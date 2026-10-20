@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.superpowers/
+.DS_Store
+profiles.json
+state.sqlite3*
+jobs/
+locks/
