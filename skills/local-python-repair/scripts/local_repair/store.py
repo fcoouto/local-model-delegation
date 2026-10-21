@@ -226,6 +226,9 @@ class Store:
             row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
             job = self._job(row)
             if job["status"] in ("waiting", "reserved", "running", "candidate_ready", "checking"):
+                if job.get("attempt_id") and "route_data" in job:
+                    route = {**job["route_data"], "local_failure": reason}
+                    db.execute("UPDATE jobs SET route_data=? WHERE job_id=?", (canonical(route), job_id))
                 db.execute("UPDATE jobs SET status='fallback_required',reason=? WHERE job_id=?", (reason, job_id))
             return envelope(self._job(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()))
 
@@ -243,6 +246,7 @@ class Store:
     def claim_fallback(self, job_id):
         with self.db(write=True) as db:
             job = self._job(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone())
+            if job.get("route_data", {}).get("assessment"): raise ValueError("assessment_has_no_native_fallback")
             row = db.execute("SELECT * FROM fallback_dispatches WHERE job_id=?", (job_id,)).fetchone()
             first = row is None
             if first:

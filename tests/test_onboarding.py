@@ -183,3 +183,24 @@ class Onboarding(Fixture):
         result=module.record_outcome(self.state,job['job_id'],receipt)
         self.assertEqual(result['usage_proxy_saved_tokens'],-910)
         self.assertFalse(module._profile(self.state,'fictional').get('benefit_evidence',{}).get('credible',False))
+
+    def test_native_fallback_success_does_not_qualify_local_model(self):
+        module=self.module();profile=self.setup_policy();assessment=module.begin_assessment(self.state,'fictional','fixture-standing-consent')
+        from local_repair.store import Store
+        from local_repair.contracts import canonical
+        trial=assessment['trials'][0];store=Store(self.state);job=store.reserve(trial['brief'],profile,None)
+        permit={'assessment_id':assessment['assessment_id'],'permit_token':assessment['permit_token']}
+        with store.db(write=True) as db:
+            db.execute("UPDATE jobs SET status='accepted',native_task_id='fictional-native-result',route_data=?",(canonical({'assessment':permit}),))
+        module.record_trial(self.state,assessment['assessment_id'],{'trial_id':trial['trial_id'],'job_id':job['job_id']})
+        saved=module._assessment(self.state,assessment['assessment_id'])
+        self.assertFalse(saved['receipts'][trial['trial_id']]['passed'])
+
+    def test_assessment_failure_cannot_dispatch_native_fallback(self):
+        module=self.module();profile=self.setup_policy();assessment=module.begin_assessment(self.state,'fictional','fixture-standing-consent')
+        from local_repair.store import Store
+        from local_repair.contracts import canonical
+        store=Store(self.state);job=store.reserve(assessment['trials'][0]['brief'],profile,None)
+        with store.db(write=True) as db:
+            db.execute('UPDATE jobs SET route_data=?',(canonical({'assessment':{'assessment_id':assessment['assessment_id'],'permit_token':assessment['permit_token']}}),))
+        with self.assertRaisesRegex(ValueError,'assessment_has_no_native_fallback'):store.claim_fallback(job['job_id'])

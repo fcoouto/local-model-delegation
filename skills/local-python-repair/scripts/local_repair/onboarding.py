@@ -125,7 +125,7 @@ def record_trial(state_dir, assessment_id, receipt):
         if not trial or digest(job['brief']) != trial['brief_hash'] or job.get('route_data', {}).get('assessment') != permit:
             raise ValueError('assessment_scope_mismatch')
         if job['status'] not in ('accepted','failed','fallback_required'): raise ValueError('trial_not_complete')
-        value = {**receipt, 'passed': job['status']=='accepted', 'status': job['status']}
+        value = {**receipt, 'passed': job['status']=='accepted' and not job['native_task_id'], 'status': job['status']}
         previous = assessment['receipts'].get(receipt['trial_id'])
         if previous and previous != value: raise ValueError('trial_conflict')
         assessment['receipts'][receipt['trial_id']] = value
@@ -226,12 +226,12 @@ def record_outcome(state_dir, job_id, receipt):
         if current.get('approval')==profile.get('approval'):
             suspended=current.get('suspended_scope',[])
             for record in related:
-                if record['status']=='failed' and record['brief'].get('schema_version')==2:
+                if (record['status']=='failed' or record.get('route_data',{}).get('local_failure')) and record['brief'].get('schema_version')==2:
                     for scope in current.get('scope',[]):
                         if scope_matches({'scope':[scope]},record['brief']) and scope not in suspended:suspended.append(scope)
             current['suspended_scope']=suspended
             current['outcomes']={'accepted_tasks':accepted,'completed_tasks':len(related)}
-            if saved is not None and saved>0 and job['status']=='accepted':
+            if saved is not None and saved>0 and job['status']=='accepted' and not job['native_task_id'] and not route.get('local_failure'):
                 scopes=[s for s in current.get('scope',[]) if job['brief'].get('schema_version')==2 and scope_matches({'scope':[s]},job['brief'])]
                 if not scopes and route.get('assessment'):
                     brief=job['brief']
