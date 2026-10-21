@@ -3,12 +3,19 @@ import signal
 import subprocess
 import sys
 import time
+from unittest.mock import patch
 from local_repair.store import Store
 from local_repair.worker import run_attempt, start_worker, wait_job, reconcile_attempts
 from tests.support import Fixture, FakeRuntime, SCRIPTS
 
 
 class Worker(Fixture):
+    def setUp(self):
+        super().setUp()
+        recovery = patch("local_repair.recovery.request_recovery")
+        recovery.start()
+        self.addCleanup(recovery.stop)
+
     def prepare(self, **kwargs):
         server = FakeRuntime(**kwargs)
         self.addCleanup(server.close)

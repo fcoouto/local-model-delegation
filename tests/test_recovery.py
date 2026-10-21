@@ -1,0 +1,103 @@
+import threading
+import time
+from unittest.mock import patch
+from local_repair.recovery import close_instance, recover_once, recover_instance
+from local_repair.lmstudio import Runtime
+from local_repair.store import Store
+from local_repair.worker import run_attempt, start_worker, wait_job
+from tests.support import Fixture, FakeRuntime
+
+
+class Recovery(Fixture):
+    def prepare(self, **kwargs):
+        server = FakeRuntime(**kwargs)
+        self.addCleanup(server.close)
+        p = self.profile()
+        p["endpoint"] = server.endpoint
+        self.write_config(p)
+        store = Store(self.state)
+        job = store.reserve(self.brief(), p, {**self.loaded(2), "endpoint": server.endpoint})
+        attempt = store.attempt(job["attempt_id"])
+        store.transition(attempt["attempt_id"], 0, "reserved", "uncertain", {})
+        store.select_fallback(job["job_id"], "test_silence")
+        close_instance(store, attempt["instance_key"])
+        return server, store, job, attempt["instance_key"]
+
+    def test_lost_load_ack_reconciles_before_retry(self):
+        server, store, job, key = self.prepare()
+        server.drop_load_ack = True
+        self.assertTrue(recover_once(store, key, Runtime(server.endpoint)))
+        self.assertEqual(server.calls.count(("POST", "/api/v1/models/load")), 1)
+        self.assertIn(("GET", "/api/v1/models"), server.calls)
+        self.assertEqual(store.instance(key)["state"], "ready")
+        self.assertEqual(store.instance(key)["generation"], 1)
+
+    def test_lost_unload_ack_reconciles_before_retry(self):
+        server, store, job, key = self.prepare()
+        server.drop_unload_ack = True
+        self.assertTrue(recover_once(store, key, Runtime(server.endpoint)))
+        self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 1)
+
+    def test_healthy_peer_defers_unload(self):
+        server, store, job, key = self.prepare(delay=.35)
+        # The closed instance blocks admission; create the healthy peer before re-closing it.
+        with store.db(write=True) as db: db.execute("UPDATE instances SET state='ready' WHERE instance_key=?", (key,))
+        healthy = store.reserve(self.brief("healthy"), self.profile_for(server), {**self.loaded(2), "endpoint": server.endpoint})
+        start_worker(self.state, healthy["attempt_id"])
+        deadline = time.monotonic() + 2
+        while not server.calls and time.monotonic() < deadline: time.sleep(.01)
+        close_instance(store, key)
+        self.assertFalse(recover_once(store, key, Runtime(server.endpoint)))
+        self.assertNotIn(("POST", "/api/v1/models/unload"), server.calls)
+        self.assertEqual(wait_job(self.state, healthy["job_id"], 3)["status"], "candidate_ready")
+        self.assertTrue(recover_once(store, key, Runtime(server.endpoint)))
+
+    def profile_for(self, server):
+        p = self.profile()
+        p["endpoint"] = server.endpoint
+        return p
+
+    def test_two_recovery_owners(self):
+        server, store, job, key = self.prepare()
+        threads = [threading.Thread(target=recover_instance, args=(self.state, key)) for _ in range(2)]
+        for thread in threads: thread.start()
+        for thread in threads: thread.join(5)
+        self.assertFalse(any(t.is_alive() for t in threads))
+        self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 1)
+
+    def test_old_generation_and_late_output(self):
+        server, store, job, key = self.prepare()
+        self.assertTrue(recover_once(store, key, Runtime(server.endpoint)))
+        self.assertFalse(store.publish_candidate(job["attempt_id"], 0, "late.json"))
+        self.assertEqual(store.job(job["job_id"])["status"], "fallback_required")
+
+    def test_incomplete_probe_stays_closed(self):
+        server, store, job, key = self.prepare(incomplete=True)
+        with self.assertRaises(ValueError): recover_once(store, key, Runtime(server.endpoint))
+        self.assertNotEqual(store.instance(key)["state"], "ready")
+
+    def test_stale_closes_admission_and_falls_back_once(self):
+        server = FakeRuntime(delay=.6)
+        self.addCleanup(server.close)
+        profile = self.profile_for(server)
+        profile["stale_tolerance_seconds"] = .1
+        self.write_config(profile)
+        store = Store(self.state)
+        job = store.reserve(self.brief(), profile, {**self.loaded(), "endpoint": server.endpoint})
+        with patch("local_repair.recovery.request_recovery"):
+            run_attempt(self.state, job["attempt_id"])
+        self.assertEqual(store.job(job["job_id"])["status"], "fallback_required")
+        key = store.attempt(job["attempt_id"])["instance_key"]
+        self.assertNotEqual(store.instance(key)["state"], "ready")
+
+    def test_recovery_restart_after_ack_loss(self):
+        server, store, job, key = self.prepare()
+        runtime = Runtime(server.endpoint)
+        original = runtime.load
+        def successful_then_crash(body):
+            original(body)
+            raise KeyboardInterrupt("simulate process death")
+        with patch.object(runtime, "load", successful_then_crash), self.assertRaises(KeyboardInterrupt):
+            recover_once(store, key, runtime)
+        self.assertTrue(recover_once(store, key, Runtime(server.endpoint)))
+        self.assertEqual(server.calls.count(("POST", "/api/v1/models/load")), 1)

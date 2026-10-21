@@ -7,7 +7,10 @@ from .worker import run_attempt
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--state-dir", required=True, type=Path)
-    parser.add_argument("command", choices=["worker"])
+    parser.add_argument("command", choices=["worker", "recover"])
     parser.add_argument("identifier")
     args = parser.parse_args(argv)
+    if args.command == "recover":
+        from .recovery import recover_instance
+        return recover_instance(args.state_dir, args.identifier)
     return run_attempt(args.state_dir, args.identifier)

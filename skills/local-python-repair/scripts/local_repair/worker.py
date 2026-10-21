@@ -78,7 +78,7 @@ def run_attempt(state_dir, attempt_id):
                 if watch.is_stale(now):
                     stale.set()
                     runtime.abort()
-                    return
+                    continue
                 if now - heartbeat >= 1:
                     try:
                         store.observe(attempt_id, {"heartbeat": time.time(), "last_activity": watch.last, "counts": dict(counts)})
@@ -127,6 +127,9 @@ def run_attempt(state_dir, attempt_id):
             if current_state in ("submitting", "streaming"):
                 store.transition(attempt_id, generation, current_state, "uncertain", {"error": type(error).__name__})
             store.select_fallback(job["job_id"], "stale" if stale.is_set() else "local_request_uncertain")
+            from .recovery import close_instance, request_recovery
+            close_instance(store, attempt["instance_key"])
+            request_recovery(state_dir, attempt["instance_key"])
             return 1
         finally:
             stopped.set()
@@ -142,6 +145,9 @@ def reconcile_attempts(state_dir):
         with ownership(store, "attempt-" + attempt["attempt_id"]) as owned:
             if owned and store.transition(attempt["attempt_id"], attempt["generation"], attempt["state"], "uncertain", {"error": "observer_lost"}):
                 store.select_fallback(attempt["job_id"], "observer_lost")
+                from .recovery import close_instance, request_recovery
+                close_instance(store, attempt["instance_key"])
+                request_recovery(state_dir, attempt["instance_key"])
 
 
 def wait_job(state_dir, job_id, seconds):

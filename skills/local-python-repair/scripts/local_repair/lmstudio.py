@@ -70,6 +70,12 @@ class Runtime:
     def list_models(self):
         return self._json("GET", "/api/v1/models")
 
+    def load(self, body):
+        return self._json("POST", "/api/v1/models/load", body, timeout=120)
+
+    def unload(self, instance_id):
+        return self._json("POST", "/api/v1/models/unload", {"instance_id": instance_id}, timeout=120)
+
     def stream(self, body):
         conn = None
         try:
