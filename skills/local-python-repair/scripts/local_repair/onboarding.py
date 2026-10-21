@@ -183,3 +183,53 @@ def submit_trial(state_dir, assessment_id, trial_id):
     from .worker import launch
     launch(state_dir,'scheduler','queue')
     return result
+
+
+def record_outcome(state_dir, job_id, receipt):
+    from .contracts import positive
+    from .profiles import scope_matches
+    from .worker import ownership
+    required={'native_usage','coordination_tokens','checking_tokens','fallback_tokens','native_baseline_tokens','latency_seconds','provenance'}
+    if not isinstance(receipt,dict) or set(receipt)!=required:raise ValueError('invalid_outcome')
+    for key in ('coordination_tokens','checking_tokens','fallback_tokens','native_baseline_tokens'):
+        if receipt[key] is not None and (type(receipt[key]) is not int or receipt[key]<0):raise ValueError('invalid_outcome')
+    usage=receipt['native_usage']
+    if (not isinstance(usage,dict) or set(usage)!={'kind','value'} or usage['kind'] not in ('unknown','tokens')
+            or usage['kind']=='unknown' and usage['value'] is not None
+            or usage['kind']=='tokens' and (type(usage['value']) is not int or usage['value']<0)
+            or not positive(receipt['latency_seconds']) or not isinstance(receipt['provenance'],str) or not receipt['provenance'].strip()):
+        raise ValueError('invalid_outcome')
+    store=Store(state_dir)
+    with ownership(store,'outcomes') as owned:
+        if not owned:raise ValueError('outcome_busy')
+        with store.db(write=True) as db:
+            job=store._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone())
+            if job['status'] not in ('accepted','failed'):raise ValueError('outcome_not_final')
+            route=job.get('route_data',{})
+            previous=route.get('outcome')
+            if previous and previous!=receipt:raise ValueError('outcome_conflict')
+            route['outcome']=receipt
+            db.execute('UPDATE jobs SET route_data=? WHERE job_id=?',(canonical(route),job_id))
+            records=[store._job(r) for r in db.execute('SELECT * FROM jobs')]
+        profile=job['profile'];identifier=profile.get('profile_id')
+        related=[j for j in records if j['profile'].get('profile_id')==identifier and j.get('route_data',{}).get('outcome')]
+        accepted=sum(j['status']=='accepted' for j in related)
+        counts=[receipt[k] for k in ('coordination_tokens','checking_tokens','fallback_tokens')]
+        saved=receipt['native_baseline_tokens']-sum(counts) if all(v is not None for v in [receipt['native_baseline_tokens'],*counts]) else None
+        if not identifier:
+            return {'job_id':job_id,'status':job['status'],'accepted_tasks':accepted,'usage_proxy_saved_tokens':saved,'subscription_savings':'unknown'}
+        current=_profile(state_dir,identifier)
+        if current.get('approval')==profile.get('approval'):
+            suspended=current.get('suspended_scope',[])
+            for record in related:
+                if record['status']=='failed' and record['brief'].get('schema_version')==2:
+                    for scope in current.get('scope',[]):
+                        if scope_matches({'scope':[scope]},record['brief']) and scope not in suspended:suspended.append(scope)
+            current['suspended_scope']=suspended
+            current['outcomes']={'accepted_tasks':accepted,'completed_tasks':len(related)}
+            if saved is not None and saved>0 and job['status']=='accepted':
+                current['benefit_evidence']={'credible':True,'kind':'usage_proxy','native_overhead':sum(counts),
+                                            'job_id':job_id,'subscription_savings':'unknown'}
+            atomic_json(store.root/'profiles'/(identifier+'.json'),current)
+        return {'job_id':job_id,'status':job['status'],'accepted_tasks':accepted,
+                'usage_proxy_saved_tokens':saved,'subscription_savings':'unknown'}

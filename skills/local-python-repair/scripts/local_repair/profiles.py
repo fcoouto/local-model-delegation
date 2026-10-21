@@ -192,6 +192,10 @@ def read_profile_by_id(state_dir, profile_id, capability):
 
 
 def authorize_job(store, job):
+    if job.get("native_task_id") and not job["profile"]:
+        from .contracts import validate_fallback
+        validate_fallback(job["fallback"])
+        return {}
     if job.get("route_data", {}).get("assessment"):
         from .onboarding import authorize_assessment
         current = authorize_assessment(store.root, job["brief"], job["route_data"]["assessment"])

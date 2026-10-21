@@ -132,3 +132,32 @@ class Onboarding(Fixture):
             self.assertEqual(runtime.headers['Authorization'], 'Bearer synthetic-secret')
         with self.assertRaisesRegex(ValueError, 'runtime_token_unavailable'):
             Runtime('http://127.0.0.1:1', token_env='FIXTURE_MISSING_TOKEN')
+
+    def test_usage_proxy_is_not_subscription_savings(self):
+        module=self.module();self.assertTrue(hasattr(module,'record_outcome'),'record_outcome must exist')
+        self.setup_policy()
+        from local_repair.store import Store
+        profile=module._profile(self.state,'fictional');store=Store(self.state)
+        job=store.reserve(self.brief(),profile,None)
+        with store.db(write=True) as db:db.execute("UPDATE jobs SET status='accepted'")
+        receipt={'native_usage':{'kind':'tokens','value':10},'coordination_tokens':3,'checking_tokens':7,'fallback_tokens':0,
+                 'native_baseline_tokens':100,'latency_seconds':5,'provenance':'fictional paired measurement'}
+        first=module.record_outcome(self.state,job['job_id'],receipt)
+        second=module.record_outcome(self.state,job['job_id'],receipt)
+        self.assertEqual(first,second)
+        self.assertEqual(first['subscription_savings'],'unknown')
+        self.assertEqual(first['usage_proxy_saved_tokens'],90)
+        self.assertEqual(first['accepted_tasks'],1)
+
+    def test_failed_outcomes_reduce_routing_scope(self):
+        module=self.module();self.assertTrue(hasattr(module,'record_outcome'),'record_outcome must exist')
+        from tests import test_scheduler
+        fixture=test_scheduler.Scheduler(methodName='test_unknown_benefit_keeps_native');fixture.setUp();self.addCleanup(fixture.doCleanups)
+        store,brief,p=fixture.setup_queue();job=store.reserve(brief,p,None)
+        with store.db(write=True) as db:db.execute("UPDATE jobs SET status='failed'")
+        receipt={'native_usage':{'kind':'unknown','value':None},'coordination_tokens':None,'checking_tokens':None,'fallback_tokens':None,
+                 'native_baseline_tokens':None,'latency_seconds':5,'provenance':'fixture failure'}
+        module.record_outcome(fixture.state,job['job_id'],receipt)
+        from local_repair.profiles import read_profiles
+        from local_repair.scheduler import rank_profiles
+        self.assertEqual(rank_profiles(brief,read_profiles(fixture.state)),[])

@@ -102,16 +102,21 @@ def main(argv=None):
     p = commands.add_parser("discover")
     p.add_argument("--endpoint", required=True)
     p = commands.add_parser("assessment")
-    p.add_argument("action", choices=["begin", "report", "trial", "approve"])
+    p.add_argument("action", choices=["begin", "report", "trial", "submit", "approve"])
     p.add_argument("--profile-id")
     p.add_argument("--assessment-id")
     p.add_argument("--owner-reference")
     p.add_argument("--receipt", type=Path)
     p.add_argument("--scope", type=Path)
+    p.add_argument("--trial-id")
     p = commands.add_parser("route")
     p.add_argument("action", choices=["decide"])
     p.add_argument("--job", required=True)
     p.add_argument("--decision", type=Path, required=True)
+    p = commands.add_parser("outcome")
+    p.add_argument("action", choices=["record"])
+    p.add_argument("--job", required=True)
+    p.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "worker": return run_attempt(args.state_dir, args.identifier)
@@ -125,9 +130,10 @@ def main(argv=None):
             from .onboarding import discover_models
             result = discover_models(Runtime(args.endpoint))
         elif args.command == "assessment":
-            from .onboarding import begin_assessment, assessment_report, record_trial, approve_assessment
+            from .onboarding import begin_assessment, assessment_report, record_trial, approve_assessment, submit_trial
             if args.action == "begin": result = begin_assessment(args.state_dir, args.profile_id, args.owner_reference)
             elif args.action == "report": result = assessment_report(args.state_dir, args.assessment_id)
+            elif args.action == "submit": result = submit_trial(args.state_dir, args.assessment_id, args.trial_id)
             elif args.action == "trial": result = record_trial(args.state_dir, args.assessment_id, read_input(args.receipt))
             else: result = approve_assessment(args.state_dir, args.assessment_id, args.owner_reference, read_input(args.scope))
         elif args.command == "migrate":
@@ -163,6 +169,9 @@ def main(argv=None):
                 if args.action == "prepare": result = prepare_verification(args.state_dir, args.job)
                 elif args.action == "checks": result = run_native_checks(args.state_dir, args.job)
                 else: result = record_verification(args.state_dir, args.job, read_input(args.receipt))
+            elif args.command == "outcome":
+                from .onboarding import record_outcome
+                result = record_outcome(args.state_dir, args.job, read_input(args.receipt))
             elif args.command == "route":
                 result = store.decide_wait(args.job, read_input(args.decision))
                 if result["status"] == "waiting":

@@ -161,3 +161,16 @@ class Delegation(Fixture):
         session = prepare(self.state, identifier)
         (self.project / 'test_helper.js').write_text('unrelated work')
         with self.assertRaisesRegex(ValueError, 'source_changed'): record(self.state, identifier, self.receipt(session))
+
+    def test_native_candidate_without_selected_local_model_uses_same_checks(self):
+        from local_repair.validation import prepare_verification,record_verification
+        brief=self.generic('file_summary')
+        atomic_json(self.state/'config.json',{'schema_version':2,'routing_enabled':True,'visibility_enabled':True})
+        store=Store(self.state);job=store.enqueue(brief,brief['fallback'])
+        store.decide_wait(job['job_id'],{'action':'fallback','reason':'no_qualified_model'})
+        claim=store.claim_fallback(job['job_id']);native='/root/'+claim['task_name']
+        store.attach_fallback(job['job_id'],claim['dispatch_token'],native)
+        candidate=self.root/'native.json';candidate.write_text(json.dumps(self.proposal(brief)))
+        store.record_fallback_candidate(job['job_id'],native,candidate)
+        session=prepare_verification(self.state,job['job_id']);receipt=self.receipt(session);receipt.update(checks={},claims=[True])
+        self.assertEqual(record_verification(self.state,job['job_id'],receipt)['status'],'accepted')

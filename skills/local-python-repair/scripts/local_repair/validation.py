@@ -231,7 +231,7 @@ def _check_candidate(store, job_id):
     receipt = {}
     try:
         current = authorize_job(store, job)
-        if current["approval"] != job["profile"]["approval"]: raise ValueError("approval_changed")
+        if current.get("approval") != job["profile"].get("approval"): raise ValueError("approval_changed")
         path = Path(job["result_path"])
         if path.is_symlink() or not path.resolve().is_relative_to(store.root / "jobs" / job_id): raise ValueError("unsafe_result")
         artifact = load_json(path.read_text())
@@ -264,7 +264,7 @@ def _check_candidate(store, job_id):
             raise ValueError("independent_checks_failed")
         if not source_matches(brief): raise ValueError("source_changed")
         current = authorize_job(store, job)
-        if current["approval"] != job["profile"]["approval"]: raise ValueError("approval_changed")
+        if current.get("approval") != job["profile"].get("approval"): raise ValueError("approval_changed")
         if job["attempt_id"] and not job["native_task_id"]:
             attempt = store.attempt(job["attempt_id"])
             if attempt["state"] != "complete" or attempt["generation"] != store.instance(attempt["instance_key"])["generation"]:
