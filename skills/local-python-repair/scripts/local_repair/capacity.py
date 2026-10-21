@@ -22,6 +22,11 @@ def machine_snapshot():
         values={k.strip():int(v) for k,v in re.findall(r'^([^:]+):\s*(\d+)\.',vm,re.M)}
         available=sum(values[k] for k in ('Pages free','Pages inactive','Pages speculative'))*page
         swap=values['Swapouts']*page
+        if _last_swap is None:
+            _last_swap=swap
+            time.sleep(.05)
+            second=read('/usr/bin/vm_stat')
+            swap=int(re.search(r'^Swapouts:\s*(\d+)',second,re.M)[1])*page
         pressure=int(read('/usr/sbin/sysctl','-n','kern.memorystatus_vm_pressure_level'))
         result.update(physical_bytes=physical,available_bytes=available,pressure={1:'normal',2:'warning',4:'critical'}.get(pressure,'unknown'),
                       swapout_delta_bytes=None if _last_swap is None else max(0,swap-_last_swap),
@@ -96,7 +101,8 @@ def owned_operation(store, instance):
         row=db.execute("SELECT * FROM model_operations WHERE operation_id=? AND state='complete'",(identifier,)).fetchone()
     if not row:return None
     data=load_json(row['data'])
-    if data.get('instance_id')!=instance['data']['instance_id'] or data.get('kind')!='load' or data.get('ownership_verified') is not True:return None
+    if (data.get('instance_id')!=instance['data']['instance_id'] or data.get('kind')!='load' or data.get('ownership_verified') is not True
+            or row['model_key']!=digest([instance['data']['endpoint'],instance['data']['model_id']])):return None
     return dict(row)
 
 
@@ -104,20 +110,32 @@ def release_idle(state_dir, instance_key):
     from .worker import ownership
     from .lmstudio import Runtime
     store=Store(state_dir)
-    with ownership(store,'recovery-'+instance_key) as owned:
+    instance=store.instance(instance_key)
+    model_key=digest([instance['data']['endpoint'],instance['data']['model_id']])
+    with ownership(store,'recovery-'+model_key) as owned:
         if not owned:return {'status':'busy','reason':'instance_busy'}
         instance=store.instance(instance_key)
         if not owned_operation(store,instance):return {'status':'not_eligible','reason':'instance_not_owned'}
         profile=instance['data']['profile']
+        operation='unload-'+instance_key+'-'+str(instance['generation'])
         with store.db(write=True) as db:
             if db.execute("SELECT 1 FROM attempts WHERE instance_key=? AND state IN ('reserved','submitting','streaming','uncertain')",(instance_key,)).fetchone():
                 return {'status':'busy','reason':'instance_busy'}
             db.execute("UPDATE instances SET state='closed' WHERE instance_key=?",(instance_key,))
+            previous=db.execute('SELECT state FROM model_operations WHERE operation_id=?',(operation,)).fetchone()
+            if not previous:
+                db.execute("INSERT INTO model_operations VALUES (?,?,'submitting',?)",(operation,model_key,canonical({'kind':'unload','instance_id':instance['data']['instance_id']})))
         runtime=Runtime(profile['endpoint'],token_env=profile.get('token_env'))
         # Unload only the exact owned identifier. A missing acknowledgement never permits a load retry.
-        try: runtime.unload(instance['data']['instance_id'])
-        except (ValueError,OSError):return {'status':'uncertain','reason':'unload_unconfirmed'}
+        if not previous:
+            try: runtime.unload(instance['data']['instance_id'])
+            except (ValueError,OSError):
+                with store.db(write=True) as db:db.execute("UPDATE model_operations SET state='uncertain' WHERE operation_id=?",(operation,))
         snapshot=runtime.list_models()
         if any(i.get('id')==instance['data']['instance_id'] for m in snapshot.get('models',[]) for i in m.get('loaded_instances',[])):
             return {'status':'uncertain','reason':'unload_unconfirmed'}
+        with store.db(write=True) as db:
+            db.execute("UPDATE model_operations SET state='complete' WHERE operation_id=?",(operation,))
+            data={**instance['data'],'recovery_phase':'retired'}
+            db.execute("UPDATE instances SET data=? WHERE instance_key=?",(canonical(data),instance_key))
         return {'status':'released','instance_key':instance_key}

@@ -121,6 +121,8 @@ class Onboarding(Fixture):
         report = module.record_trial(self.state, assessment['assessment_id'], {'trial_id':trial['trial_id'], 'job_id':saved['job_id']})
         self.assertEqual(report['completed_trials'], 1)
         self.assertEqual(report['recommendation'], 'do_not_approve_yet')
+        module.record_outcome(self.state,saved['job_id'],{'native_usage':{'kind':'tokens','value':10},'coordination_tokens':3,'checking_tokens':7,'fallback_tokens':0,'native_baseline_tokens':100,'onboarding_tokens':0,'latency_seconds':5,'provenance':'fictional comparable trial'})
+        self.assertTrue(module._profile(self.state,'fictional')['benefit_evidence']['scope'])
         self.assertFalse(json.loads((self.state / 'config.json').read_text())['routing_enabled'])
 
     def test_optional_token_uses_named_environment_only(self):
@@ -141,7 +143,7 @@ class Onboarding(Fixture):
         job=store.reserve(self.brief(),profile,None)
         with store.db(write=True) as db:db.execute("UPDATE jobs SET status='accepted'")
         receipt={'native_usage':{'kind':'tokens','value':10},'coordination_tokens':3,'checking_tokens':7,'fallback_tokens':0,
-                 'native_baseline_tokens':100,'latency_seconds':5,'provenance':'fictional paired measurement'}
+                 'native_baseline_tokens':100,'onboarding_tokens':0,'latency_seconds':5,'provenance':'fictional paired measurement'}
         first=module.record_outcome(self.state,job['job_id'],receipt)
         second=module.record_outcome(self.state,job['job_id'],receipt)
         self.assertEqual(first,second)
@@ -156,8 +158,28 @@ class Onboarding(Fixture):
         store,brief,p=fixture.setup_queue();job=store.reserve(brief,p,None)
         with store.db(write=True) as db:db.execute("UPDATE jobs SET status='failed'")
         receipt={'native_usage':{'kind':'unknown','value':None},'coordination_tokens':None,'checking_tokens':None,'fallback_tokens':None,
-                 'native_baseline_tokens':None,'latency_seconds':5,'provenance':'fixture failure'}
+                 'native_baseline_tokens':None,'onboarding_tokens':None,'latency_seconds':5,'provenance':'fixture failure'}
         module.record_outcome(fixture.state,job['job_id'],receipt)
         from local_repair.profiles import read_profiles
         from local_repair.scheduler import rank_profiles
         self.assertEqual(rank_profiles(brief,read_profiles(fixture.state)),[])
+
+    def test_capacity_record_requires_accepted_local_trial_jobs(self):
+        module=self.module();self.assertTrue(hasattr(module,'record_capacity'),'record_capacity must exist')
+        self.setup_policy();assessment=module.begin_assessment(self.state,'fictional','fixture-standing-consent')
+        from local_repair.store import Store
+        trial=assessment['trials'][0];store=Store(self.state);job=store.reserve(trial['brief'],module._profile(self.state,'fictional'),self.loaded())
+        receipt={'context_length':8192,'resources':{},'batches':[{'job_ids':[job['job_id']],'request_bytes':1024,'pressure':'normal','swapout_delta_bytes':0}]}
+        with self.assertRaisesRegex(ValueError,'capacity_trial_not_accepted'):
+            module.record_capacity(self.state,assessment['assessment_id'],receipt)
+
+    def test_onboarding_overhead_is_amortized_before_claiming_benefit(self):
+        module=self.module();self.setup_policy()
+        from local_repair.store import Store
+        store=Store(self.state);job=store.reserve(self.brief(),module._profile(self.state,'fictional'),None)
+        with store.db(write=True) as db:db.execute("UPDATE jobs SET status='accepted'")
+        receipt={'native_usage':{'kind':'tokens','value':10},'coordination_tokens':3,'checking_tokens':7,'fallback_tokens':0,
+                 'native_baseline_tokens':100,'onboarding_tokens':1000,'latency_seconds':5,'provenance':'fictional paired measurement'}
+        result=module.record_outcome(self.state,job['job_id'],receipt)
+        self.assertEqual(result['usage_proxy_saved_tokens'],-910)
+        self.assertFalse(module._profile(self.state,'fictional').get('benefit_evidence',{}).get('credible',False))

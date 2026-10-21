@@ -58,13 +58,16 @@ def begin_assessment(state_dir, profile_id, owner_reference):
     manifest = load_json(fixtures_path().read_text())
     identifier = uuid.uuid4().hex
     root = private_dir(Path(state_dir) / 'assessments' / identifier)
+    prior=profile.get('capacity_evidence',{})
+    target=prior.get('limit',0)+1 if prior.get('qualified') is True and prior.get('settings_digest')==digest(profile['request_settings']) and prior.get('artifact_digest')==profile['artifact']['digest'] else 1
+    target=min(target,32)
     trials = []
     for case in manifest['cases']:
         if case['capability'] not in profile['capabilities']: continue
         source = private_dir(root / case['id'])
         for name, text in case['files'].items():
             path = source / name; path.write_text(text); path.chmod(0o600)
-        for repeat in (1, 2):
+        for repeat in range(1,max(2,target)+1):
             trial_id = case['id'] + '-' + str(repeat)
             brief = {'schema_version': 2, 'origin_chat_id': 'assessment-' + identifier, 'task_key': trial_id,
                      'capability': case['capability'], 'source_root': str(source),
@@ -89,7 +92,7 @@ def begin_assessment(state_dir, profile_id, owner_reference):
     if not trials: raise ValueError('assessment_scope_unsupported')
     assessment = {'assessment_id': identifier, 'permit_token': uuid.uuid4().hex + uuid.uuid4().hex,
                   'profile_id': profile_id, 'owner_reference': owner_reference, 'binding': binding,
-                  'fixture_digest': digest(manifest), 'trials': trials, 'receipts': {}}
+                  'fixture_digest': digest(manifest), 'capacity_target':target, 'trials': trials, 'receipts': {}}
     atomic_json(root / 'assessment.json', assessment)
     return assessment
 
@@ -138,7 +141,7 @@ def assessment_report(state_dir, assessment_id):
     for trial in assessment['trials']:
         brief = trial['brief']
         scope = {k: brief['task_requirements'][k] for k in ('language','complexity','context_bucket')}
-        scope.update(capability=brief['capability'], max_input_bytes=max(4096, len(canonical({'contract': brief['behavior_contract'], 'files': brief['files'], 'editable_paths': brief['editable_paths']}).encode())))
+        scope.update(capability=brief['capability'], max_input_bytes=len(canonical({'contract': brief['behavior_contract'], 'files': brief['files'], 'editable_paths': brief['editable_paths']}).encode()))
         key = digest({k:v for k,v in scope.items() if k!='max_input_bytes'})
         bucket = buckets.setdefault(key, {'scope': scope, 'trials': 0, 'passed': 0, 'cases': set()})
         bucket['scope']['max_input_bytes'] = max(bucket['scope']['max_input_bytes'], scope['max_input_bytes'])
@@ -190,9 +193,9 @@ def record_outcome(state_dir, job_id, receipt):
     from .contracts import positive
     from .profiles import scope_matches
     from .worker import ownership
-    required={'native_usage','coordination_tokens','checking_tokens','fallback_tokens','native_baseline_tokens','latency_seconds','provenance'}
+    required={'native_usage','coordination_tokens','checking_tokens','fallback_tokens','native_baseline_tokens','onboarding_tokens','latency_seconds','provenance'}
     if not isinstance(receipt,dict) or set(receipt)!=required:raise ValueError('invalid_outcome')
-    for key in ('coordination_tokens','checking_tokens','fallback_tokens','native_baseline_tokens'):
+    for key in ('coordination_tokens','checking_tokens','fallback_tokens','native_baseline_tokens','onboarding_tokens'):
         if receipt[key] is not None and (type(receipt[key]) is not int or receipt[key]<0):raise ValueError('invalid_outcome')
     usage=receipt['native_usage']
     if (not isinstance(usage,dict) or set(usage)!={'kind','value'} or usage['kind'] not in ('unknown','tokens')
@@ -213,10 +216,10 @@ def record_outcome(state_dir, job_id, receipt):
             db.execute('UPDATE jobs SET route_data=? WHERE job_id=?',(canonical(route),job_id))
             records=[store._job(r) for r in db.execute('SELECT * FROM jobs')]
         profile=job['profile'];identifier=profile.get('profile_id')
-        related=[j for j in records if j['profile'].get('profile_id')==identifier and j.get('route_data',{}).get('outcome')]
+        related=[j for j in records if j['profile'].get('profile_id')==identifier and j['profile'].get('artifact',{}).get('digest')==profile.get('artifact',{}).get('digest') and j.get('route_data',{}).get('outcome')]
         accepted=sum(j['status']=='accepted' for j in related)
         counts=[receipt[k] for k in ('coordination_tokens','checking_tokens','fallback_tokens')]
-        saved=receipt['native_baseline_tokens']-sum(counts) if all(v is not None for v in [receipt['native_baseline_tokens'],*counts]) else None
+        saved=receipt['native_baseline_tokens']-sum(counts)-receipt['onboarding_tokens']/max(1,accepted) if all(v is not None for v in [receipt['native_baseline_tokens'],receipt['onboarding_tokens'],*counts]) else None
         if not identifier:
             return {'job_id':job_id,'status':job['status'],'accepted_tasks':accepted,'usage_proxy_saved_tokens':saved,'subscription_savings':'unknown'}
         current=_profile(state_dir,identifier)
@@ -229,8 +232,49 @@ def record_outcome(state_dir, job_id, receipt):
             current['suspended_scope']=suspended
             current['outcomes']={'accepted_tasks':accepted,'completed_tasks':len(related)}
             if saved is not None and saved>0 and job['status']=='accepted':
+                scopes=[s for s in current.get('scope',[]) if job['brief'].get('schema_version')==2 and scope_matches({'scope':[s]},job['brief'])]
+                if not scopes and route.get('assessment'):
+                    brief=job['brief']
+                    scopes=[{'capability':brief['capability'],**{k:brief['task_requirements'][k] for k in ('language','complexity','context_bucket')},
+                             'max_input_bytes':len(canonical({'contract':brief['behavior_contract'],'files':brief['files'],'editable_paths':brief['editable_paths']}).encode())}]
                 current['benefit_evidence']={'credible':True,'kind':'usage_proxy','native_overhead':sum(counts),
-                                            'job_id':job_id,'subscription_savings':'unknown'}
+                                            'job_id':job_id,'subscription_savings':'unknown',
+                                            'scope':scopes}
+            elif saved is not None and saved<=0:
+                current['benefit_evidence']={'credible':False,'kind':'usage_proxy','job_id':job_id,'subscription_savings':'unknown'}
             atomic_json(store.root/'profiles'/(identifier+'.json'),current)
         return {'job_id':job_id,'status':job['status'],'accepted_tasks':accepted,
                 'usage_proxy_saved_tokens':saved,'subscription_savings':'unknown'}
+
+
+def record_capacity(state_dir, assessment_id, receipt):
+    from .capacity import qualify_measurements
+    assessment=_assessment(state_dir,assessment_id)
+    profile=_profile(state_dir,assessment['profile_id'])
+    _policy(state_dir,assessment['owner_reference'])
+    if _binding(profile)!=assessment['binding']:raise ValueError('assessment_identity_changed')
+    if not isinstance(receipt,dict) or set(receipt)!={'context_length','resources','batches'} or not isinstance(receipt['batches'],list):raise ValueError('invalid_capacity_receipt')
+    store=Store(state_dir);batches=[];seen=set()
+    for batch in receipt['batches']:
+        if not isinstance(batch,dict) or set(batch)!={'job_ids','request_bytes','pressure','swapout_delta_bytes'} or not isinstance(batch['job_ids'],list) or not batch['job_ids']:raise ValueError('invalid_capacity_receipt')
+        timings=[]
+        for identifier in batch['job_ids']:
+            job=store.job(identifier)
+            if job['status']!='accepted' or job['native_task_id'] or not job['attempt_id']:raise ValueError('capacity_trial_not_accepted')
+            permit=job.get('route_data',{}).get('assessment')
+            if not permit or authorize_assessment(state_dir,job['brief'],permit)['profile_id']!=profile['profile_id']:raise ValueError('assessment_scope_mismatch')
+            if identifier in seen:raise ValueError('capacity_trial_reused')
+            seen.add(identifier)
+            attempt=store.attempt(job['attempt_id']);instance=store.instance(attempt['instance_key'])
+            if instance['data']['config'].get('context_length')!=receipt['context_length']:raise ValueError('capacity_context_mismatch')
+            data=attempt['data']
+            if not data.get('submitted_at') or not data.get('finished_at') or data['finished_at']<=data['submitted_at']:raise ValueError('capacity_timing_unavailable')
+            timings.append((data['submitted_at'],data['finished_at']))
+        if min(end for start,end in timings)<=max(start for start,end in timings):raise ValueError('capacity_overlap_unproven')
+        batches.append({k:v for k,v in batch.items() if k!='job_ids'}|{'concurrency':len(timings),'task_seconds':[end-start for start,end in timings],'all_correct':True})
+    evidence=qualify_measurements(profile,batches,receipt['resources'],receipt['context_length'])
+    evidence['assessment_id']=assessment_id
+    profile['capacity_evidence']=evidence
+    atomic_json(Path(state_dir)/'profiles'/(profile['profile_id']+'.json'),profile)
+    atomic_json(Path(state_dir)/'assessments'/assessment_id/'capacity.json',receipt)
+    return evidence

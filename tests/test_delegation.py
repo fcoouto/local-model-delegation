@@ -174,3 +174,16 @@ class Delegation(Fixture):
         store.record_fallback_candidate(job['job_id'],native,candidate)
         session=prepare_verification(self.state,job['job_id']);receipt=self.receipt(session);receipt.update(checks={},claims=[True])
         self.assertEqual(record_verification(self.state,job['job_id'],receipt)['status'],'accepted')
+
+    def test_invalid_generic_candidate_selects_fallback_automatically(self):
+        from local_repair.validation import prepare_verification
+        brief=self.generic();store,identifier=self.stage_job(brief,{'files':{'unauthorized.js':'bad'},'summary':'bad'})
+        with self.assertRaises(ValueError):prepare_verification(self.state,identifier)
+        self.assertEqual(store.job(identifier)['status'],'fallback_required')
+
+    def test_malformed_summary_path_selects_fallback(self):
+        from local_repair.validation import prepare_verification
+        brief=self.generic('file_summary');candidate=self.proposal(brief);candidate['claims'][0]['path']=[]
+        store,identifier=self.stage_job(brief,candidate)
+        with self.assertRaises(ValueError):prepare_verification(self.state,identifier)
+        self.assertEqual(store.job(identifier)['status'],'fallback_required')

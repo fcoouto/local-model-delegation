@@ -8,6 +8,7 @@ from .store import Store
 def rank_profiles(brief, profiles):
     candidates=[p for p in profiles if p.get('qualification_status')=='qualified' and p.get('approval')
                 and p.get('benefit_evidence',{}).get('credible') is True and scope_matches(p,brief)
+                and scope_matches({'scope':p['benefit_evidence'].get('scope',[])},brief)
                 and not any(scope_matches({'scope':[s]},brief) for s in p.get('suspended_scope',[]))]
     return [p['profile_id'] for p in sorted(candidates,key=lambda p:(p['benefit_evidence'].get('native_overhead',float('inf')),
                         not p.get('owned_loaded',False),p['profile_id']))]

@@ -106,7 +106,7 @@ def run_attempt(state_dir, attempt_id):
             store.transition(attempt_id, generation, "reserved", "released", {})
             store.select_fallback(job["job_id"], "approval_changed")
             return 1
-        if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time()}): return 0
+        if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time(), "submitted_at": time.time()}): return 0
         runtime = Runtime(job["profile"]["endpoint"], token_env=job["profile"].get("token_env"))
         watch = ActivityWatch(job["profile"]["stale_tolerance_seconds"], time.monotonic())
         progress = ProgressWatch({**job["profile"]["request_settings"], "require_completion_metadata": job["profile"].get("schema_version") == 2})

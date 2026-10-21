@@ -54,3 +54,24 @@ class Plugin(Fixture):
         module.prepare_uninstall(self.state)
         self.assertTrue((self.state/'state.sqlite3').exists())
         self.assertEqual((self.artifact/'weights.bin').read_bytes(),before)
+
+    def test_completed_native_dispatch_does_not_block_update(self):
+        module=self.module();module.initialize_state(self.state)
+        from tests import test_delegation
+        brief=test_delegation.Delegation.generic(self,'file_summary')
+        config=json.loads((self.state/'config.json').read_text());config['routing_enabled']=True;atomic_json(self.state/'config.json',config)
+        store=Store(self.state);job=store.enqueue(brief,brief['fallback']);store.decide_wait(job['job_id'],{'action':'fallback','reason':'no_qualified_model'})
+        claim=store.claim_fallback(job['job_id']);store.attach_fallback(job['job_id'],claim['dispatch_token'],'/root/'+claim['task_name'])
+        with store.db(write=True) as db:db.execute("UPDATE jobs SET status='accepted' WHERE job_id=?",(job['job_id'],))
+        self.assertEqual(module.prepare_update(self.state)['status'],'ready')
+
+    def test_release_contains_no_machine_local_evidence(self):
+        root=SCRIPTS.parents[2]
+        markers=['/Us'+'ers/','/var/fol'+'ders/','_docs/'+'work/','BEGIN '+'PRIVATE KEY']
+        for directory in ('skills','tests'):
+            for path in (root/directory).rglob('*'):
+                if path.suffix not in ('.py','.md','.json'):continue
+                text=path.read_text()
+                self.assertFalse(any(marker in text for marker in markers),str(path.relative_to(root)))
+        for path in (root/'README.md',root/'plugin.json'):
+            self.assertFalse(any(marker in path.read_text() for marker in markers),path.name)

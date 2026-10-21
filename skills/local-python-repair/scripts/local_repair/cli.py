@@ -72,6 +72,7 @@ def main(argv=None):
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("migrate")
+    commands.add_parser("resources")
     for name in ("setup", "prepare-update", "prepare-uninstall"):
         commands.add_parser(name)
     p = commands.add_parser("doctor")
@@ -106,7 +107,7 @@ def main(argv=None):
     p = commands.add_parser("discover")
     p.add_argument("--endpoint", required=True)
     p = commands.add_parser("assessment")
-    p.add_argument("action", choices=["begin", "report", "trial", "submit", "approve"])
+    p.add_argument("action", choices=["begin", "report", "trial", "submit", "capacity", "approve"])
     p.add_argument("--profile-id")
     p.add_argument("--assessment-id")
     p.add_argument("--owner-reference")
@@ -132,7 +133,10 @@ def main(argv=None):
         if args.command == "recover":
             from .recovery import recover_instance
             return recover_instance(args.state_dir, args.identifier)
-        if args.command in ("setup", "doctor", "prepare-update", "prepare-uninstall"):
+        if args.command == "resources":
+            from .capacity import machine_snapshot
+            result = machine_snapshot()
+        elif args.command in ("setup", "doctor", "prepare-update", "prepare-uninstall"):
             from .package import initialize_state, doctor, prepare_update, prepare_uninstall
             if args.command == "doctor": result = doctor(args.state_dir, args.inspect_runtime)
             else: result = {"setup": initialize_state, "prepare-update": prepare_update, "prepare-uninstall": prepare_uninstall}[args.command](args.state_dir)
@@ -143,9 +147,10 @@ def main(argv=None):
             from .onboarding import discover_models
             result = discover_models(Runtime(args.endpoint))
         elif args.command == "assessment":
-            from .onboarding import begin_assessment, assessment_report, record_trial, approve_assessment, submit_trial
+            from .onboarding import begin_assessment, assessment_report, record_trial, approve_assessment, submit_trial, record_capacity
             if args.action == "begin": result = begin_assessment(args.state_dir, args.profile_id, args.owner_reference)
             elif args.action == "report": result = assessment_report(args.state_dir, args.assessment_id)
+            elif args.action == "capacity": result = record_capacity(args.state_dir, args.assessment_id, read_input(args.receipt))
             elif args.action == "submit": result = submit_trial(args.state_dir, args.assessment_id, args.trial_id)
             elif args.action == "trial": result = record_trial(args.state_dir, args.assessment_id, read_input(args.receipt))
             else: result = approve_assessment(args.state_dir, args.assessment_id, args.owner_reference, read_input(args.scope))

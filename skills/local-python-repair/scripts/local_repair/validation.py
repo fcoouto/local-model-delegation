@@ -297,6 +297,7 @@ def parse_proposal(text, brief):
         for claim in value['claims']:
             if not isinstance(claim, dict) or set(claim) != {'text','path','sha256','start_line','end_line'}:
                 raise ValueError('invalid_citation')
+            if not isinstance(claim['path'], str) or not isinstance(claim['sha256'], str): raise ValueError('invalid_citation')
             item = brief['files'].get(claim['path'])
             if (not item or claim['sha256'] != item['sha256'] or not isinstance(claim['text'], str)
                     or not claim['text'] or type(claim['start_line']) is not int or type(claim['end_line']) is not int
@@ -329,6 +330,21 @@ def _verification_binding(job, candidate_hash):
 
 
 def prepare_verification(state_dir, job_id):
+    try: return _prepare_verification(state_dir, job_id)
+    except (ValueError, OSError) as error:
+        store = Store(state_dir)
+        job = store.job(job_id)
+        if job['status'] in ('candidate_ready', 'checking') and str(error) != 'verification_busy':
+            if str(error) == 'source_changed' or job['native_task_id']:
+                with store.db(write=True) as db:
+                    db.execute('UPDATE jobs SET status=?,reason=? WHERE job_id=?',
+                               ('needs_reassessment' if str(error) == 'source_changed' else 'failed',
+                                'source_changed' if str(error) == 'source_changed' else 'native_verification_failed', job_id))
+            else: store.select_fallback(job_id, 'verification_unsupported' if str(error) == 'verification_unsupported' else 'candidate_checks_failed')
+        raise
+
+
+def _prepare_verification(state_dir, job_id):
     from .store import private_dir
     from .worker import ownership
     store = Store(state_dir)

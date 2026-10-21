@@ -92,3 +92,18 @@ class Capacity(Fixture):
         close_instance(store,attempt['instance_key']);runtime=Mock()
         with self.assertRaisesRegex(ValueError,'instance_not_owned'):recover_once(store,attempt['instance_key'],runtime)
         runtime.unload.assert_not_called();runtime.load.assert_not_called()
+
+    def test_lost_unload_ack_reconciles_without_reposting(self):
+        from tests.support import FakeRuntime
+        from local_repair.contracts import canonical,digest
+        server=FakeRuntime();server.drop_unload_ack=True;self.addCleanup(server.close)
+        module=self.module();store,brief,p=self.setup_queue();p['endpoint']=server.endpoint
+        job=store.reserve(brief,p,{**self.loaded(),'endpoint':server.endpoint})
+        key=store.attempt(job['attempt_id'])['instance_key'];instance=store.instance(key)
+        with store.db(write=True) as db:
+            db.execute("UPDATE attempts SET state='released'")
+            db.execute("INSERT INTO model_operations VALUES ('owned',?,'complete',?)",(digest([server.endpoint,p['model_id']]),canonical({'kind':'load','instance_id':instance['data']['instance_id'],'ownership_verified':True})))
+            db.execute('UPDATE instances SET data=? WHERE instance_key=?',(canonical({**instance['data'],'owned_operation_id':'owned'}),key))
+        module.release_idle(self.state,key)
+        self.assertEqual(module.release_idle(self.state,key)['status'],'released')
+        self.assertEqual(server.calls.count(('POST','/api/v1/models/unload')),1)

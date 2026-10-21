@@ -91,3 +91,19 @@ class Worker(Fixture):
             time.sleep(.05)
         self.assertEqual(store.instance(key)["state"], "ready")
         self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 1)
+
+    def test_cache_refresh_keeps_detached_worker_alive(self):
+        import shutil
+        server,store,job=self.prepare(delay=.3)
+        cache=self.root/'cache';scripts=cache/'skills/local-python-repair/scripts'
+        shutil.copytree(SCRIPTS,scripts)
+        fixtures=cache/'skills/setup/fixtures';fixtures.mkdir(parents=True)
+        shutil.copyfile(SCRIPTS.parents[1]/'setup/fixtures/assessment-cases.json',fixtures/'assessment-cases.json')
+        code=f'import sys;sys.path.insert(0,{str(scripts)!r});from pathlib import Path;from local_repair.worker import start_worker;print(start_worker(Path({str(self.state)!r}),{job["attempt_id"]!r}))'
+        parent=subprocess.run([sys.executable,'-B','-c',code],capture_output=True,text=True)
+        self.assertEqual(parent.returncode,0,parent.stderr)
+        shutil.rmtree(cache)
+        self.assertEqual(wait_job(self.state,job['job_id'],5)['status'],'candidate_ready')
+        self.assertEqual(server.calls.count(('POST','/api/v1/chat')),1)
+        instance=store.instance(store.attempt(job['attempt_id'])['instance_key'])
+        self.assertTrue((self.state/'runtimes'/instance['data']['runtime_bundle']/'repair.py').is_file())

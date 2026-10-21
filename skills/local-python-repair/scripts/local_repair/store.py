@@ -80,6 +80,10 @@ class Store:
                 CREATE TABLE IF NOT EXISTS fallback_dispatches (
                   job_id TEXT PRIMARY KEY REFERENCES jobs(job_id), token TEXT NOT NULL, task_name TEXT NOT NULL,
                   native_task_id TEXT, state TEXT NOT NULL);
+                CREATE TRIGGER IF NOT EXISTS finish_native_dispatch AFTER UPDATE OF status ON jobs
+                  WHEN NEW.status IN ('accepted','failed')
+                  BEGIN UPDATE fallback_dispatches SET state=CASE WHEN NEW.status='accepted' THEN 'complete' ELSE 'failed' END
+                  WHERE job_id=NEW.job_id; END;
             ''')
             if version == 0:
                 db.execute("PRAGMA user_version=1")
@@ -231,7 +235,8 @@ class Store:
             if (row is None or row["generation"] != generation or row["current_generation"] != generation
                     or row["state"] != "streaming" or row["status"] != "running"):
                 return False
-            db.execute("UPDATE attempts SET state='complete' WHERE attempt_id=?", (attempt_id,))
+            data = {**load_json(row["data"]), "finished_at": time.time()}
+            db.execute("UPDATE attempts SET state='complete',data=? WHERE attempt_id=?", (canonical(data), attempt_id))
             db.execute("UPDATE jobs SET status='candidate_ready',result_path=? WHERE job_id=?", (str(path), row["job_id"]))
             return True
 
@@ -331,7 +336,9 @@ class Store:
                 limit=admission_limit(current,loaded,resources)
                 if route.get('assessment'):
                     from .capacity import available_budget
-                    limit=1 if loaded and type(loaded.get('capacity')) is int and loaded['capacity']>0 and available_budget(resources)>0 else 0
+                    from .onboarding import _assessment
+                    target=_assessment(self.root,route['assessment']['assessment_id']).get('capacity_target',1)
+                    limit=min(target,loaded['capacity']) if loaded and type(loaded.get('capacity')) is int and loaded['capacity']>0 and available_budget(resources)>0 else 0
                 if limit:
                     attempt,status,reason,key,generation=self._slot(db,current,{**loaded,'capacity':limit})
                     if attempt:

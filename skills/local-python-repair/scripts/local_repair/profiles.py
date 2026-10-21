@@ -222,7 +222,7 @@ def scope_matches(profile, brief):
 def _quiescent(db):
     if (db.execute("SELECT 1 FROM jobs WHERE status NOT IN ('accepted','failed','needs_reassessment') LIMIT 1").fetchone()
             or db.execute("SELECT 1 FROM attempts WHERE state IN ('reserved','submitting','streaming','uncertain') LIMIT 1").fetchone()
-            or db.execute("SELECT 1 FROM fallback_dispatches WHERE state NOT IN ('complete','failed') LIMIT 1").fetchone()
+            or db.execute("SELECT 1 FROM fallback_dispatches f JOIN jobs j USING(job_id) WHERE f.state NOT IN ('complete','failed') AND j.status NOT IN ('accepted','failed') LIMIT 1").fetchone()
             or db.execute("SELECT 1 FROM instances WHERE state != 'ready' LIMIT 1").fetchone()):
         raise ValueError("unresolved_work")
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='model_operations'").fetchone():
