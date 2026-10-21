@@ -171,3 +171,38 @@ class Capacity(Fixture):
             resources={**self.resources(),'physical_bytes':48*1024**3,'available_bytes':5*1024**3}
             result=store.admit(job['job_id'],current,{**self.loaded(),'instance_id':identifier},resources)
             self.assertEqual(result['status'],'reserved' if index==0 else 'waiting')
+
+    def test_capacity_record_refreshes_resources_after_slow_artifact_checks(self):
+        from unittest.mock import patch
+        from tests.test_onboarding import Onboarding
+        from local_model_delegation import onboarding
+        from local_model_delegation.contracts import canonical
+        profile=Onboarding.setup_policy(self)
+        assessment=onboarding.begin_assessment(self.state,'fictional','fixture-standing-consent')
+        permit={'assessment_id':assessment['assessment_id'],'permit_token':assessment['permit_token']}
+        store=Store(self.state);batches=[]
+        for trial in assessment['trials'][:3]:
+            job=store.reserve(trial['brief'],profile,self.loaded())
+            with store.db(write=True) as db:
+                db.execute("UPDATE jobs SET status='accepted',route_data=? WHERE job_id=?",(canonical({'assessment':permit}),job['job_id']))
+                db.execute("UPDATE attempts SET state='complete',data=? WHERE attempt_id=?",(canonical({'submitted_at':1,'finished_at':2}),job['attempt_id']))
+            batches.append({'job_ids':[job['job_id']],'request_bytes':1024**3,'pressure':'normal','swapout_delta_bytes':0})
+        clock=[100]
+        resources={**self.resources(),'observed_at':100}
+        authorize=onboarding.authorize_assessment
+        def slow_authorize(*args):
+            result=authorize(*args);clock[0]+=10;return result
+        with patch('local_model_delegation.capacity.time.time',side_effect=lambda:clock[0]), \
+             patch('local_model_delegation.onboarding.authorize_assessment',side_effect=slow_authorize), \
+             patch('local_model_delegation.capacity.machine_snapshot',side_effect=lambda:{**resources,'observed_at':clock[0]}):
+            receipt={'context_length':8192,'resources':resources,'batches':batches}
+            evidence=onboarding.record_capacity(self.state,assessment['assessment_id'],receipt)
+            clock[0]=100
+            with patch('local_model_delegation.capacity.machine_snapshot',side_effect=lambda:{**resources,'observed_at':clock[0],'pressure':'warning'}):
+                with self.assertRaisesRegex(ValueError,'resources_unqualified'):
+                    onboarding.record_capacity(self.state,assessment['assessment_id'],receipt)
+            clock[0]=200
+            with self.assertRaisesRegex(ValueError,'resources_unqualified'):
+                onboarding.record_capacity(self.state,assessment['assessment_id'],receipt)
+        self.assertTrue(evidence['qualified'])
+        self.assertEqual(evidence['limit'],1)

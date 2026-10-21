@@ -259,12 +259,15 @@ def record_outcome(state_dir, job_id, receipt):
 
 
 def record_capacity(state_dir, assessment_id, receipt):
-    from .capacity import qualify_measurements
+    from .capacity import qualify_measurements, available_budget, machine_snapshot
+    if (not isinstance(receipt,dict) or set(receipt)!={'context_length','resources','batches'}
+            or not isinstance(receipt['batches'],list) or not isinstance(receipt['resources'],dict)):
+        raise ValueError('invalid_capacity_receipt')
+    initial_budget=available_budget(receipt['resources'],loaded=True)
     assessment=_assessment(state_dir,assessment_id)
     profile=_profile(state_dir,assessment['profile_id'])
     _policy(state_dir,assessment['owner_reference'])
     if _binding(profile)!=assessment['binding']:raise ValueError('assessment_identity_changed')
-    if not isinstance(receipt,dict) or set(receipt)!={'context_length','resources','batches'} or not isinstance(receipt['batches'],list):raise ValueError('invalid_capacity_receipt')
     store=Store(state_dir);batches=[];seen=set()
     for batch in receipt['batches']:
         if not isinstance(batch,dict) or set(batch)!={'job_ids','request_bytes','pressure','swapout_delta_bytes'} or not isinstance(batch['job_ids'],list) or not batch['job_ids']:raise ValueError('invalid_capacity_receipt')
@@ -283,9 +286,16 @@ def record_capacity(state_dir, assessment_id, receipt):
             timings.append((data['submitted_at'],data['finished_at']))
         if min(end for start,end in timings)<=max(start for start,end in timings):raise ValueError('capacity_overlap_unproven')
         batches.append({k:v for k,v in batch.items() if k!='job_ids'}|{'concurrency':len(timings),'task_seconds':[end-start for start,end in timings],'all_correct':True})
-    evidence=qualify_measurements(profile,batches,receipt['resources'],receipt['context_length'])
+    if not initial_budget: raise ValueError('resources_unqualified')
+    # Artifact authorization may outlast the observation window for every trial.
+    resources=machine_snapshot()
+    if (resources.get('machine_fingerprint')!=receipt['resources'].get('machine_fingerprint')
+            or resources.get('physical_bytes')!=receipt['resources'].get('physical_bytes')):
+        raise ValueError('capacity_machine_changed')
+    evidence=qualify_measurements(profile,batches,resources,receipt['context_length'])
     evidence['assessment_id']=assessment_id
     profile['capacity_evidence']=evidence
     atomic_json(Path(state_dir)/'profiles'/(profile['profile_id']+'.json'),profile)
     atomic_json(Path(state_dir)/'assessments'/assessment_id/'capacity.json',receipt)
+    atomic_json(Path(state_dir)/'assessments'/assessment_id/'capacity-resources.json',resources)
     return evidence
