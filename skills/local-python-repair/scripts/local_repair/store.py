@@ -48,7 +48,9 @@ class Store:
         self.path = self.root / "state.sqlite3"
         for suffix in ("", "-wal", "-shm"):
             path = Path(str(self.path) + suffix)
-            if path.is_symlink() or (path.exists() and (path.stat().st_uid != os.getuid() or path.stat().st_mode & 0o077 or not path.is_file())):
+            try: stamp = path.lstat()
+            except FileNotFoundError: continue
+            if stamp.st_uid != os.getuid() or stamp.st_mode & 0o077 or not stat.S_ISREG(stamp.st_mode):
                 raise ValueError("unsafe_database")
         created = False
         try:
@@ -137,34 +139,39 @@ class Store:
                 return envelope(self._job(row))
             job_id, attempt_id = uuid.uuid4().hex, None
             status, reason = "fallback_required", "model_unavailable"
-            valid = bool(loaded and type(loaded.get("capacity")) is int and loaded["capacity"] > 0
-                         and loaded.get("model_id") == profile["model_id"] and loaded.get("endpoint") == profile["endpoint"]
-                         and isinstance(loaded.get("instance_id"), str) and loaded["instance_id"])
-            if valid:
-                key = digest([loaded["endpoint"], loaded["model_id"], loaded["instance_id"]])
-                row = db.execute("SELECT * FROM instances WHERE instance_key=?", (key,)).fetchone()
-                if row is None:
-                    data = {**loaded, "profile": profile, "artifact_digest": profile["artifact"]["digest"]}
-                    state = "ready" if loaded.get("binding_verified") else "closed"
-                    db.execute("INSERT INTO instances VALUES (?,0,?,?)", (key, state, canonical(data)))
-                    generation = 0
-                else:
-                    generation, state = row["generation"], row["state"]
-                    data = load_json(row["data"])
-                    if (data["artifact_digest"] != profile["artifact"]["digest"]
-                            or data["profile"]["approval"] != profile["approval"]):
-                        state = "closed"
-                        db.execute("UPDATE instances SET state='closed' WHERE instance_key=?", (key,))
-                occupied = db.execute("SELECT count(*) FROM attempts WHERE instance_key=? AND state IN ('reserved','submitting','streaming','uncertain')", (key,)).fetchone()[0]
-                if state == "ready" and occupied < loaded["capacity"]:
-                    attempt_id, status, reason = uuid.uuid4().hex, "reserved", None
-                else:
-                    reason = "instance_closed" if state != "ready" else "model_busy"
+            attempt_id, status, reason, key, generation = self._slot(db, profile, loaded)
             db.execute("INSERT OR IGNORE INTO profiles VALUES (?,?)", (digest(profile), canonical(profile)))
             db.execute("INSERT INTO jobs (job_id,chat,task_key,brief_hash,brief,profile,status,reason,attempt_id,result_path,native_task_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (job_id, brief["origin_chat_id"], brief["task_key"], digest(brief), canonical(brief), canonical(profile), status, reason, attempt_id, None, None))
             if attempt_id:
                 db.execute("INSERT INTO attempts VALUES (?,?,?,?,?,?)", (attempt_id, job_id, key, generation, "reserved", canonical({"created": time.time()})))
             return envelope(self._job(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()))
+
+    def _slot(self, db, profile, loaded):
+        attempt_id, status, reason, key, generation = None, "fallback_required", "model_unavailable", None, None
+        valid = bool(loaded and type(loaded.get("capacity")) is int and loaded["capacity"] > 0
+                     and loaded.get("model_id") == profile["model_id"] and loaded.get("endpoint") == profile["endpoint"]
+                     and isinstance(loaded.get("instance_id"), str) and loaded["instance_id"])
+        if valid:
+            key = digest([loaded["endpoint"], loaded["model_id"], loaded["instance_id"]])
+            row = db.execute("SELECT * FROM instances WHERE instance_key=?", (key,)).fetchone()
+            if row is None:
+                data = {**loaded, "profile": profile, "artifact_digest": profile["artifact"]["digest"]}
+                state = "ready" if loaded.get("binding_verified") else "closed"
+                db.execute("INSERT INTO instances VALUES (?,0,?,?)", (key, state, canonical(data)))
+                generation = 0
+            else:
+                generation, state = row["generation"], row["state"]
+                data = load_json(row["data"])
+                if (data["artifact_digest"] != profile["artifact"]["digest"]
+                        or data["profile"]["approval"] != profile["approval"]):
+                    state = "closed"
+                    db.execute("UPDATE instances SET state='closed' WHERE instance_key=?", (key,))
+            occupied = db.execute("SELECT count(*) FROM attempts WHERE instance_key=? AND state IN ('reserved','submitting','streaming','uncertain')", (key,)).fetchone()[0]
+            if state == "ready" and occupied < loaded["capacity"]:
+                attempt_id, status, reason = uuid.uuid4().hex, "reserved", None
+            else:
+                reason = "instance_closed" if state != "ready" else "model_busy"
+        return attempt_id, status, reason, key, generation
 
     def attempt(self, attempt_id):
         with self.db() as db:
@@ -206,7 +213,7 @@ class Store:
         with self.db(write=True) as db:
             row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
             job = self._job(row)
-            if job["status"] in ("reserved", "running", "candidate_ready", "checking"):
+            if job["status"] in ("waiting", "reserved", "running", "candidate_ready", "checking"):
                 db.execute("UPDATE jobs SET status='fallback_required',reason=? WHERE job_id=?", (reason, job_id))
             return envelope(self._job(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()))
 
@@ -267,3 +274,71 @@ class Store:
         with self.db(write=True) as db:
             db.execute("UPDATE jobs SET status='candidate_ready',result_path=? WHERE job_id=? AND native_task_id=? AND status='fallback_running'", (str(path), job_id, native_task_id))
         return envelope(self.job(job_id))
+
+    def enqueue(self, brief, fallback, assessment=None):
+        from .contracts import validate_fallback
+        from .profiles import read_config
+        validate_brief(brief); validate_fallback(fallback)
+        if brief['schema_version'] != 2 or brief['fallback'] != fallback: raise ValueError('invalid_brief')
+        if assessment:
+            from .onboarding import authorize_assessment
+            authorize_assessment(self.root, brief, assessment)
+        elif read_config(self.root).get('routing_enabled') is not True: raise ValueError('routing_disabled')
+        with self.db(write=True) as db:
+            if db.execute('PRAGMA user_version').fetchone()[0] != 2: raise ValueError('mixed_state_version')
+            row=db.execute('SELECT * FROM jobs WHERE chat=? AND task_key=?',(brief['origin_chat_id'],brief['task_key'])).fetchone()
+            if row:
+                if row['brief_hash'] != digest(brief): raise ValueError('job_conflict')
+                return envelope(self._job(row))
+            identifier, now=uuid.uuid4().hex,time.time()
+            route={'wait_until':now+brief['task_requirements']['wait_budget_seconds'],'observed_at':now}
+            if assessment: route['assessment']=assessment
+            db.execute("INSERT INTO jobs (job_id,chat,task_key,brief_hash,brief,profile,status,reason,fallback,queued_at,route_data) VALUES (?,?,?,?,?,'{}','waiting','waiting_for_slot',?,?,?)",
+                       (identifier,brief['origin_chat_id'],brief['task_key'],digest(brief),canonical(brief),canonical(fallback),now,canonical(route)))
+            return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(identifier,)).fetchone()))
+
+    def waiting_jobs(self, now=None):
+        now=time.time() if now is None else now
+        with self.db() as db: jobs=[self._job(r) for r in db.execute("SELECT * FROM jobs WHERE status='waiting'")]
+        return sorted(jobs,key=lambda j:(0 if j['brief']['task_requirements']['urgency']=='urgent' or now-j['queued_at']>=300 else 1,j['queued_at'],j['job_id']))
+
+    def admit(self, job_id, profile, loaded, resource_snapshot):
+        from .profiles import authorize_job
+        from .validation import source_matches
+        with self.db(write=True) as db:
+            job=self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone())
+            if job['status']!='waiting': return envelope(job)
+            route=job['route_data']
+            if not source_matches(job['brief']):
+                db.execute("UPDATE jobs SET status='needs_reassessment',reason='source_changed' WHERE job_id=?",(job_id,))
+            elif time.time()>=route['wait_until']:
+                db.execute("UPDATE jobs SET reason='route_decision_required' WHERE job_id=?",(job_id,))
+            else:
+                current=authorize_job(self,{**job,'profile':profile})
+                from .scheduler import admission_limit
+                limit=admission_limit(current,loaded,resource_snapshot)
+                if limit:
+                    attempt,status,reason,key,generation=self._slot(db,current,{**loaded,'capacity':limit})
+                    if attempt:
+                        route.update(observed_at=time.time(),approval_digest=digest(current['approval']),evidence_revision=digest(current.get('assessment',{})))
+                        db.execute('UPDATE jobs SET profile=?,status=?,reason=NULL,attempt_id=?,route_data=? WHERE job_id=?',
+                                   (canonical(current),status,attempt,canonical(route),job_id))
+                        db.execute('INSERT INTO attempts VALUES (?,?,?,?,?,?)',(attempt,job_id,key,generation,'reserved',canonical({'created':time.time()})))
+                    else: db.execute('UPDATE jobs SET reason=? WHERE job_id=?',(reason,job_id))
+                else: db.execute("UPDATE jobs SET reason='capacity_unqualified' WHERE job_id=?",(job_id,))
+            return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()))
+
+    def decide_wait(self, job_id, decision):
+        from .contracts import positive
+        if not isinstance(decision,dict) or not isinstance(decision.get('reason'),str) or not decision['reason'].strip(): raise ValueError('invalid_wait_decision')
+        with self.db(write=True) as db:
+            job=self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone())
+            if job['status']!='waiting': return envelope(job)
+            route=job['route_data']
+            if decision.get('action')=='fallback' and set(decision)=={'action','reason'}:
+                db.execute("UPDATE jobs SET status='fallback_required',reason=? WHERE job_id=?",(decision['reason'],job_id))
+            elif decision.get('action')=='extend' and set(decision)=={'action','until','reason'} and positive(decision['until']) and decision['until']>max(time.time(),route['wait_until']):
+                route.update(wait_until=decision['until'],wait_decision=decision,observed_at=time.time())
+                db.execute("UPDATE jobs SET reason='waiting_for_slot',route_data=? WHERE job_id=?",(canonical(route),job_id))
+            else: raise ValueError('invalid_wait_decision')
+            return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()))

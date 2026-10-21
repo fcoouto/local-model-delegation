@@ -6,7 +6,7 @@ import re
 import sqlite3
 from .contracts import CAPABILITY, MAX_ANSWER_BYTES, canonical, digest, envelope, load_json, validate_brief
 from .lmstudio import Runtime, select_loaded
-from .profiles import fingerprint_artifact, model_identity, read_profile
+from .profiles import fingerprint_artifact, model_identity, read_profile, read_config
 from .store import Store, atomic_json
 from .worker import run_attempt, start_worker, wait_job
 
@@ -33,6 +33,19 @@ def read_input(path):
 def submit(state_dir, path):
     brief = read_input(path)
     # Disabled/missing configuration causes no database, process or HTTP side effects.
+    config = read_config(state_dir)
+    if config.get("routing_enabled") is not True: raise ValueError("routing_disabled")
+    if config["schema_version"] == 2:
+        validate_brief(brief)
+        store = Store(state_dir)
+        result = store.enqueue(brief, brief["fallback"])
+        from .scheduler import schedule_once
+        schedule_once(state_dir)
+        result = envelope(store.job(result["job_id"]))
+        if result["status"] == "waiting" and result["reason"] != "route_decision_required":
+            from .worker import launch
+            launch(state_dir, "scheduler", "queue")
+        return result
     profile = read_profile(state_dir / "profiles.json", brief.get("capability", CAPABILITY))
     validate_brief(brief)
     from .validation import isolation_supported
@@ -59,7 +72,7 @@ def main(argv=None):
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("migrate")
-    for name in ("worker", "recover"):
+    for name in ("worker", "recover", "scheduler"):
         p = commands.add_parser(name)
         p.add_argument("identifier")
     p = commands.add_parser("submit")
@@ -95,9 +108,16 @@ def main(argv=None):
     p.add_argument("--owner-reference")
     p.add_argument("--receipt", type=Path)
     p.add_argument("--scope", type=Path)
+    p = commands.add_parser("route")
+    p.add_argument("action", choices=["decide"])
+    p.add_argument("--job", required=True)
+    p.add_argument("--decision", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "worker": return run_attempt(args.state_dir, args.identifier)
+        if args.command == "scheduler":
+            from .scheduler import run_scheduler
+            return run_scheduler(args.state_dir)
         if args.command == "recover":
             from .recovery import recover_instance
             return recover_instance(args.state_dir, args.identifier)
@@ -143,6 +163,11 @@ def main(argv=None):
                 if args.action == "prepare": result = prepare_verification(args.state_dir, args.job)
                 elif args.action == "checks": result = run_native_checks(args.state_dir, args.job)
                 else: result = record_verification(args.state_dir, args.job, read_input(args.receipt))
+            elif args.command == "route":
+                result = store.decide_wait(args.job, read_input(args.decision))
+                if result["status"] == "waiting":
+                    from .worker import launch
+                    launch(args.state_dir, "scheduler", "queue")
             elif args.command == "fallback":
                 if args.action == "claim": result = store.claim_fallback(args.job)
                 elif args.action == "attach":

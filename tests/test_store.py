@@ -95,3 +95,16 @@ class Slots(Fixture):
         (self.state / "jobs").symlink_to(outside, target_is_directory=True)
         with self.assertRaises(ValueError): atomic_json(self.state / "jobs/child/result.json", {"data": "private"})
         self.assertFalse((outside / "child").exists())
+
+    def test_disappearing_sqlite_sidecar_does_not_break_open(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        sidecar=Path(str(self.store.path)+'-shm');sidecar.write_bytes(b'fixture');sidecar.chmod(0o600)
+        original=Path.stat; calls=[]
+        def race(path,*args,**kwargs):
+            if path==sidecar and kwargs.get('follow_symlinks',True):
+                calls.append(path)
+                if len(calls)==2: sidecar.unlink()
+            return original(path,*args,**kwargs)
+        with patch.object(Path,'stat',race): reopened=Store(self.state)
+        self.assertEqual(reopened.path,self.store.path)

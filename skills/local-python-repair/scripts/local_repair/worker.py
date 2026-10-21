@@ -186,11 +186,11 @@ def reconcile_attempts(state_dir):
 
 
 def wait_job(state_dir, job_id, seconds):
-    if not 0 <= seconds <= 5: raise ValueError("invalid_wait")
+    if not 0 <= seconds <= 60: raise ValueError("invalid_wait")
     store = Store(state_dir)
     end = time.monotonic() + seconds
     while True:
         reconcile_attempts(state_dir)
         result = envelope(store.job(job_id))
-        if result["status"] not in ("reserved", "running") or time.monotonic() >= end: return result
+        if result["status"] not in ("waiting", "reserved", "running") or result["reason"] == "route_decision_required" or time.monotonic() >= end: return result
         time.sleep(min(.05, max(0, end - time.monotonic())))
