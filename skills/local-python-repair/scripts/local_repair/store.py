@@ -50,13 +50,17 @@ class Store:
             path = Path(str(self.path) + suffix)
             if path.is_symlink() or (path.exists() and (path.stat().st_uid != os.getuid() or path.stat().st_mode & 0o077 or not path.is_file())):
                 raise ValueError("unsafe_database")
+        created = False
         try:
             fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         except FileExistsError:
             pass
         else:
             os.close(fd)
+            created = True
         with self.db() as db:
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            if version not in (0, 1, 2): raise ValueError("unsupported_state_version")
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS profiles (digest TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -75,6 +79,20 @@ class Store:
                   job_id TEXT PRIMARY KEY REFERENCES jobs(job_id), token TEXT NOT NULL, task_name TEXT NOT NULL,
                   native_task_id TEXT, state TEXT NOT NULL);
             ''')
+            if version == 0:
+                db.execute("PRAGMA user_version=1")
+            if created and (self.root / "config.json").exists():
+                config = load_json((self.root / "config.json").read_text())
+                if config.get("schema_version") == 2:
+                    self.upgrade_schema(db)
+
+    @staticmethod
+    def upgrade_schema(db):
+        columns = {r[1] for r in db.execute("PRAGMA table_info(jobs)")}
+        for name, declaration in (("fallback", "TEXT"), ("queued_at", "REAL"), ("route_data", "TEXT NOT NULL DEFAULT '{}'")):
+            if name not in columns: db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {declaration}")
+        db.execute("CREATE TABLE IF NOT EXISTS model_operations (operation_id TEXT PRIMARY KEY, model_key TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL)")
+        db.execute("PRAGMA user_version=2")
 
     @contextmanager
     def db(self, write=False):
@@ -95,7 +113,8 @@ class Store:
         if row is None: raise ValueError("unknown_job")
         result = dict(row)
         for key in ("brief", "profile"): result[key] = load_json(result[key])
-        result["fallback"] = result["profile"]["fallback"]
+        result["fallback"] = load_json(result["fallback"]) if result.get("fallback") else result["profile"].get("fallback")
+        if "route_data" in result: result["route_data"] = load_json(result["route_data"])
         return result
 
     def job(self, job_id):
@@ -110,6 +129,8 @@ class Store:
     def reserve(self, brief, profile, loaded):
         validate_brief(brief)
         with self.db(write=True) as db:
+            if db.execute("PRAGMA user_version").fetchone()[0] != profile.get("schema_version"):
+                raise ValueError("mixed_state_version")
             row = db.execute("SELECT * FROM jobs WHERE chat=? AND task_key=?", (brief["origin_chat_id"], brief["task_key"])).fetchone()
             if row:
                 if row["brief_hash"] != digest(brief): raise ValueError("job_conflict")
@@ -140,7 +161,7 @@ class Store:
                 else:
                     reason = "instance_closed" if state != "ready" else "model_busy"
             db.execute("INSERT OR IGNORE INTO profiles VALUES (?,?)", (digest(profile), canonical(profile)))
-            db.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (job_id, brief["origin_chat_id"], brief["task_key"], digest(brief), canonical(brief), canonical(profile), status, reason, attempt_id, None, None))
+            db.execute("INSERT INTO jobs (job_id,chat,task_key,brief_hash,brief,profile,status,reason,attempt_id,result_path,native_task_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (job_id, brief["origin_chat_id"], brief["task_key"], digest(brief), canonical(brief), canonical(profile), status, reason, attempt_id, None, None))
             if attempt_id:
                 db.execute("INSERT INTO attempts VALUES (?,?,?,?,?,?)", (attempt_id, job_id, key, generation, "reserved", canonical({"created": time.time()})))
             return envelope(self._job(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()))

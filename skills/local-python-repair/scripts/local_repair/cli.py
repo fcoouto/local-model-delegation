@@ -58,6 +58,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="HTTP-only bounded repairs; routing disabled unless separately configured and approved.")
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("migrate")
     for name in ("worker", "recover"):
         p = commands.add_parser(name)
         p.add_argument("identifier")
@@ -87,7 +88,10 @@ def main(argv=None):
         if args.command == "recover":
             from .recovery import recover_instance
             return recover_instance(args.state_dir, args.identifier)
-        if args.command == "submit": result = submit(args.state_dir, args.brief)
+        if args.command == "migrate":
+            from .profiles import migrate_state
+            result = migrate_state(args.state_dir)
+        elif args.command == "submit": result = submit(args.state_dir, args.brief)
         elif args.command == "profile":
             profile = read_input(args.file)
             identity = fingerprint_artifact(Path(profile["artifact"]["root"]), profile["artifact"]["files"])

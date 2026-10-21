@@ -9,7 +9,7 @@ import threading
 import time
 from .contracts import MAX_ANSWER_BYTES, canonical, envelope, text_hash
 from .lmstudio import ActivityWatch, Runtime, final_text
-from .profiles import read_profile
+from .profiles import authorize_job
 from .store import Store, atomic_json, private_dir
 
 _children = []
@@ -58,7 +58,7 @@ def run_attempt(state_dir, attempt_id):
         generation = attempt["generation"]
         if attempt["state"] != "reserved": return 0
         try:
-            current = read_profile(store.root / "profiles.json", job["brief"]["capability"])
+            current = authorize_job(store, job)
             if current["approval"] != job["profile"]["approval"]:
                 raise ValueError("approval_changed")
         except (ValueError, OSError):

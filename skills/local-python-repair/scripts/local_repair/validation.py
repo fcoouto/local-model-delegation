@@ -11,7 +11,7 @@ import sys
 import tempfile
 import uuid
 from .contracts import MAX_ANSWER_BYTES, canonical, envelope, load_json, safe_path, text_hash, validate_brief
-from .profiles import read_profile
+from .profiles import authorize_job
 from .store import Store, atomic_json
 
 # Explicit members keep public module aliases from exposing sys or builtins.
@@ -226,7 +226,7 @@ def _check_candidate(store, job_id):
             return envelope(store.job(job_id))
     receipt = {}
     try:
-        current = read_profile(store.root / "profiles.json", brief["capability"])
+        current = authorize_job(store, job)
         if current["approval"] != job["profile"]["approval"]: raise ValueError("approval_changed")
         path = Path(job["result_path"])
         if path.is_symlink() or not path.resolve().is_relative_to(store.root / "jobs" / job_id): raise ValueError("unsafe_result")
@@ -259,7 +259,7 @@ def _check_candidate(store, job_id):
                 or not receipt["submitted"].get("ok") or not added_count or not effective):
             raise ValueError("independent_checks_failed")
         if not source_matches(brief): raise ValueError("source_changed")
-        current = read_profile(store.root / "profiles.json", brief["capability"])
+        current = authorize_job(store, job)
         if current["approval"] != job["profile"]["approval"]: raise ValueError("approval_changed")
         if job["attempt_id"] and not job["native_task_id"]:
             attempt = store.attempt(job["attempt_id"])

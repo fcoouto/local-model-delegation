@@ -104,7 +104,142 @@ class Profiles(Fixture):
         catalog = json.loads(path.read_text())
         path.chmod(0o666)
         with self.assertRaises(ValueError): model_identity(profile)
+
         path.chmod(0o600)
         catalog["models"] *= 2
         path.write_text(json.dumps(catalog))
         with self.assertRaises(ValueError): model_identity(profile)
+
+
+class VersionedProfiles(Fixture):
+    def api(self, name):
+        from local_repair import profiles
+        function = getattr(profiles, name, None)
+        self.assertTrue(callable(function), name + " must implement the versioned profile contract")
+        return function
+
+    def write_v2(self):
+        from local_repair.store import atomic_json
+        p = self.profile()
+        p.update(schema_version=2, qualification_status="qualified", scope=[{"capability": "bounded_python_repair",
+                 "language": "python", "complexity": "simple", "context_bucket": "small", "max_input_bytes": 100000}])
+        p["approval"]["scope"] = copy.deepcopy(p["scope"])
+        atomic_json(self.state / "config.json", {"schema_version": 2, "routing_enabled": True, "visibility_enabled": True})
+        atomic_json(self.state / "profiles" / "fictional.json", p)
+        return p
+
+    def test_profile_id_cannot_escape_state(self):
+        read = self.api("read_profile_by_id")
+        self.write_v2()
+        with self.assertRaisesRegex(ValueError, "invalid_profile_id"):
+            read(self.state, "../outside", "bounded_python_repair")
+
+    def test_evidence_edit_cannot_expand_approval(self):
+        read = self.api("read_profile_by_id")
+        p = self.write_v2()
+        self.assertEqual(read(self.state, "fictional", "bounded_python_repair")["model_id"], "fictional-model")
+        p["scope"][0]["complexity"] = "complex"
+        p["assessment"] = {"passed": True}
+        from local_repair.store import atomic_json
+        atomic_json(self.state / "profiles/fictional.json", p)
+        with self.assertRaisesRegex(ValueError, "model_not_approved"):
+            read(self.state, "fictional", "bounded_python_repair")
+
+    def test_migrate_keeps_legacy_bytes_and_disables_routing(self):
+        migrate = self.api("migrate_state")
+        old = self.write_config().read_bytes()
+        result = migrate(self.state)
+        from pathlib import Path
+        from local_repair.store import Store
+        self.assertEqual((Path(result["backup_dir"]) / "profiles.json").read_bytes(), old)
+        self.assertFalse(json.loads((self.state / "config.json").read_text())["routing_enabled"])
+        p = json.loads((self.state / "profiles/fictional.json").read_text())
+        self.assertEqual(p["qualification_status"], "needs_assessment")
+        self.assertEqual(p["approval"], json.loads(old)["profiles"]["fictional"]["approval"])
+        with Store(self.state).db() as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertTrue({"fallback", "queued_at", "route_data"} <= {r[1] for r in db.execute("PRAGMA table_info(jobs)")})
+
+    def test_old_entrypoint_cannot_submit_after_migration(self):
+        migrate = self.api("migrate_state")
+        path = self.write_config()
+        migrate(self.state)
+        with self.assertRaisesRegex(ValueError, "routing_disabled"):
+            read_profile(path, "bounded_python_repair")
+        from local_repair.store import Store
+        import sqlite3
+        store = Store(self.state)
+        with self.assertRaisesRegex(ValueError, "mixed_state_version"):
+            store.reserve(self.brief(), self.profile(), self.loaded())
+        # The previous executable used a positional 11-column insert.
+        with store.db(write=True) as db, self.assertRaises(sqlite3.OperationalError):
+            db.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (None,) * 11)
+
+    def test_migration_admission_race_keeps_database_v1(self):
+        migrate = self.api("migrate_state")
+        from local_repair import profiles
+        from local_repair.store import Store, atomic_json
+        from unittest.mock import patch
+        p = self.profile(); self.write_config(p); store = Store(self.state)
+        raced = []
+        def write(path, value):
+            atomic_json(path, value)
+            if path.name == "profiles.json" and value.get("routing_enabled") is False:
+                raced.append(store.reserve(self.brief(), p, self.loaded()))
+        with patch.object(profiles, "atomic_json", side_effect=write):
+            with self.assertRaisesRegex(ValueError, "unresolved_work"):
+                migrate(self.state)
+        self.assertEqual(store.job(raced[0]["job_id"])["status"], "reserved")
+        with store.db() as db: self.assertLess(db.execute("PRAGMA user_version").fetchone()[0], 2)
+        self.assertTrue(json.loads((self.state / "profiles.json").read_text())["routing_enabled"])
+
+    def test_migrate_refuses_unresolved_work(self):
+        migrate = self.api("migrate_state")
+        from local_repair.store import Store
+        p = self.profile(); self.write_config(p); store = Store(self.state)
+        job = store.reserve(self.brief(), p, self.loaded())
+        for status in ("checking", "dispatch_uncertain", "reserved"):
+            with store.db(write=True) as db: db.execute("UPDATE jobs SET status=?", (status,))
+            with self.subTest(status=status), self.assertRaisesRegex(ValueError, "unresolved_work"):
+                migrate(self.state)
+        with store.db(write=True) as db:
+            db.execute("UPDATE jobs SET status='failed'")
+            db.execute("UPDATE attempts SET state='uncertain'")
+        with self.assertRaisesRegex(ValueError, "unresolved_work"): migrate(self.state)
+        self.assertEqual(store.job(job["job_id"])["status"], "failed")
+
+    def test_migration_interruption_is_recoverable(self):
+        migrate = self.api("migrate_state")
+        from local_repair import profiles
+        from local_repair.store import atomic_json
+        from unittest.mock import patch
+        old = self.write_config().read_bytes()
+        def interrupt(path, value):
+            if path.name == "config.json": raise OSError("fixture interruption")
+            return atomic_json(path, value)
+        with patch.object(profiles, "atomic_json", side_effect=interrupt):
+            with self.assertRaises(OSError): migrate(self.state)
+        with self.assertRaisesRegex(ValueError, "routing_disabled"):
+            read_profile(self.state / "profiles.json", "bounded_python_repair")
+        result = migrate(self.state)
+        from pathlib import Path
+        self.assertEqual((Path(result["backup_dir"]) / "profiles.json").read_bytes(), old)
+        self.assertFalse(json.loads((self.state / "config.json").read_text())["routing_enabled"])
+
+    def test_authorize_job_uses_exact_profile_and_rechecks_revocation(self):
+        authorize = self.api("authorize_job")
+        from local_repair.store import Store, atomic_json
+        p = self.write_v2(); store = Store(self.state)
+        job = {"profile": p, "brief": self.brief()}
+        self.assertEqual(authorize(store, job)["profile_id"], "fictional")
+        p["approval"] = None
+        atomic_json(self.state / "profiles/fictional.json", p)
+        with self.assertRaisesRegex(ValueError, "model_not_approved"): authorize(store, job)
+
+    def test_evidence_revision_does_not_invalidate_same_approval(self):
+        authorize = self.api("authorize_job")
+        from local_repair.store import Store, atomic_json
+        p = self.write_v2(); job = {"profile": copy.deepcopy(p), "brief": self.brief()}
+        p["assessment"] = {"revision": 2, "scope": []}
+        atomic_json(self.state / "profiles/fictional.json", p)
+        self.assertEqual(authorize(Store(self.state), job)["assessment"]["revision"], 2)

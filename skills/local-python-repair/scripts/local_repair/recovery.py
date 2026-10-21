@@ -4,7 +4,7 @@ import time
 import uuid
 from .contracts import canonical, digest, load_json
 from .lmstudio import ActivityWatch, Runtime, final_text, select_loaded
-from .profiles import read_profile, verify_runtime_binding
+from .profiles import authorize_job, verify_runtime_binding
 from .store import Store, atomic_json
 from .worker import ownership, launch
 
@@ -88,7 +88,7 @@ def recover_once(store, key, runtime):
     instance = store.instance(key)
     if instance["state"] == "ready" or instance["data"].get("recovery_phase") == "retired": return True
     profile = instance["data"]["profile"]
-    approved = read_profile(store.root / "profiles.json", "bounded_python_repair")
+    approved = authorize_job(store, {"profile": profile, "brief": {"capability": profile["capabilities"][0]}})
     if approved["approval"] != profile["approval"] or approved["model_id"] != profile["model_id"]:
         raise ValueError("approval_changed")
     with store.db() as db:
@@ -139,7 +139,7 @@ def recover_once(store, key, runtime):
         update_instance(store, key, {"recovery_phase": "probe_uncertain"}, "closed")
         atomic_json(receipt, {"generation": instance["generation"], "state": "uncertain", "time": time.time()})
         raise
-    approved = read_profile(store.root / "profiles.json", "bounded_python_repair")
+    approved = authorize_job(store, {"profile": profile, "brief": {"capability": profile["capabilities"][0]}})
     if approved["approval"] != profile["approval"]: raise ValueError("approval_changed")
     after = current_loaded(runtime, profile)
     if after is None or after["instance_id"] != loaded["instance_id"]:
