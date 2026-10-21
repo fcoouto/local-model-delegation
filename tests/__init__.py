@@ -1,6 +1,6 @@
-"""Tests import the source skill without installing it."""
+"""Tests import the shared core without installing the plugin."""
 import sys
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "skills/local-python-repair/scripts"
-sys.path.insert(0, str(SCRIPTS))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))

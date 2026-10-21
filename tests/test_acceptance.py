@@ -1,4 +1,4 @@
-from local_repair.cli import DEFAULT_STATE
+from local_model_delegation.cli import DEFAULT_STATE
 from tests.live_acceptance import prepare_native, validate_temporary_state
 from tests.support import Fixture
 
@@ -21,13 +21,13 @@ class BroadAcceptance(Fixture):
         from contextlib import nullcontext
         from unittest.mock import patch
         from tests import test_scheduler,test_delegation
-        from local_repair.scheduler import schedule_once
-        from local_repair.profiles import model_identity
-        from local_repair.worker import run_attempt
-        from local_repair.visibility import set_visibility
-        from local_repair.validation import prepare_verification,record_verification
-        from local_repair.cli import reconcile_native
-        from local_repair.store import atomic_json
+        from local_model_delegation.scheduler import schedule_once
+        from local_model_delegation.profiles import model_identity
+        from local_model_delegation.worker import run_local_attempt
+        from local_model_delegation.visibility import set_visibility
+        from local_model_delegation.validation import prepare_verification,record_verification
+        from local_model_delegation.cli import reconcile_native
+        from local_model_delegation.store import atomic_json
         from tests.support import FakeRuntime
         for mode in ('enabled','disabled','disconnected','failed'):
             with self.subTest(mode=mode):
@@ -43,8 +43,8 @@ class BroadAcceptance(Fixture):
                         one=store.enqueue(brief,brief['fallback']);two=store.enqueue({**brief,'task_key':'second','origin_chat_id':'second-project'},brief['fallback'])
                         threads=[]
                         def start(state,attempt):
-                            thread=threading.Thread(target=run_attempt,args=(state,attempt));threads.append(thread);thread.start()
-                        with patch('local_repair.worker.start_worker',side_effect=start),patch('local_repair.visibility.atomic_json',side_effect=OSError('fixture')) if mode=='failed' else nullcontext():
+                            thread=threading.Thread(target=run_local_attempt,args=(state,attempt));threads.append(thread);thread.start()
+                        with patch('local_model_delegation.worker.start_worker',side_effect=start),patch('local_model_delegation.visibility.atomic_json',side_effect=OSError('fixture')) if mode=='failed' else nullcontext():
                             schedule_once(fixture.state,fixture.resources())
                             self.assertEqual(store.job(two['job_id'])['status'],'waiting')
                             for thread in threads:thread.join(3);self.assertFalse(thread.is_alive())

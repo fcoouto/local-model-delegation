@@ -50,8 +50,8 @@ def pin_runtime_bundle(state_dir):
     from .onboarding import fixtures_path
     store=Store(state_dir)
     source=Path(__file__).resolve().parents[1]
-    files={'repair.py':source/'repair.py','assessment-cases.json':fixtures_path()}
-    files.update({'local_repair/'+p.name:p for p in (source/'local_repair').glob('*.py')})
+    files={'delegate.py':source/'delegate.py','assessment-cases.json':fixtures_path()}
+    files.update({'local_model_delegation/'+p.name:p for p in (source/'local_model_delegation').glob('*.py')})
     if any(p.is_symlink() for p in files.values()):raise ValueError('unsafe_runtime_source')
     contents={name:path.read_bytes() for name,path in files.items()}
     import hashlib
@@ -84,6 +84,14 @@ def validate_bundle(path,identifier):
     for name,expected in manifest.items():
         if hashlib.sha256(safe_path(path,name).read_bytes()).hexdigest()!=expected:raise ValueError('runtime_bundle_mismatch')
     return path
+
+
+def runtime_entrypoint(bundle):
+    validate_bundle(bundle, bundle.name)
+    manifest = load_json((bundle/'manifest.json').read_text())
+    for name in ('delegate.py', 'repair.py'):
+        if name in manifest: return bundle/name
+    raise ValueError('runtime_bundle_mismatch')
 
 
 def prepare_uninstall(state_dir):

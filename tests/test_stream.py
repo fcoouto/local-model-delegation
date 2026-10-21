@@ -1,6 +1,6 @@
 import io
 import json
-from local_repair.lmstudio import ActivityWatch, Runtime, sse_events
+from local_model_delegation.lmstudio import ActivityWatch, Runtime, sse_events
 from tests.support import FakeRuntime, Fixture
 
 
@@ -43,7 +43,7 @@ class Stream(Fixture):
 
 class Progress(Fixture):
     def watch(self, **policy):
-        from local_repair import lmstudio
+        from local_model_delegation import lmstudio
         self.assertTrue(hasattr(lmstudio,'ProgressWatch'),'ProgressWatch must exist')
         return lmstudio.ProgressWatch({'max_output_tokens':100,**policy})
 
@@ -72,7 +72,7 @@ class Progress(Fixture):
             self.watch().observe('chat.end',{'result':{}})
 
     def test_nonreasoning_model_omits_unsupported_setting(self):
-        from local_repair.worker import build_request
-        result=build_request({'capability':'file_summary','behavior_contract':'summary','files':{},'editable_paths':[]},
+        from local_model_delegation.worker import build_model_request
+        result=build_model_request({'capability':'file_summary','behavior_contract':'summary','files':{},'editable_paths':[]},
                              {'request_settings':{'temperature':0,'max_output_tokens':100}},'fixture')
         self.assertNotIn('reasoning',result)

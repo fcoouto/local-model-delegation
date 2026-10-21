@@ -1,4 +1,4 @@
-"""Independent pure-Python checks in a restrictive, qualified macOS sandbox."""
+"""Candidate verification, protected Python checks and trusted native receipts."""
 import ast
 from functools import lru_cache
 import json
@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
-from .contracts import MAX_ANSWER_BYTES, canonical, envelope, load_json, safe_path, text_hash, validate_brief
+from .contracts import PYTHON_CHANGE_CAPABILITIES, MAX_ANSWER_BYTES, canonical, envelope, load_json, safe_path, text_hash, validate_brief
 from .profiles import authorize_job
 from .store import Store, atomic_json
 
@@ -35,7 +35,7 @@ DENIED = {"open", "exec", "eval", "compile", "input", "getattr", "setattr", "del
           "type", "object", "dir", "help", "breakpoint", "memoryview", "classmethod", "staticmethod", "property"}
 
 
-def guard(text, name, modules):
+def validate_python_source(text, name, modules):
     tree = ast.parse(text, name)
     tests = Path(name).name.startswith("test_")
     allowed = PURE_IMPORTS | (set(modules) | {"unittest"} if tests else set())
@@ -63,13 +63,13 @@ def guard(text, name, modules):
     return tree
 
 
-def methods(tree):
+def python_test_methods(tree):
     return {cls.name + "." + method.name: ast.dump(method, include_attributes=False)
             for cls in tree.body if isinstance(cls, ast.ClassDef)
             for method in cls.body if isinstance(method, ast.FunctionDef) and method.name.startswith("test")}
 
 
-def parse_candidate(text, brief):
+def parse_python_proposal(text, brief):
     if len(text.encode()) > MAX_ANSWER_BYTES: raise ValueError("oversized_answer")
     value = load_json(text)
     if not isinstance(value, dict) or set(value) != {"files", "summary"} or not isinstance(value["summary"], str) or not isinstance(value["files"], dict) or not value["files"]:
@@ -80,13 +80,13 @@ def parse_candidate(text, brief):
     for name, source in files.items():
         safe_path(Path(brief["source_root"]), name)
         if not isinstance(source, str): raise ValueError("invalid_candidate")
-        guard(source, name, modules)
+        validate_python_source(source, name, modules)
     for name in brief["supplied_tests"]:
         source = files.get(name, brief["files"][name]["content"])
         original = ast.parse(brief["files"][name]["content"])
-        candidate = guard(source, name, modules)
-        supplied = methods(original)
-        if any(methods(candidate).get(key) != method for key, method in supplied.items()):
+        candidate = validate_python_source(source, name, modules)
+        supplied = python_test_methods(original)
+        if any(python_test_methods(candidate).get(key) != method for key, method in supplied.items()):
             raise ValueError("supplied_test_changed")
         original_imports = [ast.dump(n) for n in original.body if isinstance(n, (ast.Import, ast.ImportFrom))]
         candidate_imports = [ast.dump(n) for n in candidate.body if isinstance(n, (ast.Import, ast.ImportFrom))]
@@ -163,16 +163,16 @@ print(json.dumps(ok))
         return result["returncode"] == 0 and result["stdout"].strip() == '["read_denied", "network_denied"]'
 
 
-def isolation_supported(brief):
+def python_isolation_supported(brief):
     try:
         modules = [Path(name).stem for name in brief["files"]]
-        for name, item in brief["files"].items(): guard(item["content"], name, modules)
+        for name, item in brief["files"].items(): validate_python_source(item["content"], name, modules)
         return _qualified_isolation()
     except (OSError, SyntaxError, ValueError): return False
 
 
-def run_tests(files, module_names, names=None):
-    with tempfile.TemporaryDirectory(prefix="bounded-repair-") as folder:
+def run_python_tests(files, module_names, names=None):
+    with tempfile.TemporaryDirectory(prefix="python-checks-") as folder:
         root = Path(folder).resolve()
         for name, source in files.items():
             path = safe_path(root, name)
@@ -199,25 +199,25 @@ print({marker!r} + json.dumps({{"ok": result.wasSuccessful() and result.testsRun
         return load_json(lines[0][len(marker):])
 
 
-def reclaim_check(store, job_id):
-    if store.job(job_id)["brief"]["capability"] != "bounded_python_repair": return
+def reclaim_python_verification(store, job_id):
+    if store.job(job_id)["brief"]["capability"] not in PYTHON_CHANGE_CAPABILITIES: return
     with store.db(write=True) as db:
         db.execute("UPDATE jobs SET status='candidate_ready' WHERE job_id=? AND status='checking'", (job_id,))
 
 
-def check_candidate(state_dir, job_id):
+def verify_candidate(state_dir, job_id):
     from .worker import ownership
     store = Store(state_dir)
-    if store.job(job_id)["brief"]["capability"] != "bounded_python_repair":
+    if store.job(job_id)["brief"]["capability"] not in PYTHON_CHANGE_CAPABILITIES:
         return prepare_verification(state_dir, job_id)
     with ownership(store, "check-" + job_id) as owned:
         if not owned: return envelope(store.job(job_id))
         # Only a lost checker can leave this state while its ownership lock is free.
-        reclaim_check(store, job_id)
-        return _check_candidate(store, job_id)
+        reclaim_python_verification(store, job_id)
+        return _verify_python_candidate(store, job_id)
 
 
-def _check_candidate(store, job_id):
+def _verify_python_candidate(store, job_id):
     job = store.job(job_id)
     if job["status"] != "candidate_ready": return envelope(job)
     brief = job["brief"]
@@ -236,27 +236,27 @@ def _check_candidate(store, job_id):
         if path.is_symlink() or not path.resolve().is_relative_to(store.root / "jobs" / job_id): raise ValueError("unsafe_result")
         artifact = load_json(path.read_text())
         if text_hash(artifact["text"]) != artifact["sha256"]: raise ValueError("candidate_hash_mismatch")
-        candidate = parse_candidate(artifact["text"], brief)
-        if not isolation_supported(brief): raise ValueError("isolation_unsupported")
+        candidate = parse_python_proposal(artifact["text"], brief)
+        if not python_isolation_supported(brief): raise ValueError("isolation_unsupported")
         original = {name: item["content"] for name, item in brief["files"].items()}
         changed = {**original, **candidate}
         oracle_modules = [argv[1] for argv in brief["checks"]]
         # Model tests never share an interpreter with the independent oracles.
         source_only = {n: t for n, t in original.items() if n not in brief["supplied_tests"]}
         changed_source = {n: t for n, t in changed.items() if not Path(n).name.startswith("test_")}
-        receipt["baseline"] = run_tests({**source_only, **brief["independent_tests"]}, oracle_modules)
-        receipt["independent"] = run_tests({**changed_source, **brief["independent_tests"]}, oracle_modules)
+        receipt["baseline"] = run_python_tests({**source_only, **brief["independent_tests"]}, oracle_modules)
+        receipt["independent"] = run_python_tests({**changed_source, **brief["independent_tests"]}, oracle_modules)
         test_modules = [Path(n).with_suffix("").as_posix().replace("/", ".") for n in brief["supplied_tests"]]
         # Unchanged methods can still be weakened by added setup code or global rebinding.
-        receipt["protected"] = run_tests({**changed_source, **{n: original[n] for n in brief["supplied_tests"]}}, test_modules)
-        receipt["submitted"] = run_tests(changed, test_modules)
+        receipt["protected"] = run_python_tests({**changed_source, **{n: original[n] for n in brief["supplied_tests"]}}, test_modules)
+        receipt["submitted"] = run_python_tests(changed, test_modules)
         effective = False
         added_count = 0
         for name in brief["supplied_tests"]:
-            added = sorted(set(methods(ast.parse(changed[name]))) - set(methods(ast.parse(original[name]))))
+            added = sorted(set(python_test_methods(ast.parse(changed[name]))) - set(python_test_methods(ast.parse(original[name]))))
             added_count += len(added)
             if added:
-                result = run_tests({**original, name: changed[name]}, [Path(name).stem], added)
+                result = run_python_tests({**original, name: changed[name]}, [Path(name).stem], added)
                 effective |= result.get("failures", 0) > 0 and result.get("errors", 0) == 0
         if (receipt["baseline"].get("failures", 0) < 1 or receipt["baseline"].get("errors", 0)
                 or not receipt["independent"].get("ok") or not receipt["protected"].get("ok")
@@ -353,7 +353,7 @@ def _prepare_verification(state_dir, job_id):
         job = store.job(job_id)
         if job['status'] not in ('candidate_ready', 'checking'): raise ValueError('candidate_not_ready')
         validate_brief(job['brief'])
-        if job['brief']['capability'] == 'bounded_python_repair': raise ValueError('use_python_checker')
+        if job['brief']['capability'] in PYTHON_CHANGE_CAPABILITIES: raise ValueError('use_python_checker')
         authorize_job(store, job)
         if not source_matches(job['brief']): raise ValueError('source_changed')
         proposal, candidate_hash = _proposal(store, job)

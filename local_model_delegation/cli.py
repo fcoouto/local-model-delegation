@@ -1,16 +1,24 @@
-"""Explicit local operations; native OpenAI dispatch remains with Codex."""
+"""Local delegation commands; native fallback dispatch remains with the host agent."""
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 import re
 import sqlite3
-from .contracts import CAPABILITY, MAX_ANSWER_BYTES, canonical, digest, envelope, load_json, validate_brief
+from .contracts import PYTHON_CODE_CHANGE, MAX_ANSWER_BYTES, canonical, digest, envelope, load_json, validate_brief
 from .lmstudio import Runtime, select_loaded
-from .profiles import fingerprint_artifact, model_identity, read_profile, read_config
+from .profiles import fingerprint_artifact, model_identity, read_legacy_profile, read_config
 from .store import Store, atomic_json
-from .worker import run_attempt, start_worker, wait_job
+from .worker import run_local_attempt, start_worker, wait_job
 
-DEFAULT_STATE = Path.home() / ".local/state/codex-local-repairs"
+DEFAULT_STATE = Path.home() / ".local/state/local-model-delegation"
+LEGACY_STATE = Path.home() / ".local/state/codex-local-repairs"
+
+
+def resolve_state_directory(explicit):
+    if explicit is not None: return explicit
+    if LEGACY_STATE.exists() or LEGACY_STATE.is_symlink():
+        raise ValueError("explicit_state_directory_required")
+    return DEFAULT_STATE
 
 
 def reconcile_native(store, job_id, native_tasks):
@@ -30,7 +38,7 @@ def read_input(path):
     return load_json(path.read_text())
 
 
-def submit(state_dir, path):
+def submit_task(state_dir, path):
     brief = read_input(path)
     # Disabled/missing configuration causes no database, process or HTTP side effects.
     config = read_config(state_dir)
@@ -46,10 +54,10 @@ def submit(state_dir, path):
             from .worker import launch
             launch(state_dir, "scheduler", "queue")
         return result
-    profile = read_profile(state_dir / "profiles.json", brief.get("capability", CAPABILITY))
+    profile = read_legacy_profile(state_dir / "profiles.json", brief.get("capability", PYTHON_CODE_CHANGE))
     validate_brief(brief)
-    from .validation import isolation_supported
-    if not isolation_supported(brief): raise ValueError("isolation_unsupported")
+    from .validation import python_isolation_supported
+    if not python_isolation_supported(brief): raise ValueError("isolation_unsupported")
     store = Store(state_dir)
     existing = store.lookup(brief["origin_chat_id"], brief["task_key"])
     if existing:
@@ -68,8 +76,8 @@ def submit(state_dir, path):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="HTTP-only bounded repairs; routing disabled unless separately configured and approved.")
-    parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
+    parser = argparse.ArgumentParser(description="Delegate tasks to assessed local models with native verification and fallback. Routing is disabled by default.")
+    parser.add_argument("--state-dir", type=Path, help="Shared private state directory; required when legacy state exists.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("migrate")
     commands.add_parser("resources")
@@ -126,7 +134,8 @@ def main(argv=None):
     p.add_argument("action", choices=["enable", "disable", "status"])
     args = parser.parse_args(argv)
     try:
-        if args.command == "worker": return run_attempt(args.state_dir, args.identifier)
+        args.state_dir = resolve_state_directory(args.state_dir)
+        if args.command == "worker": return run_local_attempt(args.state_dir, args.identifier)
         if args.command == "scheduler":
             from .scheduler import run_scheduler
             return run_scheduler(args.state_dir)
@@ -155,9 +164,9 @@ def main(argv=None):
             elif args.action == "trial": result = record_trial(args.state_dir, args.assessment_id, read_input(args.receipt))
             else: result = approve_assessment(args.state_dir, args.assessment_id, args.owner_reference, read_input(args.scope))
         elif args.command == "migrate":
-            from .profiles import migrate_state
-            result = migrate_state(args.state_dir)
-        elif args.command == "submit": result = submit(args.state_dir, args.brief)
+            from .profiles import migrate_profile_schema
+            result = migrate_profile_schema(args.state_dir)
+        elif args.command == "submit": result = submit_task(args.state_dir, args.brief)
         elif args.command == "profile":
             profile = read_input(args.file)
             identity = fingerprint_artifact(Path(profile["artifact"]["root"]), profile["artifact"]["files"])
@@ -180,8 +189,8 @@ def main(argv=None):
             elif args.command in ("status", "wait"):
                 result = wait_job(args.state_dir, args.job, args.seconds if args.command == "wait" else 0)
             elif args.command == "check":
-                from .validation import check_candidate
-                result = check_candidate(args.state_dir, args.job)
+                from .validation import verify_candidate
+                result = verify_candidate(args.state_dir, args.job)
             elif args.command == "verify":
                 from .validation import prepare_verification, record_verification, run_native_checks
                 if args.action == "prepare": result = prepare_verification(args.state_dir, args.job)

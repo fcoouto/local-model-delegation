@@ -1,7 +1,7 @@
 import copy
 import importlib.util
 import time
-from local_repair.store import Store
+from local_model_delegation.store import Store
 from tests import test_scheduler
 
 
@@ -13,12 +13,12 @@ class Capacity(Fixture):
     setup_queue=test_scheduler.Scheduler.setup_queue
     resources=test_scheduler.Scheduler.resources
     def module(self):
-        self.assertIsNotNone(importlib.util.find_spec('local_repair.capacity'),'capacity module must exist')
-        from local_repair import capacity
+        self.assertIsNotNone(importlib.util.find_spec('local_model_delegation.capacity'),'capacity module must exist')
+        from local_model_delegation import capacity
         return capacity
 
     def measured(self,p):
-        from local_repair.contracts import digest
+        from local_model_delegation.contracts import digest
         return {**p,'capacity_evidence':{'qualified':True,'limit':2,'machine_fingerprint':'fixture-machine',
                  'settings_digest':digest(p['request_settings']),'artifact_digest':p['artifact']['digest'],
                  'context_length':8192,'request_bytes':4*1024**3,'batches':3,'median_slowdown':1.2}}
@@ -87,7 +87,7 @@ class Capacity(Fixture):
     def test_broad_recovery_does_not_reset_external_instance(self):
         module=self.module();store,brief,p=self.setup_queue();job=store.reserve(brief,p,self.loaded())
         attempt=store.attempt(job['attempt_id'])
-        from local_repair.recovery import close_instance,recover_once
+        from local_model_delegation.recovery import close_instance,recover_once
         from unittest.mock import Mock
         close_instance(store,attempt['instance_key']);runtime=Mock()
         with self.assertRaisesRegex(ValueError,'instance_not_owned'):recover_once(store,attempt['instance_key'],runtime)
@@ -95,7 +95,7 @@ class Capacity(Fixture):
 
     def test_lost_unload_ack_reconciles_without_reposting(self):
         from tests.support import FakeRuntime
-        from local_repair.contracts import canonical,digest
+        from local_model_delegation.contracts import canonical,digest
         server=FakeRuntime();server.drop_unload_ack=True;self.addCleanup(server.close)
         module=self.module();store,brief,p=self.setup_queue();p['endpoint']=server.endpoint
         job=store.reserve(brief,p,{**self.loaded(),'endpoint':server.endpoint})

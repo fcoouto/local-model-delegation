@@ -2,14 +2,14 @@ import importlib.util
 import json
 from pathlib import Path
 from unittest.mock import patch
-from tests.support import Fixture,SCRIPTS
-from local_repair.store import Store,atomic_json
+from tests.support import Fixture,REPO_ROOT
+from local_model_delegation.store import Store,atomic_json
 
 
 class Plugin(Fixture):
     def module(self):
-        self.assertIsNotNone(importlib.util.find_spec('local_repair.package'),'package module must exist')
-        from local_repair import package
+        self.assertIsNotNone(importlib.util.find_spec('local_model_delegation.package'),'package module must exist')
+        from local_model_delegation import package
         return package
 
     def test_fresh_setup_remains_disabled(self):
@@ -25,17 +25,17 @@ class Plugin(Fixture):
         self.assertFalse(module.initialize_state(self.state)['visibility_enabled'])
 
     def test_package_is_relocatable_and_contains_all_skill_paths(self):
-        self.module();root=SCRIPTS.parents[2];manifest=json.loads((root/'plugin.json').read_text())
+        self.module();root=REPO_ROOT;manifest=json.loads((root/'plugin.json').read_text())
         self.assertEqual(manifest['name'],'local-model-delegation')
         self.assertTrue((root/manifest['extensions']['com.openai']['onboardingSkill']).is_file())
-        for name in ('setup','local-delegation','local-python-repair'):self.assertTrue((root/'skills'/name/'SKILL.md').is_file())
+        for name in ('setup','local-delegation'):self.assertTrue((root/'skills'/name/'SKILL.md').is_file())
 
     def test_cache_refresh_keeps_running_job_bundle(self):
         module=self.module();module.initialize_state(self.state)
         first=module.pin_runtime_bundle(self.state);second=module.pin_runtime_bundle(self.state)
-        self.assertEqual(first,second);self.assertTrue((first/'repair.py').is_file())
-        self.assertTrue((first/'local_repair/visibility.py').is_file())
-        self.assertNotIn(str(SCRIPTS),(first/'repair.py').read_text())
+        self.assertEqual(first,second);self.assertTrue((first/'delegate.py').is_file())
+        self.assertTrue((first/'local_model_delegation/visibility.py').is_file())
+        self.assertNotIn(str(REPO_ROOT),(first/'delegate.py').read_text())
 
     def test_incompatible_upgrade_refuses_active_state(self):
         module=self.module();self.write_config();store=Store(self.state);store.reserve(self.brief(),self.profile(),self.loaded())
@@ -43,7 +43,7 @@ class Plugin(Fixture):
 
     def test_unsupported_host_is_explicit(self):
         module=self.module()
-        with patch('local_repair.package.platform.system',return_value='Linux'):
+        with patch('local_model_delegation.package.platform.system',return_value='Linux'):
             report=module.doctor(self.state)
         self.assertFalse(report['supported']);self.assertIn('macos_required',report['limitations'])
         self.assertFalse(self.state.exists())
@@ -66,12 +66,12 @@ class Plugin(Fixture):
         self.assertEqual(module.prepare_update(self.state)['status'],'ready')
 
     def test_release_contains_no_machine_local_evidence(self):
-        root=SCRIPTS.parents[2]
+        root=REPO_ROOT
         markers=['/Us'+'ers/','/var/fol'+'ders/','_docs/'+'work/','BEGIN '+'PRIVATE KEY']
-        for directory in ('skills','tests'):
+        for directory in ('local_model_delegation','skills','tests'):
             for path in (root/directory).rglob('*'):
                 if path.suffix not in ('.py','.md','.json'):continue
                 text=path.read_text()
                 self.assertFalse(any(marker in text for marker in markers),str(path.relative_to(root)))
-        for path in (root/'README.md',root/'plugin.json'):
+        for path in (root/'README.md',root/'plugin.json',root/'delegate.py'):
             self.assertFalse(any(marker in path.read_text() for marker in markers),path.name)

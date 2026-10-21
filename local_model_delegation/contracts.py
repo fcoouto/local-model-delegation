@@ -6,8 +6,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-CAPABILITY = "bounded_python_repair"
-CAPABILITIES = {CAPABILITY, "test_writing", "code_change", "file_summary"}
+PYTHON_CODE_CHANGE = "python_code_change"
+# Keep stored briefs and approval scopes byte-for-byte; aliases do not transfer approval.
+PYTHON_CHANGE_CAPABILITIES = {PYTHON_CODE_CHANGE, "bounded_python_repair"}
+CAPABILITIES = PYTHON_CHANGE_CAPABILITIES | {"test_writing", "code_change", "file_summary"}
 MAX_ANSWER_BYTES = 2 * 1024 * 1024
 
 
@@ -60,7 +62,7 @@ def validate_brief(data: dict[str, Any]) -> dict[str, Any]:
                 "editable_paths", "supplied_tests", "behavior_contract", "checks", "independent_tests"}
     if not isinstance(data, dict) or set(data) != required or type(data["schema_version"]) is not int or data["schema_version"] != 1:
         raise ValueError("invalid_brief")
-    if data["capability"] != CAPABILITY:
+    if data["capability"] not in PYTHON_CHANGE_CAPABILITIES:
         raise ValueError("unsupported_capability")
     for key in ("origin_chat_id", "task_key", "behavior_contract"):
         if not isinstance(data[key], str) or not data[key] or len(data[key]) > 20000:
@@ -114,7 +116,7 @@ def validate_fallback(value):
 def validate_v2(data):
     common = {"schema_version", "origin_chat_id", "task_key", "capability", "source_root", "files",
               "editable_paths", "behavior_contract", "task_requirements", "acceptance", "fallback"}
-    legacy = {"supplied_tests", "checks", "independent_tests"} if data.get("capability") == CAPABILITY else set()
+    legacy = {"supplied_tests", "checks", "independent_tests"} if data.get("capability") in PYTHON_CHANGE_CAPABILITIES else set()
     if set(data) != common | legacy or data["capability"] not in CAPABILITIES: raise ValueError("invalid_brief")
     validate_fallback(data["fallback"])
     for key in ("origin_chat_id", "task_key", "behavior_contract"):

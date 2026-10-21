@@ -22,8 +22,6 @@ def admission_limit(profile, loaded, resources):
 def schedule_once(state_dir, resources=None):
     from .worker import ownership,start_worker
     from .lmstudio import Runtime,select_loaded
-    from .capacity import machine_snapshot
-    resources=machine_snapshot() if resources is None else resources
     store=Store(state_dir)
     with ownership(store,'scheduler') as owned:
         if not owned: return {'status':'scheduler_busy'}
@@ -49,7 +47,7 @@ def schedule_once(state_dir, resources=None):
                     p=authorize_assessment(store.root,job['brief'],permit) if permit else read_profile_by_id(store.root,identifier,job['brief']['capability'])
                     from .profiles import model_identity
                     loaded=select_loaded(Runtime(p['endpoint'],token_env=p.get('token_env')).list_models(),p,model_identity(p) if permit else None)
-                    result=store.admit(job['job_id'],p,loaded,resources or {})
+                    result=store.admit(job['job_id'],p,loaded,resources)
                 except (ValueError,OSError): continue
                 if result['status']=='reserved':
                     start_worker(store.root,result['attempt_id']); break
