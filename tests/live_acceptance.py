@@ -35,6 +35,14 @@ def prepare_native(state_dir):
         shutil.copytree(fixture.root, state_dir)
         state_dir.chmod(0o700)
         profile["artifact"]["root"] = str((state_dir / "artifact").resolve())
+        catalog = state_dir / "runtime-catalog.json"
+        entry = load_json(catalog.read_text())
+        entry["models"][0]["concreteModelDirAbsolutePath"] = profile["artifact"]["root"]
+        entry["models"][0]["allFiles"] = [{"absPath": str(state_dir / "artifact/weights.bin")}]
+        atomic_json(catalog, entry)
+        profile["runtime_catalog"] = str(catalog)
+        from local_repair.profiles import model_identity
+        profile["approval"]["model_identity"] = model_identity(profile)
         brief["source_root"] = str((state_dir / "project").resolve())
         # Only a fictional local profile; no real runtime discovery or local POST.
         config = fixture.config(profile)

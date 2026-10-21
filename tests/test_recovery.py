@@ -55,6 +55,8 @@ class Recovery(Fixture):
     def profile_for(self, server):
         p = self.profile()
         p["endpoint"] = server.endpoint
+        from local_repair.profiles import model_identity
+        p["approval"]["model_identity"] = model_identity(p)
         return p
 
     def test_two_recovery_owners(self):
@@ -101,3 +103,81 @@ class Recovery(Fixture):
             recover_once(store, key, runtime)
         self.assertTrue(recover_once(store, key, Runtime(server.endpoint)))
         self.assertEqual(server.calls.count(("POST", "/api/v1/models/load")), 1)
+
+    def test_review_uncertain_probe_requires_new_reset(self):
+        server, store, job, key = self.prepare(incomplete=True)
+        for _ in range(2):
+            with self.assertRaises(ValueError): recover_once(store, key, Runtime(server.endpoint))
+        self.assertEqual(server.calls.count(("POST", "/api/v1/chat")), 2)
+        self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 2)
+        self.assertNotEqual(store.instance(key)["state"], "ready")
+
+    def test_review_missing_runtime_binding_stays_closed(self):
+        server, store, job, key = self.prepare()
+        profile = self.profile_for(server)
+        profile.pop("runtime_catalog", None)
+        self.write_config(profile)
+        with self.assertRaises(ValueError): recover_once(store, key, Runtime(server.endpoint))
+        self.assertNotEqual(store.instance(key)["state"], "ready")
+        self.assertFalse(any(method == "POST" for method, _ in server.calls))
+
+    def test_probe_owner_death_requires_reset(self):
+        server, store, job, key = self.prepare()
+        runtime = Runtime(server.endpoint)
+        original = runtime.stream
+        def starts_then_dies(body):
+            for event in original(body):
+                yield event
+                raise KeyboardInterrupt("simulate probe owner death")
+        with patch.object(runtime, "stream", starts_then_dies), self.assertRaises(KeyboardInterrupt):
+            recover_once(store, key, runtime)
+        # SIGKILL cannot run exception handlers; its durable intent still fences retry.
+        from local_repair.recovery import update_instance
+        update_instance(store, key, {"recovery_phase": "probe_submitting"}, "closed")
+        self.assertTrue(recover_once(store, key, Runtime(server.endpoint)))
+        self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 2)
+        self.assertEqual(server.calls.count(("POST", "/api/v1/chat")), 2)
+        from local_repair.contracts import load_json
+        receipts = [load_json(p.read_text()) for p in (store.root / "probes" / key).glob("*.json")]
+        self.assertEqual(sorted(r["state"] for r in receipts), ["complete", "uncertain"])
+
+    def test_runtime_metadata_mismatch_cannot_load_or_probe(self):
+        server, store, job, key = self.prepare()
+        runtime = Runtime(server.endpoint)
+        snapshot = runtime.list_models()
+        snapshot["models"][0]["architecture"] = "different"
+        with patch.object(runtime, "list_models", return_value=snapshot), self.assertRaisesRegex(ValueError, "runtime_binding_mismatch"):
+            recover_once(store, key, runtime)
+        self.assertFalse(any(method == "POST" for method, _ in server.calls))
+        self.assertNotEqual(store.instance(key)["state"], "ready")
+
+    def test_recovery_restart_respects_owner_backoff_and_permanent_error(self):
+        from local_repair.recovery import request_recovery, update_instance
+        from local_repair.worker import ownership
+        server, store, job, key = self.prepare()
+        with patch("local_repair.recovery.launch") as launch:
+            with ownership(store, "recovery-" + key):
+                request_recovery(self.state, key)
+            launch.assert_not_called()
+            update_instance(store, key, {"next_recovery_at": time.time() + 30}, "closed")
+            request_recovery(self.state, key)
+            launch.assert_not_called()
+            update_instance(store, key, {"next_recovery_at": 0, "recovery_blocked": True}, "closed")
+            request_recovery(self.state, key)
+            launch.assert_not_called()
+            update_instance(store, key, {"recovery_blocked": False}, "closed")
+            request_recovery(self.state, key)
+            launch.assert_called_once()
+
+    def test_repeated_recovery_tracks_replacement_instance(self):
+        from local_repair.contracts import digest
+        server, store, job, key = self.prepare()
+        server.change_instance_on_load = True
+        for _ in range(2):
+            self.assertTrue(recover_once(store, key, Runtime(server.endpoint)))
+            self.assertEqual(store.instance(key)["data"]["recovery_phase"], "retired")
+            key = digest([server.endpoint, "fictional-model", server.instance_id])
+            self.assertEqual(store.instance(key)["state"], "ready")
+            self.assertEqual(store.instance(key)["data"]["loaded"]["instance_id"], server.instance_id)
+            close_instance(store, key)
+        self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 2)

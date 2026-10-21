@@ -6,7 +6,7 @@ import re
 import sqlite3
 from .contracts import CAPABILITY, MAX_ANSWER_BYTES, canonical, digest, envelope, load_json, validate_brief
 from .lmstudio import Runtime, select_loaded
-from .profiles import fingerprint_artifact, read_profile
+from .profiles import fingerprint_artifact, model_identity, read_profile
 from .store import Store, atomic_json
 from .worker import run_attempt, start_worker, wait_job
 
@@ -91,12 +91,12 @@ def main(argv=None):
         elif args.command == "profile":
             profile = read_input(args.file)
             identity = fingerprint_artifact(Path(profile["artifact"]["root"]), profile["artifact"]["files"])
-            result = {"schema_version": 1, "profile_id": profile["profile_id"], "identity": identity, "routing_enabled": False}
+            result = {"schema_version": 1, "profile_id": profile["profile_id"], "identity": identity, "model_identity": model_identity(profile), "routing_enabled": False}
             if args.action == "record-approval":
                 if not args.owner_reference: raise ValueError("owner_confirmation_required")
                 profile["artifact"].update(identity)
                 profile["approval"] = {"owner_reference": args.owner_reference, "timestamp": datetime.now(timezone.utc).isoformat(),
-                                       "artifact_digest": identity["digest"], "capabilities": profile["capabilities"],
+                                       "artifact_digest": identity["digest"], "model_identity": model_identity(profile), "capabilities": profile["capabilities"],
                                        "request_settings": profile["request_settings"]}
                 atomic_json(args.file, profile)
                 result["status"] = "approval_recorded"

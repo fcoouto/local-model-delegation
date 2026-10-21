@@ -135,6 +135,8 @@ def select_loaded(snapshot, profile):
         raise ValueError("invalid_model_list")
     matches = [m for m in snapshot.get("models", []) if m.get("key") == profile["model_id"] and m.get("type") == "llm"]
     if len(matches) != 1: return None
+    from .profiles import verify_runtime_binding
+    verify_runtime_binding(profile, matches[0])
     instances = matches[0].get("loaded_instances")
     if not isinstance(instances, list): raise ValueError("invalid_model_list")
     if len(instances) != 1: return None

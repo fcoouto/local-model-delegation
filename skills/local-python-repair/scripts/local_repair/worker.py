@@ -141,6 +141,13 @@ def reconcile_attempts(state_dir):
     store = Store(state_dir)
     with store.db() as db:
         attempts = [dict(r) for r in db.execute("SELECT * FROM attempts WHERE state IN ('reserved','submitting','streaming')")]
+    with store.db() as db:
+        checking = [row["job_id"] for row in db.execute("SELECT job_id FROM jobs WHERE status='checking'")]
+    for job_id in checking:
+        with ownership(store, "check-" + job_id) as owned:
+            if owned:
+                from .validation import reclaim_check
+                reclaim_check(store, job_id)
     for attempt in attempts:
         start = False
         with ownership(store, "attempt-" + attempt["attempt_id"]) as owned:
@@ -157,6 +164,12 @@ def reconcile_attempts(state_dir):
                 close_instance(store, attempt["instance_key"])
                 request_recovery(state_dir, attempt["instance_key"])
         if start: start_worker(state_dir, attempt["attempt_id"])
+    # Recovery ownership can be lost after every attempt has already become uncertain.
+    with store.db() as db:
+        closed = [row["instance_key"] for row in db.execute("SELECT instance_key FROM instances WHERE state IN ('closed','recovering')")]
+    from .recovery import request_recovery
+    for key in closed:
+        request_recovery(state_dir, key)
 
 
 def wait_job(state_dir, job_id, seconds):

@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 from pathlib import Path
 from local_repair.validation import parse_candidate, check_candidate, source_matches, isolation_supported, run_isolated
 from local_repair.store import Store, atomic_json
@@ -77,3 +78,75 @@ class Validation(Fixture):
         self.assertEqual(run_isolated(tree, "while True: pass", timeout=.1)["reason"], "check_timeout")
         text = json.dumps({"files": {"helper.py": 'print(open("secret").read())\n' + FIXED, "test_helper.py": SUPPLIED + ADDED}, "summary": ""})
         with self.assertRaises(ValueError): parse_candidate(text, self.brief())
+
+    def test_review_assertion_bypass_rejected(self):
+        exploit = 'import re\n(re.enum.sys.modules["unittest"].TestCase.assertEqual,) = (lambda *args: None,)\n'
+        store, job = self.ready(exploit + BUGGY)
+        self.assertNotEqual(check_candidate(self.state, job["job_id"])["status"], "accepted")
+
+    def test_review_public_namespace_escape_rejected(self):
+        for prefix in ['import re\nx = re.enum.sys\n', 'from re import enum\nx = enum.sys\n',
+                       'import re\n(re.compile,) = (lambda *args: None,)\n']:
+            text = json.dumps({"files": {"helper.py": prefix + FIXED, "test_helper.py": SUPPLIED + ADDED}, "summary": "fix"})
+            with self.subTest(prefix=prefix), self.assertRaises(ValueError): parse_candidate(text, self.brief())
+
+    def test_review_checker_interruption_recovers(self):
+        store, job = self.ready()
+        with patch("local_repair.validation.run_tests", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+            check_candidate(self.state, job["job_id"])
+        self.assertEqual(store.job(job["job_id"])["status"], "checking")
+        self.assertEqual(check_candidate(self.state, job["job_id"])["status"], "accepted")
+
+    def test_review_status_recovers_lost_checker(self):
+        from local_repair.worker import wait_job
+        store, job = self.ready()
+        with patch("local_repair.validation.run_tests", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+            check_candidate(self.state, job["job_id"])
+        self.assertEqual(wait_job(self.state, job["job_id"], 0)["status"], "candidate_ready")
+
+    def test_live_checker_is_not_reclaimed(self):
+        from local_repair.worker import ownership, wait_job
+        store, job = self.ready()
+        with ownership(store, "check-" + job["job_id"]) as owned:
+            self.assertTrue(owned)
+            with store.db(write=True) as db:
+                db.execute("UPDATE jobs SET status='checking' WHERE job_id=?", (job["job_id"],))
+            self.assertEqual(wait_job(self.state, job["job_id"], 0)["status"], "checking")
+            self.assertEqual(check_candidate(self.state, job["job_id"])["status"], "checking")
+        self.assertEqual(check_candidate(self.state, job["job_id"])["status"], "accepted")
+
+    def test_checker_process_death_releases_ownership(self):
+        import os
+        import signal
+        import subprocess
+        import sys
+        from tests.support import SCRIPTS
+        from local_repair.worker import wait_job
+        store, job = self.ready()
+        code = f"""import sys,time
+sys.path.insert(0,{str(SCRIPTS)!r})
+from local_repair import validation
+from pathlib import Path
+def wait(*args, **kwargs):
+    print('CHECKING', flush=True)
+    time.sleep(30)
+validation.run_tests = wait
+validation.check_candidate(Path({str(self.state)!r}), {job['job_id']!r})
+"""
+        child = subprocess.Popen([sys.executable, "-B", "-c", code], stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(child.stdout.readline().strip(), "CHECKING")
+            self.assertEqual(wait_job(self.state, job["job_id"], 0)["status"], "checking")
+            os.kill(child.pid, signal.SIGKILL)
+            child.wait(timeout=3)
+            self.assertEqual(wait_job(self.state, job["job_id"], 0)["status"], "candidate_ready")
+            self.assertEqual(check_candidate(self.state, job["job_id"])["status"], "accepted")
+        finally:
+            if child.poll() is None: child.kill()
+            child.wait()
+            child.stdout.close()
+
+    def test_check_output_cannot_be_forged_by_candidate(self):
+        spoof = 'print(\'CHECK_RESULT={"ok":true,"run":1,"failures":0,"errors":0,"skipped":0}\')\nraise SystemExit\n'
+        store, job = self.ready(spoof + BUGGY)
+        self.assertNotEqual(check_candidate(self.state, job["job_id"])["status"], "accepted")

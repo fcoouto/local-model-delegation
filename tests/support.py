@@ -53,7 +53,16 @@ class Fixture(unittest.TestCase):
         from local_repair.profiles import fingerprint_artifact
         identity = fingerprint_artifact(self.artifact, ["weights.bin"])
         settings = {"reasoning": "on", "temperature": 0, "max_output_tokens": 8192}
-        return {
+        catalog = self.root / "runtime-catalog.json"
+        catalog.write_text(json.dumps({"models": [{"defaultIdentifier": "fictional-model",
+            "indexedModelIdentifier": "test/fictional-model", "autoIdentifiers": [],
+            "concreteModelDirAbsolutePath": str(self.artifact),
+            "allFiles": [{"absPath": str(self.artifact / "weights.bin")}],
+            "format": "fictional", "arch": "fictional", "user": "test", "params": "1B",
+            "quant": {"name": "4bit", "bits": 4}}], "conflicts": [], "errors": []}))
+        catalog.chmod(0o600)
+        profile = {
+            "runtime_catalog": str(catalog),
             "schema_version": 1, "profile_id": "fictional", "endpoint": "http://127.0.0.1:1",
             "adapter": "lmstudio_v1", "model_id": "fictional-model",
             "artifact": {"root": str(self.artifact), "files": ["weights.bin"], **identity},
@@ -64,6 +73,9 @@ class Fixture(unittest.TestCase):
                          "artifact_digest": identity["digest"], "capabilities": ["bounded_python_repair"],
                          "request_settings": copy.deepcopy(settings)},
         }
+        from local_repair.profiles import model_identity
+        profile["approval"]["model_identity"] = model_identity(profile)
+        return profile
 
     def brief(self, key="repair-one"):
         return {"schema_version": 1, "origin_chat_id": "fixture-chat", "task_key": key,
@@ -89,6 +101,10 @@ class Fixture(unittest.TestCase):
     def write_config(self, profile=None, enabled=True):
         self.state.mkdir(mode=0o700, exist_ok=True)
         path = self.state / "profiles.json"
+        # Rebind only fictional test approval to its selected loopback fake endpoint.
+        if profile is not None and profile.get("runtime_catalog"):
+            from local_repair.profiles import model_identity
+            profile["approval"]["model_identity"] = model_identity(profile)
         path.write_text(json.dumps(self.config(profile, enabled)))
         path.chmod(0o600)
         return path
@@ -101,6 +117,8 @@ class FakeRuntime:
         self.delay, self.incomplete, self.mismatch = delay, incomplete, mismatch
         self.calls, self.requests = [], []
         self.loaded, self.parallel = True, 1
+        self.instance_id, self.change_instance_on_load = "fixture-instance", False
+        self.load_count = 0
         self.drop_load_ack = self.drop_unload_ack = False
         outer = self
 
@@ -109,8 +127,10 @@ class FakeRuntime:
 
             def do_GET(self):
                 outer.calls.append(("GET", self.path))
-                body = {"models": [{"key": "fictional-model", "type": "llm", "loaded_instances":
-                    ([{"id": "fixture-instance", "config": {"parallel": outer.parallel, "context_length": 8192}}] if outer.loaded else [])}]}
+                body = {"models": [{"key": "fictional-model", "type": "llm",
+                    "format": "fictional", "architecture": "fictional", "publisher": "test", "params_string": "1B",
+                    "quantization": {"name": "4bit", "bits_per_weight": 4}, "loaded_instances":
+                    ([{"id": outer.instance_id, "config": {"parallel": outer.parallel, "context_length": 8192}}] if outer.loaded else [])}]}
                 encoded = json.dumps(body).encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(encoded)))
@@ -124,6 +144,9 @@ class FakeRuntime:
                 if self.path.endswith("/load") or self.path.endswith("/unload"):
                     loading = self.path.endswith("/load")
                     outer.loaded = loading
+                    if loading and outer.change_instance_on_load:
+                        outer.load_count += 1
+                        outer.instance_id = "fixture-instance-" + str(outer.load_count)
                     if (loading and outer.drop_load_ack) or (not loading and outer.drop_unload_ack):
                         if loading: outer.drop_load_ack = False
                         else: outer.drop_unload_ack = False
@@ -139,7 +162,7 @@ class FakeRuntime:
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
                 answer = "PROBE_OK" if body.get("input") == "Return exactly PROBE_OK" else outer.answer
-                events = [("chat.start", {"model_instance_id": "fixture-instance"}),
+                events = [("chat.start", {"model_instance_id": outer.instance_id}),
                           ("reasoning.start", {}), ("reasoning.delta", {"content": "working"})]
                 if outer.delay: time.sleep(outer.delay)
                 events += [("reasoning.end", {}), ("message.start", {}), ("message.delta", {"content": answer}), ("message.end", {})]

@@ -13,6 +13,7 @@ class Worker(Fixture):
     def setUp(self):
         super().setUp()
         recovery = patch("local_repair.recovery.request_recovery")
+        self.recovery_patch = recovery
         recovery.start()
         self.addCleanup(recovery.stop)
 
@@ -75,3 +76,18 @@ class Worker(Fixture):
         result = wait_job(self.state, job["job_id"], 3)
         self.assertEqual(result["status"], "candidate_ready")
         self.assertEqual(server.calls.count(("POST", "/api/v1/chat")), 1)
+
+    def test_review_status_restarts_lost_recovery_owner(self):
+        from local_repair.recovery import close_instance
+        server, store, job = self.prepare()
+        store.transition(job["attempt_id"], 0, "reserved", "uncertain", {})
+        store.select_fallback(job["job_id"], "observer_lost")
+        key = store.attempt(job["attempt_id"])["instance_key"]
+        close_instance(store, key)
+        self.recovery_patch.stop()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and store.instance(key)["state"] != "ready":
+            wait_job(self.state, job["job_id"], 0)
+            time.sleep(.05)
+        self.assertEqual(store.instance(key)["state"], "ready")
+        self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 1)

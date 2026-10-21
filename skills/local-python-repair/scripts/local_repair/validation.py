@@ -9,11 +9,28 @@ import signal
 import subprocess
 import sys
 import tempfile
+import uuid
 from .contracts import MAX_ANSWER_BYTES, canonical, envelope, load_json, safe_path, text_hash, validate_brief
 from .profiles import read_profile
 from .store import Store, atomic_json
 
-PURE_IMPORTS = {"re", "hashlib", "math", "string", "collections", "itertools", "functools", "decimal", "fractions"}
+# Explicit members keep public module aliases from exposing sys or builtins.
+IMPORT_MEMBERS = {
+    "re": set("compile escape findall finditer fullmatch match search split sub subn Pattern Match ASCII IGNORECASE MULTILINE DOTALL VERBOSE".split()),
+    "hashlib": set("md5 sha1 sha224 sha256 sha384 sha512 sha3_224 sha3_256 sha3_384 sha3_512 blake2b blake2s".split()),
+    "math": set("ceil floor trunc fabs factorial gcd lcm isqrt comb perm sqrt exp expm1 log log1p log2 log10 pow sin cos tan asin acos atan atan2 hypot degrees radians isclose isfinite isinf isnan copysign fmod remainder frexp ldexp modf fsum prod pi e tau inf nan".split()),
+    "string": set("ascii_letters ascii_lowercase ascii_uppercase digits hexdigits octdigits punctuation whitespace capwords".split()),
+    "collections": set("Counter defaultdict deque namedtuple OrderedDict ChainMap".split()),
+    "itertools": set("accumulate chain combinations combinations_with_replacement compress count cycle dropwhile filterfalse groupby islice pairwise permutations product repeat starmap takewhile tee zip_longest".split()),
+    "functools": {"reduce", "partial", "cmp_to_key"},
+    "decimal": {"Decimal", "Context", "InvalidOperation", "ROUND_HALF_UP", "ROUND_HALF_EVEN"},
+    "fractions": {"Fraction"},
+    "unittest": {"TestCase", "main"},
+}
+PURE_IMPORTS = set(IMPORT_MEMBERS) - {"unittest"}
+SAFE_ATTRIBUTES = set("strip lstrip rstrip lower upper casefold title capitalize swapcase replace split rsplit splitlines join startswith endswith find rfind index rindex count isalpha isalnum isdigit isdecimal isnumeric isspace islower isupper istitle isascii encode decode format format_map zfill center ljust rjust removeprefix removesuffix partition rpartition expandtabs translate maketrans append extend insert pop remove clear copy reverse sort get items keys values update setdefault add discard union intersection difference symmetric_difference issubset issuperset isdisjoint digest hexdigest group groups groupdict start end span numerator denominator real imag conjugate as_integer_ratio bit_length bit_count quantize normalize to_integral_value elements most_common subtract rotate appendleft popleft extendleft maxlen".split())
+SAFE_ATTRIBUTES |= set().union(*IMPORT_MEMBERS.values())
+SAFE_ATTRIBUTES |= set("assertEqual assertNotEqual assertTrue assertFalse assertIs assertIsNot assertIsNone assertIsNotNone assertIn assertNotIn assertRaises assertRaisesRegex assertAlmostEqual assertNotAlmostEqual assertGreater assertGreaterEqual assertLess assertLessEqual assertCountEqual assertRegex assertNotRegex subTest fail".split())
 DENIED = {"open", "exec", "eval", "compile", "input", "getattr", "setattr", "delattr", "vars", "globals", "locals",
           "type", "object", "dir", "help", "breakpoint", "memoryview", "classmethod", "staticmethod", "property"}
 
@@ -26,21 +43,23 @@ def guard(text, name, modules):
         if isinstance(node, ast.Import):
             if any(a.name not in allowed or (a.asname or "").startswith("_") for a in node.names): raise ValueError("unsupported_import")
         if isinstance(node, ast.ImportFrom):
-            if node.level or node.module not in allowed or any(a.name.startswith("_") or a.name == "*" for a in node.names): raise ValueError("unsupported_import")
+            if (node.level or node.module not in allowed
+                    or any(a.name.startswith("_") or a.name == "*" or (a.asname or "").startswith("_")
+                           or node.module in IMPORT_MEMBERS and a.name not in IMPORT_MEMBERS[node.module]
+                           for a in node.names)):
+                raise ValueError("unsupported_import")
         if isinstance(node, ast.Name) and (node.id in DENIED or node.id.startswith("__") and node.id != "__name__"):
             raise ValueError("unsupported_execution")
-        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+        if isinstance(node, ast.Attribute) and node.attr not in SAFE_ATTRIBUTES and not (tests and isinstance(node.value, ast.Name) and node.value.id == "self" and not node.attr.startswith("_")):
             raise ValueError("unsupported_introspection")
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (node.name.startswith("__") or node.decorator_list):
             raise ValueError("unsupported_function")
         if isinstance(node, ast.ClassDef) and (not tests or node.decorator_list or node.keywords
                 or len(node.bases) != 1 or ast.unparse(node.bases[0]) not in ("unittest.TestCase", "TestCase")):
             raise ValueError("unsupported_class")
-        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                if isinstance(target, ast.Attribute) and not (isinstance(target.value, ast.Name) and target.value.id == "self"):
-                    raise ValueError("unsupported_mutation")
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)) and not (
+                tests and isinstance(node.value, ast.Name) and node.value.id == "self"):
+            raise ValueError("unsupported_mutation")
     return tree
 
 
@@ -106,6 +125,11 @@ def run_isolated(root, code, timeout=60):
             os.killpg(child.pid, signal.SIGKILL)
             child.wait()
             reason = "check_timeout"
+        except BaseException:
+            if child.poll() is None:
+                os.killpg(child.pid, signal.SIGKILL)
+            child.wait()
+            raise
         out.seek(0)
         err.seek(0)
         return {"returncode": child.returncode, "stdout": out.read(MAX_ANSWER_BYTES).decode(errors="replace"),
@@ -153,6 +177,7 @@ def run_tests(files, module_names, names=None):
             path = safe_path(root, name)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(source)
+        marker = "CHECK_RESULT_" + uuid.uuid4().hex + "="
         driver = f'''import io, json, sys, unittest
 sys.path.insert(0, {str(root)!r})
 suite = unittest.TestSuite()
@@ -164,17 +189,31 @@ for module in {module_names!r}:
             suite.addTests(unittest.defaultTestLoader.loadTestsFromName(module + "." + name))
 output = io.StringIO()
 result = unittest.TextTestRunner(stream=output).run(suite)
-print("CHECK_RESULT=" + json.dumps({{"ok": result.wasSuccessful() and result.testsRun > 0 and not result.skipped,
+print({marker!r} + json.dumps({{"ok": result.wasSuccessful() and result.testsRun > 0 and not result.skipped,
       "run": result.testsRun, "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped)}}))
 '''
         result = run_isolated(root, driver)
-        lines = [line for line in result["stdout"].splitlines() if line.startswith("CHECK_RESULT=")]
+        lines = [line for line in result["stdout"].splitlines() if line.startswith(marker)]
         if result["returncode"] or len(lines) != 1: return {"ok": False, "reason": result["reason"] or "check_runner_failed"}
-        return load_json(lines[0].split("=", 1)[1])
+        return load_json(lines[0][len(marker):])
+
+
+def reclaim_check(store, job_id):
+    with store.db(write=True) as db:
+        db.execute("UPDATE jobs SET status='candidate_ready' WHERE job_id=? AND status='checking'", (job_id,))
 
 
 def check_candidate(state_dir, job_id):
+    from .worker import ownership
     store = Store(state_dir)
+    with ownership(store, "check-" + job_id) as owned:
+        if not owned: return envelope(store.job(job_id))
+        # Only a lost checker can leave this state while its ownership lock is free.
+        reclaim_check(store, job_id)
+        return _check_candidate(store, job_id)
+
+
+def _check_candidate(store, job_id):
     job = store.job(job_id)
     if job["status"] != "candidate_ready": return envelope(job)
     brief = job["brief"]

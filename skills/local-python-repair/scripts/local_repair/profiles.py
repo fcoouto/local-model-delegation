@@ -35,9 +35,55 @@ def fingerprint_artifact(root: Path, files: list[str]) -> dict[str, Any]:
     return {"digest": digest(entries), "entries": entries}
 
 
+def model_identity(profile):
+    """Bind a runtime key to its owner-trusted local LM Studio index and exact files."""
+    try:
+        path = Path(profile["runtime_catalog"])
+        if not path.is_absolute() or path != path.resolve() or not path.is_file():
+            raise ValueError("runtime_binding_unavailable")
+        stamp = path.stat()
+        if stamp.st_uid != os.getuid() or stamp.st_mode & 0o022:
+            raise ValueError("runtime_binding_unavailable")
+        catalog = load_json(path.read_text())
+        if catalog.get("conflicts") or catalog.get("errors"):
+            raise ValueError("runtime_binding_unavailable")
+        matches = [entry for entry in catalog["models"] if profile["model_id"] in
+                   [entry.get("defaultIdentifier"), entry.get("indexedModelIdentifier"),
+                    entry.get("originalIndexedModelIdentifier"), *entry.get("autoIdentifiers", [])]]
+        if len(matches) != 1: raise ValueError("runtime_binding_unavailable")
+        entry = matches[0]
+        root = Path(profile["artifact"]["root"])
+        expected = sorted(str(safe_path(root, name)) for name in profile["artifact"]["files"])
+        files = sorted(item["absPath"] for item in entry["allFiles"])
+        if entry["concreteModelDirAbsolutePath"] != str(root) or files != expected:
+            raise ValueError("runtime_binding_mismatch")
+        metadata = {"format": entry["format"], "architecture": entry["arch"], "publisher": entry["user"],
+                    "params_string": entry["params"],
+                    "quantization": {"name": entry["quant"]["name"], "bits_per_weight": entry["quant"]["bits"]}}
+        return {"endpoint": profile["endpoint"], "adapter": profile["adapter"], "model_id": profile["model_id"],
+                "runtime_catalog": str(path), "indexed_identifier": entry["indexedModelIdentifier"],
+                "artifact_root": str(root), "files": files, "metadata": metadata}
+    except (OSError, KeyError, TypeError, AttributeError):
+        raise ValueError("runtime_binding_unavailable") from None
+
+
+def verify_runtime_binding(profile, model):
+    identity = model_identity(profile)
+    if profile.get("approval", {}).get("model_identity") != identity:
+        raise ValueError("model_not_approved")
+    if (model.get("key") != profile["model_id"] or model.get("type") != "llm"
+            or any(model.get(key) != value for key, value in identity["metadata"].items())):
+        raise ValueError("runtime_binding_mismatch")
+
+
 def eligible(profile: dict[str, Any], identity: dict[str, Any], capability: str) -> bool:
     approval = profile.get("approval")
+    try:
+        binding = model_identity(profile)
+    except ValueError:
+        return False
     return bool(isinstance(approval, dict) and approval.get("owner_reference") and approval.get("timestamp")
+                and approval.get("model_identity") == binding
                 and approval.get("artifact_digest") == identity.get("digest") == profile["artifact"].get("digest")
                 and profile["artifact"].get("entries") == identity.get("entries")
                 and capability in profile.get("capabilities", []) and capability in approval.get("capabilities", [])

@@ -69,3 +69,42 @@ class Profiles(Fixture):
         manifest.write_text(json.dumps({"artifacts": [{"path": "weights.bin", "sha256": "0" * 64, "size": 29}]}))
         with self.assertRaises(ValueError): fingerprint_artifact(self.artifact, ["weights.bin", "manifest.json"])
         with self.assertRaises(ValueError): fingerprint_artifact(self.artifact, ["manifest.json"])
+
+    def test_review_approval_binds_model_identity(self):
+        profile = self.profile()
+        identity = fingerprint_artifact(self.artifact, ["weights.bin"])
+        profile["model_id"] = "a-remapped-model-key"
+        self.assertFalse(eligible(profile, identity, "bounded_python_repair"))
+
+    def test_catalog_remapping_invalidates_approval(self):
+        profile = self.profile()
+        identity = fingerprint_artifact(self.artifact, ["weights.bin"])
+        path = self.root / "runtime-catalog.json"
+        catalog = json.loads(path.read_text())
+        catalog["models"][0]["indexedModelIdentifier"] = "other/same-key"
+        path.write_text(json.dumps(catalog))
+        self.assertFalse(eligible(profile, identity, "bounded_python_repair"))
+
+    def test_catalog_must_cover_exact_approved_files(self):
+        from local_repair.profiles import model_identity
+        profile = self.profile()
+        path = self.root / "runtime-catalog.json"
+        original = json.loads(path.read_text())
+        for update in [{"concreteModelDirAbsolutePath": str(self.project)}, {"allFiles": []},
+                       {"allFiles": [{"absPath": str(self.project / "helper.py")}]}]:
+            catalog = copy.deepcopy(original)
+            catalog["models"][0].update(update)
+            path.write_text(json.dumps(catalog))
+            with self.subTest(update=update), self.assertRaises(ValueError): model_identity(profile)
+
+    def test_catalog_ambiguity_and_permissions_fail_closed(self):
+        from local_repair.profiles import model_identity
+        profile = self.profile()
+        path = self.root / "runtime-catalog.json"
+        catalog = json.loads(path.read_text())
+        path.chmod(0o666)
+        with self.assertRaises(ValueError): model_identity(profile)
+        path.chmod(0o600)
+        catalog["models"] *= 2
+        path.write_text(json.dumps(catalog))
+        with self.assertRaises(ValueError): model_identity(profile)

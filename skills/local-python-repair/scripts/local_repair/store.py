@@ -130,7 +130,8 @@ class Store:
                 else:
                     generation, state = row["generation"], row["state"]
                     data = load_json(row["data"])
-                    if data["artifact_digest"] != profile["artifact"]["digest"]:
+                    if (data["artifact_digest"] != profile["artifact"]["digest"]
+                            or data["profile"]["approval"] != profile["approval"]):
                         state = "closed"
                         db.execute("UPDATE instances SET state='closed' WHERE instance_key=?", (key,))
                 occupied = db.execute("SELECT count(*) FROM attempts WHERE instance_key=? AND state IN ('reserved','submitting','streaming','uncertain')", (key,)).fetchone()[0]
