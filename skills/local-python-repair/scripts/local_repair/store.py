@@ -16,7 +16,9 @@ def private_dir(path: Path) -> Path:
     path = Path(path)
     if path.is_symlink():
         raise ValueError("unsafe_state")
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not path.parent.exists():
+        private_dir(path.parent)
+    path.mkdir(mode=0o700, exist_ok=True)
     s = path.stat()
     if s.st_uid != os.getuid() or s.st_mode & 0o077 or not stat.S_ISDIR(s.st_mode):
         raise ValueError("unsafe_state")
