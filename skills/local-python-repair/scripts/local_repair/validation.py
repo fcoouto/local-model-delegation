@@ -96,27 +96,28 @@ def parse_candidate(text, brief):
 
 def source_matches(brief):
     try:
-        return all(text_hash(safe_path(Path(brief["source_root"]), name).read_text()) == item["sha256"] for name, item in brief["files"].items())
+        return (all(text_hash(safe_path(Path(brief["source_root"]), name).read_text()) == item["sha256"] for name, item in brief["files"].items())
+                and all(not safe_path(Path(brief["source_root"]), name).exists() for name in brief["editable_paths"] if name not in brief["files"]))
     except (OSError, ValueError): return False
 
 
-def sandbox_profile(root):
+def sandbox_profile(root, executable_roots=()):
     python_root = str(Path(sys.base_prefix).resolve())
-    read_roots = [str(root.resolve()), python_root, "/usr", "/System", "/Library/Apple"]
+    read_roots = [str(root.resolve()), python_root, "/usr", "/System", "/Library/Apple", *executable_roots]
     return ('(version 1)(deny default)(allow process*)(allow sysctl-read)(allow mach-lookup)(allow file-read-metadata)'
             + ''.join('(allow file-read* (subpath ' + json.dumps(p) + '))' for p in read_roots)
             + '(allow file-read* (literal "/") (literal "/dev/null") (literal "/dev/urandom") (literal "/private/etc/localtime"))'
             + '(allow file-write* (subpath ' + json.dumps(str(root.resolve())) + ') (literal "/dev/null"))(deny network*)')
 
 
-def run_isolated(root, code, timeout=60):
+def run_isolated(root, code, timeout=60, executable_roots=()):
     sandbox = shutil.which("sandbox-exec")
     if sys.platform != "darwin" or not sandbox: raise ValueError("isolation_unsupported")
     root = Path(root).resolve()
     driver = ('import resource\nresource.setrlimit(resource.RLIMIT_CPU,(10,10))\n'
               'resource.setrlimit(resource.RLIMIT_FSIZE,(1048576,1048576))\n' + code)
     with tempfile.TemporaryFile(dir=root) as out, tempfile.TemporaryFile(dir=root) as err:
-        child = subprocess.Popen([sandbox, "-p", sandbox_profile(root), str(Path(sys.executable).resolve()), "-I", "-B", "-c", driver],
+        child = subprocess.Popen([sandbox, "-p", sandbox_profile(root, executable_roots), str(Path(sys.executable).resolve()), "-I", "-B", "-c", driver],
                                  cwd=root, env={"PATH": "/usr/bin:/bin", "HOME": str(root), "TMPDIR": str(root)},
                                  stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True, close_fds=True)
         reason = None
@@ -199,6 +200,7 @@ print({marker!r} + json.dumps({{"ok": result.wasSuccessful() and result.testsRun
 
 
 def reclaim_check(store, job_id):
+    if store.job(job_id)["brief"]["capability"] != "bounded_python_repair": return
     with store.db(write=True) as db:
         db.execute("UPDATE jobs SET status='candidate_ready' WHERE job_id=? AND status='checking'", (job_id,))
 
@@ -206,6 +208,8 @@ def reclaim_check(store, job_id):
 def check_candidate(state_dir, job_id):
     from .worker import ownership
     store = Store(state_dir)
+    if store.job(job_id)["brief"]["capability"] != "bounded_python_repair":
+        return prepare_verification(state_dir, job_id)
     with ownership(store, "check-" + job_id) as owned:
         if not owned: return envelope(store.job(job_id))
         # Only a lost checker can leave this state while its ownership lock is free.
@@ -278,3 +282,138 @@ def _check_candidate(store, job_id):
             with store.db(write=True) as db: db.execute("UPDATE jobs SET status='failed',reason='fallback_checks_failed' WHERE job_id=? AND status='checking'", (job_id,))
         else: store.select_fallback(job_id, "candidate_checks_failed")
     return envelope(store.job(job_id))
+
+
+def parse_proposal(text, brief):
+    """Structural checks only. Semantic acceptance belongs to the native coordinator."""
+    if len(text.encode()) > MAX_ANSWER_BYTES: raise ValueError('oversized_answer')
+    value = load_json(text)
+    summary = brief['capability'] == 'file_summary'
+    expected = {'summary', 'claims' if summary else 'files'}
+    if not isinstance(value, dict) or set(value) != expected or not isinstance(value['summary'], str):
+        raise ValueError('invalid_candidate')
+    if summary:
+        if not isinstance(value['claims'], list) or not value['claims']: raise ValueError('invalid_candidate')
+        for claim in value['claims']:
+            if not isinstance(claim, dict) or set(claim) != {'text','path','sha256','start_line','end_line'}:
+                raise ValueError('invalid_citation')
+            item = brief['files'].get(claim['path'])
+            if (not item or claim['sha256'] != item['sha256'] or not isinstance(claim['text'], str)
+                    or not claim['text'] or type(claim['start_line']) is not int or type(claim['end_line']) is not int
+                    or not 1 <= claim['start_line'] <= claim['end_line'] <= len(item['content'].splitlines())):
+                raise ValueError('invalid_citation')
+    else:
+        files = value['files']
+        if not isinstance(files, dict) or not files: raise ValueError('invalid_candidate')
+        if not files.keys() <= set(brief['editable_paths']) or files.keys() & set(brief['acceptance']['protected_paths']):
+            raise ValueError('candidate_path_not_allowed')
+        for name, content in files.items():
+            safe_path(Path(brief['source_root']), name)
+            if not isinstance(content, str) or '\0' in content: raise ValueError('invalid_candidate')
+    return value
+
+
+def _proposal(store, job):
+    path = Path(job['result_path'])
+    if path.is_symlink() or not path.resolve().is_relative_to(store.root / 'jobs' / job['job_id']): raise ValueError('unsafe_result')
+    artifact = load_json(path.read_text())
+    if text_hash(artifact['text']) != artifact['sha256']: raise ValueError('candidate_hash_mismatch')
+    return parse_proposal(artifact['text'], job['brief']), artifact['sha256']
+
+
+def _verification_binding(job, candidate_hash):
+    from .contracts import digest
+    return {'job_id': job['job_id'], 'attempt_id': job['attempt_id'], 'native_task_id': job['native_task_id'],
+            'candidate_hash': candidate_hash, 'source_hash': digest(job['brief']['files']),
+            'acceptance_hash': digest(job['brief']['acceptance'])}
+
+
+def prepare_verification(state_dir, job_id):
+    from .store import private_dir
+    from .worker import ownership
+    store = Store(state_dir)
+    with ownership(store, 'check-' + job_id) as owned:
+        if not owned: raise ValueError('verification_busy')
+        job = store.job(job_id)
+        if job['status'] not in ('candidate_ready', 'checking'): raise ValueError('candidate_not_ready')
+        validate_brief(job['brief'])
+        if job['brief']['capability'] == 'bounded_python_repair': raise ValueError('use_python_checker')
+        authorize_job(store, job)
+        if not source_matches(job['brief']): raise ValueError('source_changed')
+        proposal, candidate_hash = _proposal(store, job)
+        if job['brief']['capability'] != 'file_summary' and not _qualified_isolation():
+            raise ValueError('verification_unsupported')
+        binding = _verification_binding(job, candidate_hash)
+        path = store.root / 'jobs' / job_id / 'verification.json'
+        if path.exists():
+            saved = load_json(path.read_text())
+            if all(saved.get(k) == v for k, v in binding.items()):
+                with store.db(write=True) as db: db.execute("UPDATE jobs SET status='checking' WHERE job_id=?", (job_id,))
+                return saved
+        stage = private_dir(store.root / 'jobs' / job_id / ('stage-' + uuid.uuid4().hex))
+        files = {n: item['content'] for n, item in job['brief']['files'].items()}
+        files.update(proposal.get('files', {}))
+        for name, content in files.items():
+            target = safe_path(stage, name)
+            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            target.write_text(content)
+            target.chmod(0o600)
+        session = {**binding, 'session_token': uuid.uuid4().hex + uuid.uuid4().hex,
+                   'stage': str(stage), 'acceptance': job['brief']['acceptance'], 'claims': proposal.get('claims', [])}
+        atomic_json(path, session)
+        with store.db(write=True) as db:
+            db.execute("UPDATE jobs SET status='checking' WHERE job_id=? AND status IN ('candidate_ready','checking')", (job_id,))
+        return session
+
+
+def record_verification(state_dir, job_id, receipt):
+    from .worker import ownership
+    store = Store(state_dir)
+    with ownership(store, 'check-' + job_id) as owned:
+        if not owned: raise ValueError('verification_busy')
+        job = store.job(job_id)
+        if job['status'] not in ('checking', 'accepted'): raise ValueError('candidate_not_ready')
+        session = load_json((store.root / 'jobs' / job_id / 'verification.json').read_text())
+        proposal, candidate_hash = _proposal(store, job)
+        binding = _verification_binding(job, candidate_hash)
+        required = set(binding) | {'session_token', 'criteria', 'checks', 'claims'}
+        if (not isinstance(receipt, dict) or set(receipt) != required
+                or any(session.get(k) != v or receipt.get(k) != v for k, v in binding.items())
+                or receipt['session_token'] != session['session_token']): raise ValueError('verification_mismatch')
+        if job['status'] == 'accepted':
+            if receipt != load_json((store.root / 'jobs' / job_id / 'native-checks.json').read_text()):
+                raise ValueError('verification_mismatch')
+            return envelope(job)
+        authorize_job(store, job)
+        if not source_matches(job['brief']): raise ValueError('source_changed')
+        if job['attempt_id'] and not job['native_task_id']:
+            attempt = store.attempt(job['attempt_id'])
+            if attempt['state'] != 'complete' or attempt['generation'] != store.instance(attempt['instance_key'])['generation']:
+                raise ValueError('attempt_fenced')
+        checks = {c['id'] for c in job['brief']['acceptance']['checks']}
+        if (not isinstance(receipt['checks'], dict) or set(receipt['checks']) != checks
+                or not isinstance(receipt['criteria'], list) or len(receipt['criteria']) != len(job['brief']['acceptance']['criteria'])
+                or not isinstance(receipt['claims'], list) or len(receipt['claims']) != len(proposal.get('claims', []))):
+            raise ValueError('incomplete_verification')
+        passed = all(v is True for v in [*receipt['criteria'], *receipt['checks'].values(), *receipt['claims']])
+        atomic_json(store.root / 'jobs' / job_id / 'native-checks.json', receipt)
+        with store.db(write=True) as db:
+            state = 'accepted' if passed else ('failed' if job['native_task_id'] else 'fallback_required')
+            db.execute("UPDATE jobs SET status=?,reason=? WHERE job_id=?", (state, None if passed else 'native_verification_failed', job_id))
+        return envelope(store.job(job_id))
+
+
+def run_native_checks(state_dir, job_id):
+    """Run only predeclared native commands, inside the qualified sandbox, with no credentials."""
+    session = prepare_verification(state_dir, job_id)
+    root = Path(session['stage'])
+    outcomes = {}
+    for check in session['acceptance']['checks']:
+        executable = Path(check['argv'][0])
+        if not executable.is_file(): raise ValueError('verification_unsupported')
+        # The sandbox denies the private receipt directory, even to candidate subprocesses.
+        cwd = root if check['cwd'] == '.' else safe_path(root, check['cwd'])
+        code = 'import os\nos.chdir(' + repr(str(cwd)) + ')\nos.execv(' + repr(str(executable)) + ',' + repr(check['argv']) + ')\n'
+        result = run_isolated(root, code, check['timeout_seconds'], (str(executable.resolve().parent),))
+        outcomes[check['id']] = result['returncode'] == 0 and result['reason'] is None
+    return {'job_id': job_id, 'checks': outcomes}

@@ -82,6 +82,10 @@ def main(argv=None):
     p.add_argument("action", choices=["inspect", "record-approval"])
     p.add_argument("--file", type=Path, required=True)
     p.add_argument("--owner-reference")
+    p = commands.add_parser("verify")
+    p.add_argument("action", choices=["prepare", "checks", "record"])
+    p.add_argument("--job", required=True)
+    p.add_argument("--receipt", type=Path)
     args = parser.parse_args(argv)
     try:
         if args.command == "worker": return run_attempt(args.state_dir, args.identifier)
@@ -115,6 +119,11 @@ def main(argv=None):
             elif args.command == "check":
                 from .validation import check_candidate
                 result = check_candidate(args.state_dir, args.job)
+            elif args.command == "verify":
+                from .validation import prepare_verification, record_verification, run_native_checks
+                if args.action == "prepare": result = prepare_verification(args.state_dir, args.job)
+                elif args.action == "checks": result = run_native_checks(args.state_dir, args.job)
+                else: result = record_verification(args.state_dir, args.job, read_input(args.receipt))
             elif args.command == "fallback":
                 if args.action == "claim": result = store.claim_fallback(args.job)
                 elif args.action == "attach":

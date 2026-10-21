@@ -119,7 +119,7 @@ def validate_profile(p, capability):
     try:
         settings, fallback = p["request_settings"], p["fallback"]
         if (p.get("schema_version") not in (1, 2) or not re.fullmatch(r"[A-Za-z0-9_-]+", p["profile_id"])
-                or p["adapter"] != "lmstudio_v1" or capability != CAPABILITY
+                or p["adapter"] != "lmstudio_v1" or capability not in (CAPABILITY, "test_writing", "code_change", "file_summary")
                 or not positive(p["stale_tolerance_seconds"]) or not isinstance(p["model_id"], str) or not p["model_id"]
                 or set(fallback) != {"model", "reasoning_effort"} or not all(isinstance(v, str) and v for v in fallback.values())
                 or set(settings) != {"reasoning", "temperature", "max_output_tokens"}
@@ -194,7 +194,19 @@ def authorize_job(store, job):
     profile = job["profile"]
     current = read_profile_by_id(store.root, profile["profile_id"], job["brief"]["capability"])
     if current["approval"] != profile["approval"]: raise ValueError("approval_changed")
+    if job["brief"].get("schema_version") == 2 and not scope_matches(current, job["brief"]):
+        raise ValueError("outside_approved_scope")
     return current
+
+
+def scope_matches(profile, brief):
+    from .contracts import canonical
+    requirements = brief["task_requirements"]
+    size = len(canonical({"contract": brief["behavior_contract"], "files": brief["files"], "editable_paths": brief["editable_paths"]}).encode())
+    return any(isinstance(scope, dict) and scope.get("capability") == brief["capability"]
+               and all(scope.get(k) == requirements[k] for k in ("language", "complexity", "context_bucket"))
+               and type(scope.get("max_input_bytes")) is int and size <= scope["max_input_bytes"]
+               for scope in profile.get("scope", []))
 
 
 def _quiescent(db):
