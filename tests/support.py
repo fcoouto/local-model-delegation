@@ -4,6 +4,10 @@ import hashlib
 import json
 import tempfile
 import unittest
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from . import SCRIPTS
 from pathlib import Path
 
 BUGGY = 'def normalize(value):\n    return value.lstrip()\n'
@@ -88,3 +92,72 @@ class Fixture(unittest.TestCase):
         path.write_text(json.dumps(self.config(profile, enabled)))
         path.chmod(0o600)
         return path
+
+
+class FakeRuntime:
+    """Actual loopback HTTP, deterministic lifecycle and stream faults."""
+    def __init__(self, answer=None, delay=0, incomplete=False, mismatch=False):
+        self.answer = answer or json.dumps({"files": {"helper.py": FIXED, "test_helper.py": SUPPLIED + ADDED}, "summary": "strip both ends"})
+        self.delay, self.incomplete, self.mismatch = delay, incomplete, mismatch
+        self.calls, self.requests = [], []
+        self.loaded, self.parallel = True, 1
+        self.drop_load_ack = self.drop_unload_ack = False
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+
+            def do_GET(self):
+                outer.calls.append(("GET", self.path))
+                body = {"models": [{"key": "fictional-model", "type": "llm", "loaded_instances":
+                    ([{"id": "fixture-instance", "config": {"parallel": outer.parallel, "context_length": 8192}}] if outer.loaded else [])}]}
+                encoded = json.dumps(body).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
+            def do_POST(self):
+                outer.calls.append(("POST", self.path))
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                outer.requests.append(body)
+                if self.path.endswith("/load") or self.path.endswith("/unload"):
+                    loading = self.path.endswith("/load")
+                    outer.loaded = loading
+                    if (loading and outer.drop_load_ack) or (not loading and outer.drop_unload_ack):
+                        if loading: outer.drop_load_ack = False
+                        else: outer.drop_unload_ack = False
+                        self.connection.close()
+                        return
+                    encoded = b'{}'
+                    self.send_response(200)
+                    self.send_header("Content-Length", "2")
+                    self.end_headers()
+                    self.wfile.write(encoded)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                answer = "PROBE_OK" if body.get("input") == "Return exactly PROBE_OK" else outer.answer
+                events = [("chat.start", {"model_instance_id": "fixture-instance"}),
+                          ("reasoning.start", {}), ("reasoning.delta", {"content": "working"})]
+                if outer.delay: time.sleep(outer.delay)
+                events += [("reasoning.end", {}), ("message.start", {}), ("message.delta", {"content": answer}), ("message.end", {})]
+                if not outer.incomplete:
+                    events.append(("chat.end", {"result": {"output": [{"type": "message", "content": answer + ("wrong" if outer.mismatch else "")}]}}))
+                try:
+                    for event, data in events:
+                        self.wfile.write(f"event: {event}\ndata: {json.dumps({'type': event, **data})}\n\n".encode())
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError): pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.endpoint = f"http://127.0.0.1:{self.server.server_port}"
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": .02}, daemon=True)
+        self.thread.start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
