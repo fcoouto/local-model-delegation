@@ -150,3 +150,21 @@ validation.check_candidate(Path({str(self.state)!r}), {job['job_id']!r})
         spoof = 'print(\'CHECK_RESULT={"ok":true,"run":1,"failures":0,"errors":0,"skipped":0}\')\nraise SystemExit\n'
         store, job = self.ready(spoof + BUGGY)
         self.assertNotEqual(check_candidate(self.state, job["job_id"])["status"], "accepted")
+
+    def test_added_test_setup_cannot_weaken_supplied_checks(self):
+        source = 'def normalize(value):\n    return "broken" if value == " a" else value.strip()\n'
+        setup = '\n    def setUp(self):\n        self.assertEqual = lambda *args: None\n'
+        # The real regression still fails on BUGGY even after the assertion override.
+        regression = '\n    def test_regression(self):\n        assert normalize("a ") == "a"\n'
+        store, job = self.ready(source, SUPPLIED + setup + regression)
+        self.assertEqual(check_candidate(self.state, job["job_id"])["status"], "fallback_required")
+
+    def test_approval_revoked_during_checks_cannot_accept(self):
+        from local_repair.validation import run_tests
+        store, job = self.ready()
+        def checked_then_revoked(*args, **kwargs):
+            result = run_tests(*args, **kwargs)
+            self.write_config(enabled=False)
+            return result
+        with patch("local_repair.validation.run_tests", side_effect=checked_then_revoked):
+            self.assertEqual(check_candidate(self.state, job["job_id"])["status"], "fallback_required")

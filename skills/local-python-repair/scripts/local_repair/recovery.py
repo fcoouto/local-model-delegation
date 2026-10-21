@@ -2,7 +2,7 @@
 import threading
 import time
 import uuid
-from .contracts import canonical, digest
+from .contracts import canonical, digest, load_json
 from .lmstudio import ActivityWatch, Runtime, final_text, select_loaded
 from .profiles import read_profile, verify_runtime_binding
 from .store import Store, atomic_json
@@ -12,7 +12,6 @@ from .worker import ownership, launch
 def update_instance(store, key, fields, state="recovering"):
     with store.db(write=True) as db:
         row = db.execute("SELECT data FROM instances WHERE instance_key=?", (key,)).fetchone()
-        from .contracts import load_json
         data = {**load_json(row["data"]), **fields}
         db.execute("UPDATE instances SET state=?,data=? WHERE instance_key=?", (state, canonical(data), key))
 
@@ -30,7 +29,7 @@ def request_recovery(state_dir, instance_key):
     if (current["state"] == "ready" or current["data"].get("recovery_phase") == "retired"
             or current["data"].get("recovery_blocked")
             or current["data"].get("next_recovery_at", 0) > time.time()): return
-    with ownership(store, "recovery-" + instance_key) as available:
+    with ownership(store, "recovery-" + digest([current["data"]["endpoint"], current["data"]["model_id"]])) as available:
         if available:
             launch(state_dir, "recover", instance_key)
 
@@ -57,14 +56,16 @@ def probe(runtime, profile, instance_id):
                 runtime.abort()
     thread = threading.Thread(target=watchdog, daemon=True)
     thread.start()
-    answer = []
+    answer, started = [], False
     try:
         body = {"model": instance_id, "input": "Return exactly PROBE_OK", "stream": True, "store": False,
                 **profile["request_settings"], "max_output_tokens": 512}
         for event, data in runtime.stream(body):
             if stale.is_set(): raise ValueError("probe_stale")
-            if event == "chat.start" and data.get("model_instance_id") != instance_id:
-                raise ValueError("probe_instance_changed")
+            if event == "chat.start":
+                if started or data.get("model_instance_id") != instance_id:
+                    raise ValueError("probe_instance_changed")
+                started = True
             if event == "error" or event.startswith(("tool_call.", "model_load.")):
                 raise ValueError("probe_error")
             watch.observe(event, data, time.monotonic())
@@ -72,7 +73,7 @@ def probe(runtime, profile, instance_id):
                 answer.append(data.get("content", ""))
                 if sum(map(len, answer)) > 1024: raise ValueError("invalid_probe")
             if event == "chat.end":
-                if "".join(answer) != "PROBE_OK" or final_text(data.get("result")) != "PROBE_OK":
+                if not started or "".join(answer) != "PROBE_OK" or final_text(data.get("result")) != "PROBE_OK":
                     raise ValueError("invalid_probe")
                 watch.done = True
                 return
@@ -91,10 +92,18 @@ def recover_once(store, key, runtime):
     if approved["approval"] != profile["approval"] or approved["model_id"] != profile["model_id"]:
         raise ValueError("approval_changed")
     with store.db() as db:
-        healthy = db.execute("SELECT count(*) FROM attempts WHERE instance_key=? AND state IN ('reserved','submitting','streaming')", (key,)).fetchone()[0]
+        peers = [load_json(row["data"]) for row in db.execute(
+            "SELECT DISTINCT i.data FROM instances i JOIN attempts a USING(instance_key) WHERE a.state IN ('reserved','submitting','streaming')")]
+    healthy = any(p["endpoint"] == profile["endpoint"] and p["model_id"] == profile["model_id"] for p in peers)
     if healthy: return False
     phase = instance["data"].get("recovery_phase", "unload")
     loaded = current_loaded(runtime, profile)
+    if phase == "load" and loaded:
+        loaded_key = digest([loaded["endpoint"], loaded["model_id"], loaded["instance_id"]])
+        with store.db() as db:
+            tracked = db.execute("SELECT 1 FROM instances WHERE instance_key=?", (loaded_key,)).fetchone()
+        # A different record may already own an uncertain probe on this replacement.
+        if loaded_key != key and tracked: raise ValueError("unaccounted_instances")
     if phase in ("probe_submitting", "probe_uncertain"):
         update_instance(store, key, {"recovery_phase": "unload"})
         phase = "unload"
@@ -118,6 +127,8 @@ def recover_once(store, key, runtime):
         update_instance(store, key, {"recovery_phase": "probe", "loaded": loaded})
     else:
         if loaded is None: raise ValueError("probe_instance_lost")
+        if loaded["instance_id"] != instance["data"]["loaded"]["instance_id"]:
+            raise ValueError("unaccounted_instances")
     probe_id = uuid.uuid4().hex
     receipt = store.root / "probes" / key / (probe_id + ".json")
     atomic_json(receipt, {"generation": instance["generation"], "state": "submitting", "time": time.time()})
@@ -128,7 +139,8 @@ def recover_once(store, key, runtime):
         update_instance(store, key, {"recovery_phase": "probe_uncertain"}, "closed")
         atomic_json(receipt, {"generation": instance["generation"], "state": "uncertain", "time": time.time()})
         raise
-    read_profile(store.root / "profiles.json", "bounded_python_repair")
+    approved = read_profile(store.root / "profiles.json", "bounded_python_repair")
+    if approved["approval"] != profile["approval"]: raise ValueError("approval_changed")
     after = current_loaded(runtime, profile)
     if after is None or after["instance_id"] != loaded["instance_id"]:
         raise ValueError("probe_instance_changed")
@@ -148,7 +160,9 @@ def recover_once(store, key, runtime):
 
 def recover_instance(state_dir, instance_key):
     store = Store(state_dir)
-    with ownership(store, "recovery-" + instance_key) as owned:
+    instance = store.instance(instance_key)
+    # A reload can change the instance ID while another caller discovers it.
+    with ownership(store, "recovery-" + digest([instance["data"]["endpoint"], instance["data"]["model_id"]])) as owned:
         if not owned: return 0
         delay = 1
         while True:

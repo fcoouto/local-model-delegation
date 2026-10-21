@@ -152,11 +152,12 @@ class Recovery(Fixture):
         self.assertNotEqual(store.instance(key)["state"], "ready")
 
     def test_recovery_restart_respects_owner_backoff_and_permanent_error(self):
+        from local_repair.contracts import digest
         from local_repair.recovery import request_recovery, update_instance
         from local_repair.worker import ownership
         server, store, job, key = self.prepare()
         with patch("local_repair.recovery.launch") as launch:
-            with ownership(store, "recovery-" + key):
+            with ownership(store, "recovery-" + digest([server.endpoint, "fictional-model"])):
                 request_recovery(self.state, key)
             launch.assert_not_called()
             update_instance(store, key, {"next_recovery_at": time.time() + 30}, "closed")
@@ -181,3 +182,104 @@ class Recovery(Fixture):
             self.assertEqual(store.instance(key)["data"]["loaded"]["instance_id"], server.instance_id)
             close_instance(store, key)
         self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 2)
+
+    def test_probe_requires_one_matching_start(self):
+        from local_repair.recovery import probe
+        server, store, job, key = self.prepare()
+        runtime = Runtime(server.endpoint)
+        stream = runtime.stream
+        for duplicate in (False, True):
+            def malformed(body):
+                for event, data in stream(body):
+                    if event != "chat.start":
+                        yield event, data
+                    elif duplicate:
+                        yield event, data
+                        yield event, data
+            with self.subTest(duplicate=duplicate), patch.object(runtime, "stream", malformed):
+                with self.assertRaises(ValueError): probe(runtime, self.profile_for(server), server.instance_id)
+
+    def test_resumed_probe_rejects_unverified_replacement(self):
+        from local_repair.recovery import update_instance
+        server, store, job, key = self.prepare()
+        update_instance(store, key, {"recovery_phase": "probe", "loaded": {
+            **self.loaded(), "endpoint": server.endpoint}})
+        server.instance_id = "unverified-replacement"
+        with self.assertRaisesRegex(ValueError, "unaccounted_instances"):
+            recover_once(store, key, Runtime(server.endpoint))
+        self.assertFalse(any(method == "POST" for method, _ in server.calls))
+        self.assertEqual(store.attempt(job["attempt_id"])["state"], "uncertain")
+
+    def test_changed_approval_during_probe_cannot_reopen(self):
+        from local_repair.recovery import probe
+        server, store, job, key = self.prepare()
+        def probe_then_change(runtime, profile, instance_id):
+            probe(runtime, profile, instance_id)
+            replacement = self.profile_for(server)
+            replacement["approval"]["owner_reference"] = "fictional-new-confirmation"
+            self.write_config(replacement)
+        with patch("local_repair.recovery.probe", side_effect=probe_then_change):
+            with self.assertRaisesRegex(ValueError, "approval_changed"):
+                recover_once(store, key, Runtime(server.endpoint))
+        self.assertNotEqual(store.instance(key)["state"], "ready")
+        self.assertEqual(store.attempt(job["attempt_id"])["state"], "uncertain")
+
+    def test_recovery_defers_to_healthy_replacement_peer(self):
+        from local_repair.recovery import update_instance
+        server, store, job, key = self.prepare()
+        update_instance(store, key, {"recovery_phase": "load"})
+        server.instance_id = "replacement-with-healthy-work"
+        profile = self.profile_for(server)
+        peer = store.reserve(self.brief("healthy-replacement"), profile, {
+            **self.loaded(), "endpoint": server.endpoint, "instance_id": server.instance_id})
+        self.assertEqual(peer["status"], "reserved")
+        self.assertFalse(recover_once(store, key, Runtime(server.endpoint)))
+        self.assertFalse(any(method == "POST" for method, _ in server.calls))
+        self.assertEqual(store.attempt(peer["attempt_id"])["state"], "reserved")
+
+    def test_old_load_phase_cannot_probe_another_uncertain_instance(self):
+        from local_repair.contracts import digest
+        from local_repair.recovery import update_instance
+        server, store, job, key = self.prepare()
+        update_instance(store, key, {"recovery_phase": "load"})
+        server.instance_id = "replacement-with-uncertain-probe"
+        profile = self.profile_for(server)
+        loaded = {**self.loaded(), "endpoint": server.endpoint,
+                  "instance_id": server.instance_id, "binding_verified": False}
+        store.reserve(self.brief("replacement"), profile, loaded)
+        replacement = digest([server.endpoint, profile["model_id"], server.instance_id])
+        update_instance(store, replacement, {"recovery_phase": "probe_uncertain", "loaded": loaded}, "closed")
+        with self.assertRaisesRegex(ValueError, "unaccounted_instances"):
+            recover_once(store, key, Runtime(server.endpoint))
+        self.assertFalse(any(method == "POST" for method, _ in server.calls))
+        self.assertEqual(store.attempt(job["attempt_id"])["state"], "uncertain")
+
+    def test_replacement_discovery_cannot_start_competing_recovery(self):
+        from local_repair.contracts import digest
+        from local_repair.lmstudio import select_loaded
+        from local_repair.recovery import probe
+        server, store, job, key = self.prepare()
+        server.change_instance_on_load = True
+        entered, release = threading.Event(), threading.Event()
+        def paused_probe(runtime, profile, instance_id):
+            if instance_id == "fixture-instance-1":
+                entered.set()
+                if not release.wait(5): raise ValueError("test_probe_release_timeout")
+            return probe(runtime, profile, instance_id)
+        with patch("local_repair.recovery.probe", side_effect=paused_probe), patch("local_repair.recovery.request_recovery"):
+            owner = threading.Thread(target=recover_instance, args=(self.state, key))
+            owner.start()
+            try:
+                self.assertTrue(entered.wait(3))
+                profile = self.profile_for(server)
+                loaded = select_loaded(Runtime(server.endpoint).list_models(), profile)
+                other = store.reserve(self.brief("competing-project"), profile, loaded)
+                self.assertEqual(other["reason"], "instance_closed")
+                replacement = digest([server.endpoint, profile["model_id"], loaded["instance_id"]])
+                recover_instance(self.state, replacement)
+                self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 1)
+            finally:
+                release.set()
+                owner.join(5)
+            self.assertFalse(owner.is_alive())
+            self.assertEqual(store.instance(replacement)["state"], "ready")

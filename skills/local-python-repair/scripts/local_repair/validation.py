@@ -242,7 +242,10 @@ def _check_candidate(store, job_id):
         changed_source = {n: t for n, t in changed.items() if not Path(n).name.startswith("test_")}
         receipt["baseline"] = run_tests({**source_only, **brief["independent_tests"]}, oracle_modules)
         receipt["independent"] = run_tests({**changed_source, **brief["independent_tests"]}, oracle_modules)
-        receipt["submitted"] = run_tests(changed, [Path(n).with_suffix("").as_posix().replace("/", ".") for n in brief["supplied_tests"]])
+        test_modules = [Path(n).with_suffix("").as_posix().replace("/", ".") for n in brief["supplied_tests"]]
+        # Unchanged methods can still be weakened by added setup code or global rebinding.
+        receipt["protected"] = run_tests({**changed_source, **{n: original[n] for n in brief["supplied_tests"]}}, test_modules)
+        receipt["submitted"] = run_tests(changed, test_modules)
         effective = False
         added_count = 0
         for name in brief["supplied_tests"]:
@@ -252,9 +255,12 @@ def _check_candidate(store, job_id):
                 result = run_tests({**original, name: changed[name]}, [Path(name).stem], added)
                 effective |= result.get("failures", 0) > 0 and result.get("errors", 0) == 0
         if (receipt["baseline"].get("failures", 0) < 1 or receipt["baseline"].get("errors", 0)
-                or not receipt["independent"].get("ok") or not receipt["submitted"].get("ok") or not added_count or not effective):
+                or not receipt["independent"].get("ok") or not receipt["protected"].get("ok")
+                or not receipt["submitted"].get("ok") or not added_count or not effective):
             raise ValueError("independent_checks_failed")
         if not source_matches(brief): raise ValueError("source_changed")
+        current = read_profile(store.root / "profiles.json", brief["capability"])
+        if current["approval"] != job["profile"]["approval"]: raise ValueError("approval_changed")
         if job["attempt_id"] and not job["native_task_id"]:
             attempt = store.attempt(job["attempt_id"])
             if attempt["state"] != "complete" or attempt["generation"] != store.instance(attempt["instance_key"])["generation"]:
