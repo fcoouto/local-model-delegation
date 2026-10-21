@@ -1,57 +1,67 @@
-# Codex Local Repairs
+# Local Model Delegation
 
-Personal, HTTP-only delegation for bounded pure-Python repairs. Routing is disabled by default. No model is approved or skill installed by this repository.
+Delegate bounded text and code work to assessed local models, with native verification and fallback. The shared core is host-agnostic; this first plugin targets **Codex on macOS with LM Studio over HTTP**. Claude integration is future work.
 
-Requires Python 3.11+ and macOS for isolated candidate execution. No third-party packages.
+**Development preview. Routing stays disabled by default.** Cloning this repository installs nothing, approves no model and changes no provider or authentication settings. MIT licensed.
 
-Run offline checks from this source root:
+## What it does
+
+- Assesses package-owned synthetic tasks before recommending a narrowly scoped model approval.
+- Supports Python repairs, test writing, small code changes and file summaries. Contracts support other languages; bundled assessment coverage currently includes simple Python, JavaScript and text cases.
+- Shares a durable queue and measured per-instance slots across projects. Healthy work can finish while other tasks wait.
+- Detects silence, a defined repeated-reasoning pattern and exhausted output budgets. It has no total inference deadline.
+- Stages proposals for protected Python checks or trusted native verification. The helper never applies project files.
+- Keeps exact native fallback settings and durable dispatch claims. Ambiguous dispatch is reconciled, never blindly repeated.
+- Exports optional read-only task visibility, enabled by default independently of routing. No viewer is required.
+
+The objective is lower native usage without lower quality. **No net subscription saving is qualified yet.** Token differences are labelled proxies and include coordination, verification and fallback overhead.
+
+## Clone and inspect
+
+Requires Python 3.11+, macOS and a qualified `sandbox-exec` boundary for executable candidates. Source runtime uses only the standard library.
 
 ```sh
-python3.11 -B -m unittest discover -s tests -t . -v
-```
-
-## Commands and installation boundary
-
-The source skill is `skills/local-python-repair/`. Run it directly without installation:
-
-```sh
+git clone https://github.com/fcoouto/local-model-delegation.git
+cd local-model-delegation
 python3.11 -B skills/local-python-repair/scripts/repair.py --help
-python3.11 -B skills/local-python-repair/scripts/repair.py --state-dir /absolute/private/state submit --brief /absolute/private/brief.json
-python3.11 -B skills/local-python-repair/scripts/repair.py --state-dir /absolute/private/state lookup --chat origin-id --task-key stable-key
+python3.11 -B skills/local-python-repair/scripts/repair.py doctor
 ```
 
-Read the skill and its brief contract before use. With missing or disabled configuration, submission returns `not_eligible` without creating state, connecting to a model or starting a process. The proposed personal state home is `~/.local/state/codex-local-repairs`; no live configuration is shipped. Its future `profiles.json` starts as:
+Doctor is read-only and does not contact LM Studio unless `--inspect-runtime` is explicitly requested with a configured loopback endpoint. It does not install dependencies.
 
-```json
-{"schema_version":1,"routing_enabled":false,"preferred_by_capability":{},"profiles":{}}
+The root [plugin manifest](plugin.json) packages the [setup skill](skills/setup/SKILL.md), [delegation workflow](skills/local-delegation/SKILL.md) and retained Python helper. Use native Codex plugin installation controls when ready to install; no separate installer or daemon is provided. The package follows the [official plugin format](https://developers.openai.com/plugins/build/plugins). Public source availability is separate from plugin-directory publication or live qualification.
+
+After authorized installation, `setup` initializes disabled private state. Installation, standing assessment consent, exact-model approval and routing activation remain separate decisions. Current builds/tests do none of those on the developer's real machine.
+
+## Shared state and updates
+
+All projects use `~/.local/state/codex-local-repairs` by default, preserving the existing helper's state location. Override `--state-dir` only deliberately, such as disposable fixtures. Schema 2 separates `config.json` from `profiles/<profile_id>.json`. Profiles, approvals, database, model results and receipts stay private; weights remain where LM Studio manages them.
+
+`migrate` backs up exact legacy configuration bytes and SQLite state, disables the old entry point, and refuses unresolved work. Migration never enables routing. `prepare-update` refuses unsettled work. Detached workers use verified content-addressed helper bundles outside mutable plugin caches; retain those bundles while jobs depend on them. No database rollback command can erase newer job history. `prepare-uninstall` disables admission and removes the current visibility export only after work settles; models, history and visibility preference remain. Native package removal follows that preparation.
+
+## Contracts and trust
+
+Read [task/verification contracts](skills/local-delegation/references/contracts.md) and [visibility format](skills/local-delegation/references/visibility.md). Keep origin/task keys stable through compaction. Wait-policy expiry requests an automatic native routing decision, not an owner model-selection prompt. The coordinator applies only accepted proposals after checking current source hashes.
+
+Approval binds artifact hashes, runtime key/index metadata, settings and permitted scope. Replacing bytes or identity requires fresh confirmation. Runtime identity trusts LM Studio/Bionic's owner-selected local index and matching discovery metadata; it does **not** attest weights in memory. Missing or ambiguous identity stays closed. Per-model profiles may reference a token environment-variable name; never store tokens in profiles or evidence.
+
+Capacity comes from measured correct batches tied to machine, artifact, settings and runtime context, capped by discovered concurrency and fresh resource observations. Disk size is not a thread limit. Shared reservations cover participating callers; unrelated runtime clients remain outside the helper's slot accounting. Existing external instances are never adopted for unloading.
+
+**Automatic loading/reloading is gated.** The documented [HTTP load API](https://lmstudio.ai/docs/developer/rest/load) does not establish a memory-estimation/non-eviction contract. The adapter returns `lifecycle_unqualified` without a load POST. No CLI workaround or global-setting change is used. Schema-2 uncertain slots stay closed without a verified reset. Legacy schema-1 recovery is retained for compatibility; migration requires it to be settled first.
+
+Python checking retains strict import/member/mutation guards, separate protected tests and private result markers. General code checks run predeclared commands with cleared credentials in qualified macOS isolation; missing toolchains stay native. A private receipt binds the proposal, source, checks, attempt/native ID and session token. Semantic acceptance trusts native review; model output cannot certify itself.
+
+Reasoning monitoring retains counts and hashes, not full reasoning. Eight identical 2,048-character reasoning windows trigger suspected looping; other loops can escape detection and legitimate repetition can trigger it. Known budget exhaustion rejects completion. A closed socket never proves model cancellation.
+
+## Offline verification and remaining gates
+
+```sh
+python3.11 -B -m unittest discover -s tests -t . -q
+git diff --check 950c12dd763f2ecbc905ab9c034a1b3376503edb
 ```
 
-Do not install the skill, approve a real artifact or activate routing as part of building or testing this repository. Later installation would link the source skill into the owner's skill directory, after explicit authorization. No command here performs installation or activation. `profile inspect` hashes a separately supplied artifact; `profile record-approval` records an actual owner's confirmation reference in that supplied private profile file. Never infer or invent that confirmation from benchmark results. Approval records and routing activation are separate.
+Tests use fictional approvals, disposable state and loopback fake servers. They include real macOS Python/JavaScript isolation canaries. Private historical evidence stays outside this repository.
 
-## One installation across projects
+Still unqualified: real approved-model end-to-end execution, automatic model lifecycle, thinking-enabled two-slot recovery, native host dispatch/automatic compaction continuity, install/update behavior in the target desktop, broader language/model reliability and net account savings. No real inference should be run merely to replay a saved candidate.
 
-Keep one standalone clone outside application repositories. A future personal installation can link `~/.agents/skills/local-python-repair` to this clone's `skills/local-python-repair` directory. Codex supports user-scoped skills and symlinked skill folders ([official guidance](https://learn.chatgpt.com/docs/build-skills)). Keep the clone at a stable path and select a reviewed revision before installing or updating it.
-
-Every participating project must use the same private state directory, `~/.local/state/codex-local-repairs`, so reservations and recovery ownership are shared. Live profiles, approvals and job records stay there; model artifacts remain in their existing runtime-managed location. The repository contains portable source, tests and contracts only. This is a per-user capability across projects, not a replacement for Codex's model provider. Installation, exact-model approval and routing activation remain separate authorized steps; this repository has no installer yet.
-
-## Behavior and limits
-
-Each owner-selected local profile supplies its model identifier, enumerated artifact files, approved capability/request settings, explicit OpenAI fallback model/effort, and one positive `stale_tolerance_seconds`. Qwen's intended settings are thinking ON, 120-second silence tolerance, and `gpt-6.1-sol` / `medium` fallback; they are not installed defaults or an approval. Capability evidence is optional. Actual artifact bytes are hashed; API names alone do not identify a version. Approval also binds the endpoint, adapter, runtime key, catalog identity and metadata. Hashing is conservative and currently repeated at eligibility checks, which adds unmeasured I/O latency.
-
-Live capacity comes from HTTP model discovery. Shared SQLite reservations account only for participating Codex callers. A new unknown loaded instance stays closed until controlled recovery verifies the approved binding, reload and probe. A profile must supply `runtime_catalog`: an absolute path to the owner-trusted LM Studio/Bionic `model-index-cache.json`. The supported index maps one exact runtime identifier to the approved artifact root and complete file inventory. Discovery metadata must match its format, architecture, publisher, parameter size and quantization. Missing, ambiguous, changed or unsupported mappings keep admission closed. This trusts the local runtime's index and configured endpoint; it is not cryptographic attestation of weights in memory. Busy requests do not POST into a model queue. In-flight uncertain slots remain reserved until verified reset; healthy peers finish first. Changing runtime configuration outside the helper between discovery and POST remains a race.
-
-Detached observers retain job/attempt IDs, answer hashes and activity counts, not full reasoning. A model fragment or valid forward phase change refreshes its stale clock; observer heartbeats do not. Active inference has no total timeout. Keepalives, empty fragments and repeated percentages cannot prevent staleness. A socket close is not proof of cancellation. Recovery ownership and healthy-peer checks cover the endpoint/model across replacement instance IDs. Each recovery probe has its own durable submission receipt and requires one matching `chat.start`; a resumed probe cannot adopt an unverified replacement instance. An interrupted or incomplete probe requires a confirmed reset before another probe. Status polling restarts a lost recovery owner even when all attempts are already uncertain; live ownership locks, retry backoff and permanent identity errors prevent unsafe restarts.
-
-Native OpenAI fallback is orchestrated by Codex, not by Python. Claims persist before native dispatch, and task identifiers persist afterward. An ambiguous dispatch is reconciled or reported `dispatch_uncertain`; it is never blindly repeated or silently changed to another model. Compaction may defer native dispatch until Codex resumes. A stopped Codex app cannot dispatch cloud work until native execution resumes.
-
-Candidate checking runs untouched supplied tests and independent oracles in separate interpreters from model tests, verifies effective regressions against the buggy source, and checks original source hashes. Approval and artifact eligibility are checked again before acceptance and before recovery reopens admission. The helper does not apply project files. MacOS candidate isolation denies network, private file reads and writes outside disposable fixtures. It permits reads of the Python installation and public system libraries, plus root-directory metadata/listing needed by the runtime. The supported structural subset uses explicit public import/member allowlists and rejects nested attribute mutation; it is not an arbitrary-code runner. Each checker owns an OS lock. Status polling returns an abandoned `checking` job to `candidate_ready`; a live checker is never stolen. Check result records use a private per-run marker, so candidate stdout cannot impersonate the trusted runner. Check processes have a separate 60-second deadline and resource limits.
-
-## Qualification
-
-Offline tests use fictional model approvals and an actual loopback fake server; they never contact a real model. They exercise cross-process reservations, monitor death, detached observation, lost lifecycle replies, healthy-peer protection, native dispatch records, and real macOS candidate isolation.
-
-Actual approved-model end-to-end operation and automatic desktop-host continuation through compaction remain separate activation gates. Native task model/effort declarations are requested settings, not independent serving-model attestation. No net subscription saving is claimed. Keep private benchmark evidence outside this portable source repository.
-
-`tests/live_acceptance.py` provides explicit `inspect` (HTTP discovery only), `native-prepare` (fictional local profile; no local HTTP), and `native-verify` (attach/check an actual native result) cases. It refuses non-temporary state paths and never approves a real model. Native model repair tests are functional qualification, not independent code review. Native task listings can reconcile canonical task names; an absent listing cannot prove a lost dispatch never happened.
-
-The bundled skill-format validator currently requires unavailable PyYAML on this machine. The source has no such dependency; its simple frontmatter/name/links and Python syntax are checked directly. Host-level automatic skill selection and desktop compaction continuity remain unqualified while the skill is uninstalled.
+The bundled skill validator currently cannot run under Python 3.11 because PyYAML is absent. This does not add a runtime dependency. Offline tests validate package paths and behavior; they do not substitute for live skill-selection or desktop qualification.

@@ -72,6 +72,10 @@ def main(argv=None):
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("migrate")
+    for name in ("setup", "prepare-update", "prepare-uninstall"):
+        commands.add_parser(name)
+    p = commands.add_parser("doctor")
+    p.add_argument("--inspect-runtime", action="store_true")
     for name in ("worker", "recover", "scheduler"):
         p = commands.add_parser(name)
         p.add_argument("identifier")
@@ -128,7 +132,11 @@ def main(argv=None):
         if args.command == "recover":
             from .recovery import recover_instance
             return recover_instance(args.state_dir, args.identifier)
-        if args.command == "visibility":
+        if args.command in ("setup", "doctor", "prepare-update", "prepare-uninstall"):
+            from .package import initialize_state, doctor, prepare_update, prepare_uninstall
+            if args.command == "doctor": result = doctor(args.state_dir, args.inspect_runtime)
+            else: result = {"setup": initialize_state, "prepare-update": prepare_update, "prepare-uninstall": prepare_uninstall}[args.command](args.state_dir)
+        elif args.command == "visibility":
             from .visibility import set_visibility, visibility_status
             result = visibility_status(args.state_dir) if args.action == "status" else set_visibility(args.state_dir, args.action == "enable")
         elif args.command == "discover":

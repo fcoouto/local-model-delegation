@@ -268,7 +268,7 @@ def migrate_state(state_dir):
                     atomic_json(store.root / "profiles" / (identifier + ".json"),
                                 {**profile, "schema_version": 2, "qualification_status": "needs_assessment", "scope": []})
                 store.upgrade_schema(db)
-                atomic_json(store.root / "config.json", {"schema_version": 2, "routing_enabled": False, "visibility_enabled": True})
+                atomic_json(store.root / "config.json", {"schema_version": 2, "routing_enabled": False, "visibility_enabled": original.get("visibility_enabled", True)})
         except ValueError as error:
             if str(error) == "unresolved_work" and load_json(legacy.read_text()) == tombstone:
                 # Only restore our own tombstone; never overwrite another writer's change.

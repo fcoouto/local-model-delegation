@@ -32,6 +32,30 @@ def ownership(store, name):
 
 def launch(state_dir, command, identifier):
     store = Store(state_dir)
+    from .package import pin_runtime_bundle, validate_bundle
+    bundle = None
+    job = None
+    instance = None
+    if command == "recover":
+        instance = store.instance(identifier)
+        saved = instance["data"].get("runtime_bundle")
+        if saved: bundle = validate_bundle(store.root / "runtimes" / saved, saved)
+    if command == "worker":
+        job = store.job(store.attempt(identifier)["job_id"])
+        instance = store.instance(store.attempt(identifier)["instance_key"])
+        saved = job.get("route_data", {}).get("runtime_bundle") or instance["data"].get("runtime_bundle")
+        if saved: bundle = validate_bundle(store.root / "runtimes" / saved, saved)
+    if bundle is None: bundle = pin_runtime_bundle(state_dir)
+    if instance:
+        with store.db(write=True) as db:
+            data = {**instance["data"], "runtime_bundle": bundle.name}
+            db.execute("UPDATE instances SET data=? WHERE instance_key=?", (canonical(data), instance["instance_key"]))
+    if job and "route_data" in job:
+        from .contracts import load_json
+        with store.db(write=True) as db:
+            route = load_json(db.execute("SELECT route_data FROM jobs WHERE job_id=?", (job["job_id"],)).fetchone()[0])
+            route["runtime_bundle"] = bundle.name
+            db.execute("UPDATE jobs SET route_data=? WHERE job_id=?", (canonical(route), job["job_id"]))
     log = store.root / "observer.log"
     fd = os.open(log, os.O_APPEND | os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     environment = {"PATH": "/usr/bin:/bin", "HOME": str(store.root), "PYTHONDONTWRITEBYTECODE": "1"}
@@ -42,7 +66,7 @@ def launch(state_dir, command, identifier):
         if name and re.fullmatch(r"[A-Z][A-Z0-9_]*", name) and name not in environment and name in os.environ:
             environment[name] = os.environ[name]
     try:
-        child = subprocess.Popen([sys.executable, "-B", str(Path(__file__).resolve().parents[1] / "repair.py"),
+        child = subprocess.Popen([sys.executable, "-B", str(bundle / "repair.py"),
                                   "--state-dir", str(store.root), command, identifier], stdin=subprocess.DEVNULL,
                                  stdout=fd, stderr=fd, start_new_session=True, close_fds=True,
                                  env=environment)

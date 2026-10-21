@@ -10,7 +10,8 @@ from .store import Store, atomic_json, private_dir
 
 
 def fixtures_path():
-    return Path(__file__).resolve().parents[3] / 'setup/fixtures/assessment-cases.json'
+    bundled=Path(__file__).resolve().parents[1]/'assessment-cases.json'
+    return bundled if bundled.exists() else Path(__file__).resolve().parents[3] / 'setup/fixtures/assessment-cases.json'
 
 
 def discover_models(runtime):

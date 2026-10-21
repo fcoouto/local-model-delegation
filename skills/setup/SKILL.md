@@ -1,0 +1,20 @@
+---
+name: setup
+description: Use when setting up, assessing models for, updating or removing the Local Model Delegation plugin on macOS.
+---
+
+# Set up Local Model Delegation
+
+Use the packaged `../local-python-repair/scripts/repair.py` with Python 3.11+. Run `doctor` first; runtime inspection requires `doctor --inspect-runtime` and an explicit configured loopback endpoint. Do not scan ports or change native credentials/provider/default settings.
+
+Installation uses native Codex plugin controls. This skill does not install itself. After authorized setup, `setup` initializes private shared state with routing disabled and visibility enabled. Existing state remains at `~/.local/state/codex-local-repairs`. Existing legacy state requires explicit `migrate`; it preserves exact backups and refuses unresolved work. Never copy private profiles/evidence into the plugin.
+
+Explain and separate the four decisions: plugin installation, optional standing synthetic-assessment consent, one-time approval of an exact model/scope, and routing activation. Setup itself grants none of the later decisions. Visibility can be enabled or disabled independently with `visibility` commands; no viewer is needed.
+
+For onboarding, use `discover --endpoint URL` (read-only). Create a private per-model profile with exact artifact inventory, owner-trusted local index, supported request settings, capability candidates and explicit native fallback. Keep approval null and qualification `needs_assessment`. Unsupported identity/protocol information remains ineligible. Tokens use an owner-selected environment-variable name, never literal secret fields.
+
+An authorized standing assessment policy in private configuration has `enabled:true` and the actual `owner_reference`. `assessment begin --profile-id ID --owner-reference REF` produces package-owned synthetic trials. Submit a selected trial with `assessment submit --assessment-id ID --trial-id TRIAL`; use the normal checking contract, then `assessment trial --assessment-id ID --receipt FILE` with `{trial_id,job_id}`. No project task can reuse this permit. Revoke the standing policy to stop further assessments. Three distinct cases twice per bucket provide provisional evidence only. Unsupported or absent buckets remain unknown.
+
+Measure supported capacity from one concurrent task upward, three correct batches per context/configuration. Record machine/settings/artifact-bound native measurements; disk size is not parallel capacity. Report tested scope, failures, sample counts, capacity and benefit unknowns, then a simple approval recommendation. `assessment approve` requires the actual owner's confirmation and exact proposed scope. Approval never enables routing. Automatic loading remains `lifecycle_unqualified` until the HTTP-only adapter can prove safe estimation/non-eviction; do not use a CLI workaround.
+
+Before updating, run `prepare-update`. Active/uncertain work must settle through its recorded helper bundle; never roll back a database over new history. Detached workers pin helper code outside mutable plugin caches. Retain old bundles while jobs depend on them. Before native uninstall, run `prepare-uninstall`; this disables new routing and refuses unsettled work, preserves models/history and visibility preference, and removes only the current visibility export. Then use native removal controls. Force-removing files outside this workflow cannot guarantee continuation.
