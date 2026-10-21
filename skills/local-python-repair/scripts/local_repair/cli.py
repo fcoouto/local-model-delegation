@@ -117,6 +117,8 @@ def main(argv=None):
     p.add_argument("action", choices=["record"])
     p.add_argument("--job", required=True)
     p.add_argument("--receipt", type=Path, required=True)
+    p = commands.add_parser("visibility")
+    p.add_argument("action", choices=["enable", "disable", "status"])
     args = parser.parse_args(argv)
     try:
         if args.command == "worker": return run_attempt(args.state_dir, args.identifier)
@@ -126,7 +128,10 @@ def main(argv=None):
         if args.command == "recover":
             from .recovery import recover_instance
             return recover_instance(args.state_dir, args.identifier)
-        if args.command == "discover":
+        if args.command == "visibility":
+            from .visibility import set_visibility, visibility_status
+            result = visibility_status(args.state_dir) if args.action == "status" else set_visibility(args.state_dir, args.action == "enable")
+        elif args.command == "discover":
             from .onboarding import discover_models
             result = discover_models(Runtime(args.endpoint))
         elif args.command == "assessment":

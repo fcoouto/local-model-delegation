@@ -95,6 +95,9 @@ class Store:
             if name not in columns: db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {declaration}")
         db.execute("CREATE TABLE IF NOT EXISTS model_operations (operation_id TEXT PRIMARY KEY, model_key TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL)")
         db.execute("PRAGMA user_version=2")
+        db.execute("""CREATE TRIGGER IF NOT EXISTS job_observation AFTER UPDATE OF status,reason,result_path,native_task_id ON jobs
+          WHEN OLD.status IS NOT NEW.status OR OLD.reason IS NOT NEW.reason OR OLD.result_path IS NOT NEW.result_path OR OLD.native_task_id IS NOT NEW.native_task_id
+          BEGIN UPDATE jobs SET route_data=json_set(route_data,'$.observed_at',CAST(strftime('%s','now') AS REAL)) WHERE job_id=NEW.job_id; END""")
 
     @contextmanager
     def db(self, write=False):
@@ -110,6 +113,11 @@ class Store:
             raise
         finally:
             db.close()
+        if write:
+            try:
+                from .visibility import publish_visibility
+                publish_visibility(self.root)
+            except Exception: pass  # Observability never changes a committed task outcome.
 
     def _job(self, row):
         if row is None: raise ValueError("unknown_job")
@@ -371,3 +379,7 @@ class Store:
                   'observed_at':time.time(),'machine_fingerprint':resources['machine_fingerprint']}
             db.execute("INSERT INTO model_operations VALUES (?,?,'reserved',?)",(operation,model_key,canonical(data)))
             return {'operation_id':operation,'model_key':model_key,'state':'reserved','data':data}
+
+    def visibility_rows(self):
+        from .visibility import read_rows
+        return read_rows(self.path)

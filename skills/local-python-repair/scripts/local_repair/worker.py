@@ -88,6 +88,7 @@ def run_attempt(state_dir, attempt_id):
         progress = ProgressWatch({**job["profile"]["request_settings"], "require_completion_metadata": job["profile"].get("schema_version") == 2})
         stopped, stale = threading.Event(), threading.Event()
         counts = {}
+        last_event_at = time.time()
 
         def monitor():
             heartbeat = 0
@@ -99,7 +100,7 @@ def run_attempt(state_dir, attempt_id):
                     continue
                 if now - heartbeat >= 1:
                     try:
-                        store.observe(attempt_id, {"heartbeat": time.time(), "last_activity": watch.last, "counts": dict(counts), **progress.snapshot()})
+                        store.observe(attempt_id, {"heartbeat": time.time(), "last_activity": watch.last, "counts": dict(counts), "last_event_at": last_event_at, **progress.snapshot()})
                     except Exception: pass  # Failure never frees a reservation; the ownership lock remains held.
                     heartbeat = now
 
@@ -120,7 +121,7 @@ def run_attempt(state_dir, attempt_id):
                     raise ValueError("unsupported_stream_event")
                 reason = progress.observe(event, data)
                 if reason: raise ValueError(reason)
-                watch.observe(event, data, time.monotonic())
+                if watch.observe(event, data, time.monotonic()): last_event_at = time.time()
                 if event == "message.delta":
                     content = data.get("content")
                     if not isinstance(content, str): raise ValueError("invalid_content")
