@@ -107,3 +107,67 @@ class Capacity(Fixture):
         module.release_idle(self.state,key)
         self.assertEqual(module.release_idle(self.state,key)['status'],'released')
         self.assertEqual(server.calls.count(('POST','/api/v1/models/unload')),1)
+
+    def test_loaded_request_uses_incremental_budget_without_weakening_load_gate(self):
+        module=self.module(); store,brief,p=self.setup_queue()
+        resources={**self.resources(),'physical_bytes':48*1024**3,'available_bytes':6*1024**3}
+        self.assertEqual(module.qualified_limit(p,self.loaded(),resources),1)
+        with self.assertRaisesRegex(ValueError,'insufficient_resources'):
+            store.reserve_load(p,{'bytes':1024**3,'non_evicting':True},resources)
+        for change in ({'available_bytes':4*1024**3},{'pressure':'warning'},{'swapout_delta_bytes':4096}):
+            self.assertEqual(module.qualified_limit(p,self.loaded(),{**resources,**change}),0)
+
+    def test_calibration_counts_only_increment_and_adds_margin(self):
+        module=self.module()
+        self.assertTrue(hasattr(module,'measure_request_memory'),'request memory calibration is missing')
+        base={**self.resources(),'observed_at':100,'process_bytes':20*1024**3,'process_identity':'fixture-process'}
+        samples=[base,{**base,'observed_at':101,'process_bytes':21*1024**3},
+                 {**base,'observed_at':102,'available_bytes':base['available_bytes']-2*1024**3}]
+        measured=module.measure_request_memory(samples)
+        self.assertEqual(measured['peak_increment_bytes'],2*1024**3)
+        self.assertEqual(measured['request_bytes'],3*1024**3)
+        for change in ({'pressure':'warning'},{'swapout_delta_bytes':1},{'process_bytes':None},
+                       {'machine_fingerprint':'changed'},{'process_identity':'replacement'},{'observed_at':110}):
+            with self.assertRaises(ValueError): module.measure_request_memory([*samples[:2],{**samples[2],**change}])
+
+    def test_unqualified_loaded_assessment_reserves_calibration_headroom(self):
+        from tests.test_onboarding import Onboarding
+        from local_model_delegation import onboarding
+        profile=Onboarding.setup_policy(self)
+        assessment=onboarding.begin_assessment(self.state,'fictional','fixture-standing-consent')
+        permit={'assessment_id':assessment['assessment_id'],'permit_token':assessment['permit_token']}
+        store=Store(self.state); brief=assessment['trials'][0]['brief']
+        job=store.enqueue(brief,brief['fallback'],assessment=permit)
+        resources={**self.resources(),'physical_bytes':48*1024**3,'available_bytes':6*1024**3}
+        self.assertEqual(store.admit(job['job_id'],profile,self.loaded(),resources)['status'],'reserved')
+        self.assertGreaterEqual(store.job(job['job_id'])['route_data']['request_bytes'],1024**3)
+
+    def test_worker_rechecks_resources_after_authorization_before_post(self):
+        from unittest.mock import patch
+        from local_model_delegation.worker import run_local_attempt
+        store,brief,p=self.setup_queue()
+        job=store.enqueue(brief,brief['fallback'])
+        reserved=store.admit(job['job_id'],p,self.loaded(),self.resources())
+        with patch('local_model_delegation.capacity.machine_snapshot',return_value={**self.resources(),'pressure':'warning'}):
+            self.assertEqual(run_local_attempt(self.state,reserved['attempt_id']),1)
+        current=store.job(job['job_id'])
+        self.assertEqual(current['reason'],'resources_changed_before_post')
+        self.assertEqual(store.attempt(reserved['attempt_id'])['state'],'released')
+
+    def test_reserved_assessments_share_incremental_memory_across_models(self):
+        from tests.test_onboarding import Onboarding
+        from local_model_delegation import onboarding
+        from local_model_delegation.store import atomic_json
+        profile=Onboarding.setup_policy(self)
+        store=Store(self.state)
+        for index in range(2):
+            identifier='model'+str(index)
+            current={**profile,'profile_id':identifier}
+            atomic_json(self.state/'profiles'/(identifier+'.json'),current)
+            assessment=onboarding.begin_assessment(self.state,identifier,'fixture-standing-consent')
+            permit={'assessment_id':assessment['assessment_id'],'permit_token':assessment['permit_token']}
+            brief=assessment['trials'][0]['brief']
+            job=store.enqueue(brief,brief['fallback'],assessment=permit)
+            resources={**self.resources(),'physical_bytes':48*1024**3,'available_bytes':5*1024**3}
+            result=store.admit(job['job_id'],current,{**self.loaded(),'instance_id':identifier},resources)
+            self.assertEqual(result['status'],'reserved' if index==0 else 'waiting')

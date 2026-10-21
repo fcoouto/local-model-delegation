@@ -120,7 +120,7 @@ def record_trial(state_dir, assessment_id, receipt):
     with ownership(store, 'assessment-' + assessment_id) as owned:
         if not owned: raise ValueError('assessment_busy')
         assessment = _assessment(state_dir, assessment_id)
-        if not isinstance(receipt, dict) or set(receipt) != {'trial_id','job_id'}: raise ValueError('invalid_trial_receipt')
+        if not isinstance(receipt, dict) or set(receipt) not in ({'trial_id','job_id'},{'trial_id','job_id','memory_samples'}): raise ValueError('invalid_trial_receipt')
         trial = next((t for t in assessment['trials'] if t['trial_id']==receipt['trial_id']), None)
         job = store.job(receipt['job_id'])
         permit = {'assessment_id': assessment_id, 'permit_token': assessment['permit_token']}
@@ -128,9 +128,17 @@ def record_trial(state_dir, assessment_id, receipt):
         if not trial or digest(job['brief']) != trial['brief_hash'] or job.get('route_data', {}).get('assessment') != permit:
             raise ValueError('assessment_scope_mismatch')
         if job['status'] not in ('accepted','failed','fallback_required'): raise ValueError('trial_not_complete')
-        value = {**receipt, 'passed': job['status']=='accepted' and not job['native_task_id'], 'status': job['status']}
+        value = {k:receipt[k] for k in ('trial_id','job_id')}
+        value.update(passed=job['status']=='accepted' and not job['native_task_id'],status=job['status'])
+        if 'memory_samples' in receipt:
+            from .capacity import measure_request_memory
+            if not job['attempt_id'] or store.attempt(job['attempt_id'])['state']!='complete' or job['native_task_id']:
+                raise ValueError('memory_trial_not_complete')
+            value['memory']=measure_request_memory(receipt['memory_samples'])
         previous = assessment['receipts'].get(receipt['trial_id'])
         if previous and previous != value: raise ValueError('trial_conflict')
+        if 'memory_samples' in receipt:
+            atomic_json(store.root/'assessments'/assessment_id/(receipt['trial_id']+'-memory.json'),receipt['memory_samples'])
         assessment['receipts'][receipt['trial_id']] = value
         atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
     return assessment_report(state_dir, assessment_id)

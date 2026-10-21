@@ -340,25 +340,37 @@ class Store:
                     return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()))
                 from .scheduler import admission_limit
                 held=sum(load_json(r['data']).get('reserved_bytes',0) for r in db.execute("SELECT data FROM model_operations WHERE state IN ('reserved','submitting','uncertain')"))
-                held+=sum(load_json(r['profile']).get('capacity_evidence',{}).get('request_bytes',0) for r in db.execute("SELECT j.profile FROM jobs j JOIN attempts a USING(job_id) WHERE a.state='reserved'"))
+                held+=sum(load_json(r['route_data']).get('request_bytes',load_json(r['profile']).get('capacity_evidence',{}).get('request_bytes',0)) for r in db.execute("SELECT j.profile,j.route_data FROM jobs j JOIN attempts a USING(job_id) WHERE a.state IN ('reserved','submitting','streaming','uncertain')"))
                 resources=dict(resource_snapshot)
                 if type(resources.get('available_bytes')) is int: resources['available_bytes']=max(0,resources['available_bytes']-held)
                 limit=admission_limit(current,loaded,resources)
+                request_bytes=current.get('capacity_evidence',{}).get('request_bytes',0)
                 if route.get('assessment'):
-                    from .capacity import available_budget
+                    from .capacity import available_budget,assessment_request_bytes
                     from .onboarding import _assessment
-                    target=_assessment(self.root,route['assessment']['assessment_id']).get('capacity_target',1)
-                    limit=min(target,loaded['capacity']) if loaded and type(loaded.get('capacity')) is int and loaded['capacity']>0 and available_budget(resources)>0 else 0
+                    assessment=_assessment(self.root,route['assessment']['assessment_id'])
+                    target=assessment.get('capacity_target',1)
+                    request_bytes=assessment_request_bytes(assessment)
+                    limit=min(target,loaded['capacity'],int(available_budget(resources,loaded=True)//request_bytes)) if loaded and type(loaded.get('capacity')) is int and loaded['capacity']>0 else 0
                 if limit:
                     attempt,status,reason,key,generation=self._slot(db,current,{**loaded,'capacity':limit})
                     if attempt:
-                        route.update(observed_at=time.time(),approval_digest=digest(current['approval']),evidence_revision=digest(current.get('assessment',{})))
+                        route.update(observed_at=time.time(),approval_digest=digest(current['approval']),evidence_revision=digest(current.get('assessment',{})),request_bytes=request_bytes)
                         db.execute('UPDATE jobs SET profile=?,status=?,reason=NULL,attempt_id=?,route_data=? WHERE job_id=?',
                                    (canonical(current),status,attempt,canonical(route),job_id))
                         db.execute('INSERT INTO attempts VALUES (?,?,?,?,?,?)',(attempt,job_id,key,generation,'reserved',canonical({'created':time.time()})))
                     else: db.execute('UPDATE jobs SET reason=? WHERE job_id=?',(reason,job_id))
                 else: db.execute("UPDATE jobs SET reason='capacity_unqualified' WHERE job_id=?",(job_id,))
             return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()))
+
+    def submission_resources_available(self, job):
+        from .capacity import machine_snapshot, available_budget
+        # Older pinned jobs have no recorded reservation; keep their original contract.
+        if 'request_bytes' not in job.get('route_data',{}): return True
+        with self.db() as db:
+            held=sum(load_json(r['data']).get('reserved_bytes',0) for r in db.execute("SELECT data FROM model_operations WHERE state IN ('reserved','submitting','uncertain')"))
+            held+=sum(load_json(r['route_data']).get('request_bytes',load_json(r['profile']).get('capacity_evidence',{}).get('request_bytes',0)) for r in db.execute("SELECT j.profile,j.route_data FROM jobs j JOIN attempts a USING(job_id) WHERE a.state IN ('reserved','submitting','streaming','uncertain')"))
+            return held<=available_budget(machine_snapshot(),loaded=True)
 
     def decide_wait(self, job_id, decision):
         from .contracts import positive

@@ -136,7 +136,13 @@ class Onboarding(Fixture):
             db.execute('UPDATE jobs SET route_data=? WHERE job_id=?', (canonical({'assessment':permit}), saved['job_id']))
         self.assertEqual(run_local_attempt(self.state, saved['attempt_id']), 0)
         self.assertEqual(verify_candidate(self.state, saved['job_id'])['status'], 'accepted')
-        report = module.record_trial(self.state, assessment['assessment_id'], {'trial_id':trial['trial_id'], 'job_id':saved['job_id']})
+        from tests.test_scheduler import Scheduler
+        from local_model_delegation.capacity import assessment_request_bytes
+        baseline={**Scheduler.resources(self),'process_bytes':20*1024**3,'process_identity':'fixture-process','observed_at':100}
+        samples=[baseline,{**baseline,'observed_at':101,'process_bytes':22*1024**3},
+                 {**baseline,'observed_at':102}]
+        report = module.record_trial(self.state, assessment['assessment_id'], {'trial_id':trial['trial_id'], 'job_id':saved['job_id'],'memory_samples':samples})
+        self.assertEqual(assessment_request_bytes(module._assessment(self.state,assessment['assessment_id'])),3*1024**3)
         self.assertEqual(report['completed_trials'], 1)
         self.assertEqual(report['recommendation'], 'do_not_approve_yet')
         module.record_outcome(self.state,saved['job_id'],{'native_usage':{'kind':'tokens','value':10},'coordination_tokens':3,'checking_tokens':7,'fallback_tokens':0,'native_baseline_tokens':100,'onboarding_tokens':0,'latency_seconds':5,'provenance':'fictional comparable trial'})

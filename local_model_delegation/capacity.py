@@ -36,18 +36,47 @@ def machine_snapshot():
     return result
 
 
-def available_budget(resources):
+def available_budget(resources, *, loaded=False):
     if (resources.get('pressure')!='normal' or type(resources.get('swapout_delta_bytes')) is not int
             or resources['swapout_delta_bytes']!=0 or not isinstance(resources.get('machine_fingerprint'),str)
             or not resources['machine_fingerprint'] or not positive(resources.get('observed_at'))
             or not -1<=time.time()-resources['observed_at']<=5
             or type(resources.get('physical_bytes')) is not int or resources['physical_bytes']<=0
             or type(resources.get('available_bytes')) is not int or not 0<=resources['available_bytes']<=resources['physical_bytes']): return 0
-    return max(0,resources['available_bytes']-max(4*1024**3,int(resources['physical_bytes']*.2)))
+    # Loaded weights already appear in host usage; retain a floor for other work.
+    reserve=4*1024**3 if loaded else max(4*1024**3,int(resources['physical_bytes']*.2))
+    return max(0,resources['available_bytes']-reserve)
+
+
+def measure_request_memory(samples):
+    """Native samples: count process growth and host loss, never resident weights."""
+    if not isinstance(samples,list) or len(samples)<3: raise ValueError('memory_samples_incomplete')
+    first=samples[0]; previous=None; peak=0
+    for sample in samples:
+        if (not isinstance(sample,dict) or not positive(sample.get('observed_at'))
+                or type(sample.get('process_bytes')) is not int or sample['process_bytes']<0
+                or type(sample.get('available_bytes')) is not int or sample['available_bytes']<4*1024**3
+                or type(sample.get('physical_bytes')) is not int or sample['available_bytes']>sample['physical_bytes']
+                or sample.get('pressure')!='normal' or sample.get('swapout_delta_bytes')!=0
+                or not sample.get('process_identity') or sample['process_identity']!=first.get('process_identity')
+                or not sample.get('machine_fingerprint')
+                or sample['machine_fingerprint']!=first.get('machine_fingerprint')
+                or sample['physical_bytes']!=first.get('physical_bytes')
+                or previous is not None and not 0<sample['observed_at']-previous<=2.5):
+            raise ValueError('memory_samples_unqualified')
+        peak=max(peak,sample['process_bytes']-first['process_bytes'],first['available_bytes']-sample['available_bytes'])
+        previous=sample['observed_at']
+    # Sampled peaks are observations, not upper bounds; keep at least 256 MiB margin.
+    return {'peak_increment_bytes':peak,'request_bytes':peak+max(256*1024**2,(peak+1)//2)}
+
+
+def assessment_request_bytes(assessment):
+    # Unknown first-task cost: single-task calibration with at least 1 GiB headroom.
+    return max([1024**3]+[r['memory']['request_bytes'] for r in assessment.get('receipts',{}).values() if 'memory' in r])
 
 
 def qualified_limit(profile, loaded, resources):
-    if not loaded or not available_budget(resources): return 0
+    if not loaded or not available_budget(resources,loaded=True): return 0
     evidence=profile.get('capacity_evidence',{})
     if (evidence.get('qualified') is not True or evidence.get('machine_fingerprint')!=resources['machine_fingerprint']
             or evidence.get('settings_digest')!=digest(profile['request_settings'])
@@ -57,12 +86,12 @@ def qualified_limit(profile, loaded, resources):
             or type(evidence.get('batches')) is not int or evidence['batches']<3
             or not positive(evidence.get('median_slowdown')) or evidence['median_slowdown']>1.5
             or not positive(evidence.get('request_bytes')) or type(loaded.get('capacity')) is not int): return 0
-    return min(loaded['capacity'],evidence['limit'],int(available_budget(resources)//evidence['request_bytes']))
+    return min(loaded['capacity'],evidence['limit'],int(available_budget(resources,loaded=True)//evidence['request_bytes']))
 
 
 def qualify_measurements(profile, batches, resources, context_length):
     """Native measurement receipts: three correct batches at each step, starting at one."""
-    if not available_budget(resources): raise ValueError('resources_unqualified')
+    if not available_budget(resources,loaded=True): raise ValueError('resources_unqualified')
     grouped={}
     for batch in batches:
         if (set(batch)!={'concurrency','task_seconds','all_correct','request_bytes','pressure','swapout_delta_bytes'}
