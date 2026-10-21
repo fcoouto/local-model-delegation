@@ -1,20 +1,35 @@
 ---
 name: setup
-description: Use when setting up, assessing models for, updating or removing the Local Model Delegation plugin on macOS.
+description: Use when onboarding, resuming setup, assessing models, updating or removing the Local Model Delegation plugin on macOS.
 ---
 
 # Set up Local Model Delegation
 
-Use the packaged `../../delegate.py` with Python 3.11+. Run `doctor` first; runtime inspection requires `doctor --inspect-runtime` and an explicit configured loopback endpoint. Do not scan ports or change native credentials/provider/default settings.
+Guide the owner from the current verified state to the next decision. Installation, assessment consent, exact-model approval and routing activation are separate decisions.
 
-Installation uses native Codex plugin controls. This skill does not install itself. After authorized setup, `setup` initializes private shared state at `~/.local/state/local-model-delegation` with routing disabled and visibility enabled. If the previous `~/.local/state/codex-local-repairs` directory exists, pass it explicitly with `--state-dir`; never move it or silently create a second queue. Legacy state schemas require explicit `migrate` in place; it preserves exact backups and refuses unresolved work. Never copy private profiles/evidence into the plugin.
+## Conversation contract
 
-Explain and separate the four decisions: plugin installation, optional standing synthetic-assessment consent, one-time approval of an exact model/scope, and routing activation. Setup itself grants none of the later decisions. Visibility can be enabled or disabled independently with `visibility` commands; no viewer is needed.
+Each progress reply has three parts: **what is verified**, **the next step and why**, and **one question or one manual action if owner input is required**. Wait for that answer before dependent work. Continue authorized checks yourself. Reuse answers and consent already recorded in this session; ask only for missing information. Keep later stages in the background until their turn.
 
-For onboarding, use `discover --endpoint URL` (read-only). Create a private per-model profile with exact artifact inventory, owner-trusted local index, supported request settings, capability candidates and explicit native fallback. Keep approval null and qualification `needs_assessment`. Unsupported identity/protocol information remains ineligible. Tokens use an owner-selected environment-variable name, never literal secret fields.
+Example after detecting a missing runtime: “The plugin is installed; delegation is off. LM Studio is missing, so there is no local server to connect. Would you like help installing LM Studio now?”
 
-An authorized standing assessment policy in private configuration has `enabled:true` and the actual `owner_reference`. `assessment begin --profile-id ID --owner-reference REF` produces package-owned synthetic trials. Submit a selected trial with `assessment submit --assessment-id ID --trial-id TRIAL`; use the normal checking contract, then `assessment trial --assessment-id ID --receipt FILE` with `{trial_id,job_id}`. No project task can reuse this permit. Revoke the standing policy to stop further assessments. Three distinct cases twice per bucket provide provisional evidence only. Unsupported or absent buckets remain unknown.
+## Follow the current stage
 
-Measure supported capacity from one concurrent task upward, three correct batches per context/configuration. `resources` provides read-only host observations. Use `assessment capacity --assessment-id ID --receipt FILE` to record `{context_length, resources, batches}`. Each batch supplies accepted local synthetic `job_ids`, measured incremental `request_bytes`, `pressure` and `swapout_delta_bytes`; timings and overlap come from durable attempts. Three correct batches per step qualify a limit. A subsequent assessment tests at most one additional slot. Record machine/settings/artifact-bound native measurements; disk size is not parallel capacity. Report tested scope, failures, sample counts, capacity and benefit unknowns, then a simple approval recommendation. `assessment approve` requires the actual owner's confirmation and exact proposed scope. Approval never enables routing. Automatic loading remains `lifecycle_unqualified` until the HTTP-only adapter can prove safe estimation/non-eviction; do not use a CLI workaround.
+1. **Inspect.** Check macOS, Codex access, Python 3.11+, installed plugin location and existing state before changes. Use the packaged `../../delegate.py`; run read-only `doctor` first. Reuse verified observations. Preserve native model, provider, reasoning and authentication settings. If the plugin is absent, follow the [public onboarding guide](../../docs/onboarding.md) before invoking packaged commands.
+2. **Resume or initialize.** Reuse the selected state, endpoint, profiles and visibility preference. Existing `~/.local/state/codex-local-repairs` requires explicit `--state-dir`; schema 2 needs no migration. After authorized installation/setup, initialize missing private state with routing disabled. Read [Setup operations](references/operations.md) before executing this or later stages; it is the required technical procedure.
+3. **Connect.** If LM Studio is missing, offer help with that installation as the next decision. If present but stopped, guide one start-server action. Use the recorded endpoint; otherwise ask for the loopback URL shown by LM Studio. Discover read-only and prepare an unapproved profile. Resolve one missing prerequisite at a time.
+4. **Assess.** Explain synthetic assessments and revocable standing consent in plain language. Use valid existing consent or ask once. After consent, follow the required operations procedure, including identity, verification and capacity checks. Report demonstrated scope, failures and unknowns.
+5. **Approve, then activate.** Ask the owner to approve the exact tested model/scope. Only after that decision, ask separately about routing activation. Verify the resulting configuration; a local task is verified only when its execution and native acceptance were observed.
 
-Before updating, run `prepare-update`. Active/uncertain work must settle through its recorded helper bundle; never roll back a database over new history. Detached workers pin helper code outside mutable plugin caches. Retain old bundles while jobs depend on them. Before native uninstall, run `prepare-uninstall`; this disables new routing and refuses unsettled work, preserves models/history and visibility preference, and removes only the current visibility export. Then use native removal controls. Force-removing files outside this workflow cannot guarantee continuation.
+## Pauses and common mistakes
+
+| Observed condition | Next action |
+|---|---|
+| Native plugin installation unavailable | Give one supported manual installation action; wait for completion |
+| Existing setup | Resume its first unfinished stage; preserve preferences and the selected queue |
+| Runtime or model unavailable | Name the blocker and one next action; keep affected work pending |
+| Assessment declined | Preserve configuration and stop assessment-dependent work; do not ask again or schedule trials |
+
+At completion or a pause, report **verified**, **pending/blocked**, **routing state**, and **resume step**. A saved setup is not operational delegation. “Resume Local Model Delegation setup” resumes from the saved checkpoint.
+
+For updates or removal, follow the corresponding preparation in [Setup operations](references/operations.md) before native plugin controls.

@@ -1,8 +1,45 @@
 # Local Model Delegation
 
-Delegate tasks to local models according to their assessed capabilities, with native verification and fallback. A task can be simple or complex; model qualification and available verification determine what can be delegated. The shared core is host-agnostic; this first plugin targets **Codex on macOS with LM Studio over HTTP**, initially for text and code tasks. Claude integration and other task types are future work.
+**Let your agent set up local delegation with you, one step at a time.**
 
-**Development preview. Routing stays disabled by default.** Cloning this repository installs nothing, approves no model and changes no provider or authentication settings. MIT licensed.
+Local models handle tasks they have demonstrated they can do. Your native agent checks their work and provides fallback.
+
+## Start with one prompt
+
+Open **Codex on your Mac** with access to local files and a terminal, then paste:
+
+```text
+Read https://raw.githubusercontent.com/fcoouto/local-model-delegation/main/docs/onboarding.md and guide me through setup on this computer, reusing what is already configured, asking one question at a time when needed, and verifying each completed step.
+```
+
+Your agent checks the environment, handles the available setup steps, and asks for your input when it reaches a decision. If a step needs a click in another app, it gives you that single action and continues when you return. You do not need to prepare configuration files yourself.
+
+**Already started? Use the same prompt to resume.** The agent reuses your installation, settings and shared state instead of starting over.
+
+The link reads the version published on `main`. To try an unpublished checkout, ask your agent to read its local `docs/onboarding.md` instead. A chat without local computer access can explain setup but cannot perform or verify it.
+
+**Development preview. Routing stays disabled by default.** Installation, permission for model assessments, approval of a tested model and task scope, and activation are separate decisions. You can pause and resume later.
+
+## Choose where to start
+
+| Your situation | Start here | What happens |
+|---|---|---|
+| New to local delegation | Paste the prompt above | The agent checks prerequisites and guides installation and setup |
+| Already installed or partly configured | Paste the same prompt | The agent resumes at the first unfinished step |
+| Want to inspect the project first | [Clone and inspect](#clone-and-inspect) | Read the source and run a read-only check |
+| Want the technical details | [Shared state](#shared-state-and-updates) · [Contracts](#contracts-and-trust) | Review storage, approvals, verification and limits |
+
+## What onboarding looks like
+
+1. **Check:** detect supported tools, an existing installation and saved configuration.
+2. **Prepare:** install missing prerequisites with your authorization and connect to your selected local server.
+3. **Assess:** with your consent, test a candidate model on package-owned synthetic tasks and report what passed.
+4. **Decide:** approve the exact demonstrated scope, then separately choose whether to enable delegation.
+5. **Verify:** report what was checked, what remains pending and how to resume. “Installed” does not mean “ready to delegate.”
+
+**Supported today:** Codex on macOS, Python 3.11+, and LM Studio over a loopback HTTP connection. Executable candidates require qualified macOS isolation. The shared core is host-agnostic; Claude integration, other runtimes and non-text tasks are future work. Automatic model loading remains unavailable until qualified; the agent reports a model-loading blocker instead of bypassing it.
+
+Read the [onboarding guide](docs/onboarding.md) for the agent's workflow and [onboarding evaluation](docs/onboarding-validation.md) for what has been tested. Cloning this repository installs nothing, approves no model and changes no provider or authentication settings.
 
 ## What it does
 
@@ -77,3 +114,7 @@ Tests use fictional approvals, disposable state and loopback fake servers. They 
 Still unqualified: real approved-model end-to-end execution, automatic model lifecycle, thinking-enabled two-slot recovery, native host dispatch/automatic compaction continuity, install/update behavior in the target desktop, broader language/model reliability and net account savings. No real inference should be run merely to replay a saved candidate.
 
 Skill validation uses the bundled validator in a disposable Python 3.11 environment with PyYAML 6.0.3. The host Python still lacks PyYAML; validation does not add a runtime dependency or install any skill. Offline checks do not substitute for live skill-selection or desktop qualification.
+
+## Credits and license
+
+The prompt-first entry and guided setup structure are inspired by the [Vibe Coding Toolkit README](https://github.com/soumatheusgomes/vibe-coding-toolkit). Local Model Delegation is [MIT licensed](LICENSE).
