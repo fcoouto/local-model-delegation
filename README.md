@@ -1,13 +1,13 @@
 # Local Model Delegation
 
-Delegate bounded text and code work to assessed local models, with native verification and fallback. The shared core is host-agnostic; this first plugin targets **Codex on macOS with LM Studio over HTTP**. Claude integration is future work.
+Delegate tasks to local models according to their assessed capabilities, with native verification and fallback. A task can be simple or complex; model qualification and available verification determine what can be delegated. The shared core is host-agnostic; this first plugin targets **Codex on macOS with LM Studio over HTTP**, initially for text and code tasks. Claude integration and other task types are future work.
 
 **Development preview. Routing stays disabled by default.** Cloning this repository installs nothing, approves no model and changes no provider or authentication settings. MIT licensed.
 
 ## What it does
 
 - Assesses package-owned synthetic tasks before recommending a narrowly scoped model approval.
-- Supports Python repairs, test writing, small code changes and file summaries. Contracts support other languages; bundled assessment coverage currently includes simple Python, JavaScript and text cases.
+- Supports code changes, test writing and file summaries. Contracts support multiple languages and complexity levels; bundled assessment coverage currently includes simple Python, JavaScript and text cases.
 - Shares a durable queue and measured per-instance slots across projects. Healthy work can finish while other tasks wait.
 - Detects silence, a defined repeated-reasoning pattern and exhausted output budgets. It has no total inference deadline.
 - Stages proposals for protected Python checks or trusted native verification. The helper never applies project files.
@@ -23,19 +23,21 @@ Requires Python 3.11+, macOS and a qualified `sandbox-exec` boundary for executa
 ```sh
 git clone https://github.com/fcoouto/local-model-delegation.git
 cd local-model-delegation
-python3.11 -B skills/local-python-repair/scripts/repair.py --help
-python3.11 -B skills/local-python-repair/scripts/repair.py doctor
+python3.11 -B delegate.py --help
+python3.11 -B delegate.py doctor
 ```
 
 Doctor is read-only and does not contact LM Studio unless `--inspect-runtime` is explicitly requested with a configured loopback endpoint. It does not install dependencies.
 
-The root [plugin manifest](plugin.json) packages the [setup skill](skills/setup/SKILL.md), [delegation workflow](skills/local-delegation/SKILL.md) and retained Python helper. Use native Codex plugin installation controls when ready to install; no separate installer or daemon is provided. The package follows the [official plugin format](https://developers.openai.com/plugins/build/plugins). Public source availability is separate from plugin-directory publication or live qualification.
+The root [plugin manifest](plugin.json) packages the [setup skill](skills/setup/SKILL.md), [delegation workflow](skills/local-delegation/SKILL.md) and shared [delegation core](local_model_delegation/). The core is implemented in Python; that does not limit delegated tasks to Python. Use native Codex plugin installation controls when ready to install; no separate installer or daemon is provided. The package follows the [official plugin format](https://developers.openai.com/plugins/build/plugins). Public source availability is separate from plugin-directory publication or live qualification.
 
 After authorized installation, `setup` initializes disabled private state. Installation, standing assessment consent, exact-model approval and routing activation remain separate decisions. Current builds/tests do none of those on the developer's real machine.
 
 ## Shared state and updates
 
-All projects use `~/.local/state/codex-local-repairs` by default, preserving the existing helper's state location. Override `--state-dir` only deliberately, such as disposable fixtures. Schema 2 separates `config.json` from `profiles/<profile_id>.json`. Profiles, approvals, database, model results and receipts stay private; weights remain where LM Studio manages them.
+All projects use `~/.local/state/local-model-delegation` by default. Override `--state-dir` deliberately, such as for disposable fixtures or an existing installation. All participating projects must select the same state directory. Schema 2 separates `config.json` from `profiles/<profile_id>.json`. Profiles, approvals, database, model results and receipts stay private; weights remain where the runtime manages them.
+
+Existing preview installations may have state at `~/.local/state/codex-local-repairs`. When that directory exists, commands require explicit `--state-dir` selection and return `explicit_state_directory_required` otherwise. Continue using that directory explicitly; it is not moved or rewritten. Do not create a second active queue for the same runtime. Saved jobs can contain absolute paths, so manually moving state is not a supported migration. The `migrate` command upgrades the state schema in place, not its directory name.
 
 ### Server connection and supported runtimes
 
@@ -47,7 +49,11 @@ Only the `lmstudio_v1` adapter is implemented. It uses the native `/api/v1/model
 
 ## Contracts and trust
 
+The **host agent** prepares context, chooses tasks, verifies results and applies accepted work. The **runtime** serves local models. A model's approved **capabilities** describe which task families and operating limits it has demonstrated. A **task brief** contains the supplied context and acceptance requirements; a **candidate** is the proposed output awaiting verification. These terms apply across task types and host integrations.
+
 Read [task/verification contracts](skills/local-delegation/references/contracts.md) and [visibility format](skills/local-delegation/references/visibility.md). Keep origin/task keys stable through compaction. Wait-policy expiry requests an automatic native routing decision, not an owner model-selection prompt. The coordinator applies only accepted proposals after checking current source hashes.
+
+New protected Python tasks use `python_code_change`; the legacy `bounded_python_repair` identifier remains readable for saved briefs and profiles. Approval remains bound to the exact recorded scope: renaming does not transfer or widen it. Existing fallback names and pinned worker entry points are also preserved when resuming saved work. The former dedicated Python skill is consolidated into the delegation workflow and its [Python verification contract](skills/local-delegation/references/python-checks.md).
 
 Approval binds artifact hashes, runtime key/index metadata, settings and permitted scope. Replacing bytes or identity requires fresh confirmation. Runtime identity trusts LM Studio/Bionic's owner-selected local index and matching discovery metadata; it does **not** attest weights in memory. Missing or ambiguous identity stays closed. Per-model profiles may reference a token environment-variable name; never store tokens in profiles or evidence.
 
@@ -70,4 +76,4 @@ Tests use fictional approvals, disposable state and loopback fake servers. They 
 
 Still unqualified: real approved-model end-to-end execution, automatic model lifecycle, thinking-enabled two-slot recovery, native host dispatch/automatic compaction continuity, install/update behavior in the target desktop, broader language/model reliability and net account savings. No real inference should be run merely to replay a saved candidate.
 
-The bundled skill validator passed for all three skills in a disposable Python 3.11 environment with PyYAML 6.0.3. The host Python still lacks PyYAML; validation did not add a runtime dependency or install any skill. Offline checks do not substitute for live skill-selection or desktop qualification.
+Skill validation uses the bundled validator in a disposable Python 3.11 environment with PyYAML 6.0.3. The host Python still lacks PyYAML; validation does not add a runtime dependency or install any skill. Offline checks do not substitute for live skill-selection or desktop qualification.

@@ -9,11 +9,11 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tests
 from tests.support import Fixture
-from local_repair.cli import DEFAULT_STATE
-from local_repair.contracts import canonical, load_json
-from local_repair.lmstudio import Runtime
-from local_repair.store import Store, atomic_json
-from local_repair.validation import check_candidate
+from local_model_delegation.cli import DEFAULT_STATE
+from local_model_delegation.contracts import canonical, load_json
+from local_model_delegation.lmstudio import Runtime
+from local_model_delegation.store import Store, atomic_json
+from local_model_delegation.validation import verify_candidate
 
 
 def validate_temporary_state(path):
@@ -41,7 +41,7 @@ def prepare_native(state_dir):
         entry["models"][0]["allFiles"] = [{"absPath": str(state_dir / "artifact/weights.bin")}]
         atomic_json(catalog, entry)
         profile["runtime_catalog"] = str(catalog)
-        from local_repair.profiles import model_identity
+        from local_model_delegation.profiles import model_identity
         profile["approval"]["model_identity"] = model_identity(profile)
         brief["source_root"] = str((state_dir / "project").resolve())
         # Only a fictional local profile; no real runtime discovery or local POST.
@@ -75,7 +75,7 @@ def main():
         if not store.attach_fallback(claim["job_id"], claim["dispatch_token"], args.native_task_id):
             raise ValueError("native_task_mismatch")
         result = store.record_fallback_candidate(claim["job_id"], args.native_task_id, Path(claim["candidate_path"]))
-        result = check_candidate(state, claim["job_id"])
+        result = verify_candidate(state, claim["job_id"])
         assert result["status"] == "accepted", result
         assert not store.claim_fallback(claim["job_id"])["may_dispatch"]
         assert not store.claim_fallback(claim["job_id"])["may_dispatch"]

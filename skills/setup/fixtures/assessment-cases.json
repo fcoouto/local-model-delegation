@@ -2,8 +2,8 @@
   "schema_version": 1,
   "cases": [
     {
-      "id": "python-repair-0",
-      "capability": "bounded_python_repair",
+      "id": "python-change-0",
+      "capability": "python_code_change",
       "language": "python",
       "complexity": "simple",
       "context_bucket": "small",
@@ -30,8 +30,8 @@
       "contract": "Make transform return text.strip() and add a regression test."
     },
     {
-      "id": "python-repair-1",
-      "capability": "bounded_python_repair",
+      "id": "python-change-1",
+      "capability": "python_code_change",
       "language": "python",
       "complexity": "simple",
       "context_bucket": "small",
@@ -58,8 +58,8 @@
       "contract": "Make transform return text.upper() and add a regression test."
     },
     {
-      "id": "python-repair-2",
-      "capability": "bounded_python_repair",
+      "id": "python-change-2",
+      "capability": "python_code_change",
       "language": "python",
       "complexity": "simple",
       "context_bucket": "small",

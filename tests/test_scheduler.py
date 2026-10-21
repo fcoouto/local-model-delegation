@@ -2,7 +2,7 @@ import copy
 import importlib.util
 import time
 from unittest.mock import patch
-from local_repair.store import Store, atomic_json
+from local_model_delegation.store import Store, atomic_json
 from tests.support import Fixture
 from tests import test_delegation
 
@@ -16,7 +16,7 @@ class Scheduler(Fixture):
         p = self.profile(); p.update(schema_version=2, qualification_status='qualified', capabilities=['code_change'],
             scope=[{'capability':'code_change','language':'javascript','complexity':'simple','context_bucket':'small','max_input_bytes':100000}],
             benefit_evidence={'credible':True,'native_overhead':10})
-        from local_repair.contracts import digest
+        from local_model_delegation.contracts import digest
         p['capacity_evidence']={'qualified':True,'limit':1,'machine_fingerprint':'fixture-machine','settings_digest':digest(p['request_settings']),'artifact_digest':p['artifact']['digest'],'context_length':8192,'request_bytes':1024**3,'batches':3,'median_slowdown':1}
         p['benefit_evidence']['scope']=copy.deepcopy(p['scope'])
         p['approval'].update(scope=copy.deepcopy(p['scope']),capabilities=p['capabilities'])
@@ -53,17 +53,17 @@ class Scheduler(Fixture):
 
     def test_queue_deadline_does_not_reset_on_progress(self):
         store, brief, p = self.setup_queue()
-        with patch('local_repair.store.time.time',return_value=100): job=store.enqueue(brief,brief['fallback'])
-        with patch('local_repair.store.time.time',return_value=131):
+        with patch('local_model_delegation.store.time.time',return_value=100): job=store.enqueue(brief,brief['fallback'])
+        with patch('local_model_delegation.store.time.time',return_value=131):
             self.assertEqual(store.admit(job['job_id'],p,self.loaded(),self.resources())['reason'],'route_decision_required')
         self.assertEqual(store.job(job['job_id'])['queued_at'],100)
         self.assertEqual(store.job(job['job_id'])['route_data']['wait_until'],130)
 
     def test_later_arrivals_cannot_starve_waiter(self):
         store, brief, p = self.setup_queue()
-        with patch('local_repair.store.time.time',return_value=100): first=store.enqueue(brief,brief['fallback'])
+        with patch('local_model_delegation.store.time.time',return_value=100): first=store.enqueue(brief,brief['fallback'])
         urgent=copy.deepcopy(brief); urgent['task_key']='urgent';urgent['task_requirements']['urgency']='urgent'
-        with patch('local_repair.store.time.time',return_value=401): second=store.enqueue(urgent,urgent['fallback'])
+        with patch('local_model_delegation.store.time.time',return_value=401): second=store.enqueue(urgent,urgent['fallback'])
         self.assertEqual(store.waiting_jobs(now=401)[0]['job_id'],first['job_id'])
 
     def test_queue_fallback_leaves_running_peer_untouched(self):
@@ -88,8 +88,8 @@ class Scheduler(Fixture):
         self.assertEqual(store.admit(job['job_id'],p,self.loaded(),self.resources())['status'],'needs_reassessment')
 
     def test_unknown_benefit_keeps_native(self):
-        self.assertIsNotNone(importlib.util.find_spec('local_repair.scheduler'))
-        from local_repair.scheduler import rank_profiles
+        self.assertIsNotNone(importlib.util.find_spec('local_model_delegation.scheduler'))
+        from local_model_delegation.scheduler import rank_profiles
         store, brief, p=self.setup_queue()
         self.assertEqual(rank_profiles(brief,[p]),['fictional'])
         p.pop('benefit_evidence')
@@ -97,8 +97,8 @@ class Scheduler(Fixture):
 
     def test_scheduler_samples_memory_after_slow_artifact_authorization(self):
         from tests.support import FakeRuntime
-        from local_repair.profiles import authorize_job, model_identity
-        from local_repair.scheduler import schedule_once
+        from local_model_delegation.profiles import authorize_job, model_identity
+        from local_model_delegation.scheduler import schedule_once
         store, brief, p = self.setup_queue()
         server = FakeRuntime(); self.addCleanup(server.close)
         p['endpoint'] = server.endpoint; p['approval']['model_identity'] = model_identity(p)
@@ -109,9 +109,9 @@ class Scheduler(Fixture):
             now[0] += 6
             return result
         with patch('time.time', side_effect=lambda: now[0]), \
-             patch('local_repair.profiles.authorize_job', side_effect=slow_authorization), \
-             patch('local_repair.capacity.machine_snapshot', side_effect=self.resources) as sample, \
-             patch('local_repair.worker.start_worker') as start:
+             patch('local_model_delegation.profiles.authorize_job', side_effect=slow_authorization), \
+             patch('local_model_delegation.capacity.machine_snapshot', side_effect=self.resources) as sample, \
+             patch('local_model_delegation.worker.start_worker') as start:
             job = store.enqueue(brief, brief['fallback'])
             schedule_once(self.state)
             self.assertEqual(store.job(job['job_id'])['status'], 'reserved')
@@ -122,18 +122,18 @@ class Scheduler(Fixture):
     def test_explicit_stale_resource_snapshot_stays_ineligible(self):
         store, brief, p = self.setup_queue(); job = store.enqueue(brief, brief['fallback'])
         resources = self.resources(); resources['observed_at'] -= 6
-        with patch('local_repair.capacity.machine_snapshot') as sample:
+        with patch('local_model_delegation.capacity.machine_snapshot') as sample:
             self.assertEqual(store.admit(job['job_id'], p, self.loaded(), resources)['status'], 'waiting')
             sample.assert_not_called()
 
     def test_authorization_cannot_admit_after_wait_policy_expires(self):
-        from local_repair.profiles import authorize_job
+        from local_model_delegation.profiles import authorize_job
         store, brief, p = self.setup_queue(); now = [100]
         def slow_authorization(*args):
             result = authorize_job(*args); now[0] = 131
             return result
         with patch('time.time', side_effect=lambda: now[0]), \
-             patch('local_repair.profiles.authorize_job', side_effect=slow_authorization):
+             patch('local_model_delegation.profiles.authorize_job', side_effect=slow_authorization):
             job = store.enqueue(brief, brief['fallback'])
             result = store.admit(job['job_id'], p, self.loaded(), self.resources())
         self.assertEqual(result['reason'], 'route_decision_required')

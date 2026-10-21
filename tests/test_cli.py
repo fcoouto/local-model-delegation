@@ -3,14 +3,14 @@ import subprocess
 import sys
 from unittest.mock import patch
 from pathlib import Path
-from local_repair.cli import reconcile_native
-from local_repair.store import Store
-from tests.support import Fixture, FakeRuntime, SCRIPTS, FIXED, SUPPLIED, ADDED
+from local_model_delegation.cli import reconcile_native
+from local_model_delegation.store import Store
+from tests.support import Fixture, FakeRuntime, REPO_ROOT, FIXED, SUPPLIED, ADDED
 
 
 class CLI(Fixture):
     def invoke(self, *args):
-        result = subprocess.run([sys.executable, "-B", str(SCRIPTS / "repair.py"), "--state-dir", str(self.state), *args], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-B", str(REPO_ROOT / "delegate.py"), "--state-dir", str(self.state), *args], capture_output=True, text=True)
         self.assertIn(result.returncode, (0, 2), result.stderr)
         return json.loads(result.stdout)
 
@@ -107,7 +107,7 @@ class CLI(Fixture):
         self.assertEqual(self.invoke("check", "--job", job["job_id"])["status"], "failed")
 
     def test_invalid_model_list_is_unavailable(self):
-        from local_repair.cli import submit
+        from local_model_delegation.cli import submit_task
         server, store, path = self.busy()
-        with patch("local_repair.cli.Runtime.list_models", return_value={"models": [None]}):
-            self.assertEqual(submit(self.state, path)["status"], "fallback_required")
+        with patch("local_model_delegation.cli.Runtime.list_models", return_value={"models": [None]}):
+            self.assertEqual(submit_task(self.state, path)["status"], "fallback_required")

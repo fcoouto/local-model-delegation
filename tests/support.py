@@ -7,7 +7,7 @@ import unittest
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from . import SCRIPTS
+from . import REPO_ROOT
 from pathlib import Path
 
 BUGGY = 'def normalize(value):\n    return value.lstrip()\n'
@@ -50,7 +50,7 @@ class Fixture(unittest.TestCase):
         (self.artifact / "weights.bin").write_bytes(b"fictional weights version one")
 
     def profile(self):
-        from local_repair.profiles import fingerprint_artifact
+        from local_model_delegation.profiles import fingerprint_artifact
         identity = fingerprint_artifact(self.artifact, ["weights.bin"])
         settings = {"reasoning": "on", "temperature": 0, "max_output_tokens": 8192}
         catalog = self.root / "runtime-catalog.json"
@@ -66,20 +66,20 @@ class Fixture(unittest.TestCase):
             "schema_version": 1, "profile_id": "fictional", "endpoint": "http://127.0.0.1:1",
             "adapter": "lmstudio_v1", "model_id": "fictional-model",
             "artifact": {"root": str(self.artifact), "files": ["weights.bin"], **identity},
-            "capabilities": ["bounded_python_repair"], "request_settings": settings,
+            "capabilities": ["python_code_change"], "request_settings": settings,
             "fallback": {"model": "gpt-6.1-sol", "reasoning_effort": "medium"},
             "stale_tolerance_seconds": 120,
             "approval": {"owner_reference": "fictional-test-owner-not-a-real-approval", "timestamp": "2026-10-21",
-                         "artifact_digest": identity["digest"], "capabilities": ["bounded_python_repair"],
+                         "artifact_digest": identity["digest"], "capabilities": ["python_code_change"],
                          "request_settings": copy.deepcopy(settings)},
         }
-        from local_repair.profiles import model_identity
+        from local_model_delegation.profiles import model_identity
         profile["approval"]["model_identity"] = model_identity(profile)
         return profile
 
-    def brief(self, key="repair-one"):
+    def brief(self, key="change-one"):
         return {"schema_version": 1, "origin_chat_id": "fixture-chat", "task_key": key,
-                "capability": "bounded_python_repair", "source_root": str(self.project),
+                "capability": "python_code_change", "source_root": str(self.project),
                 "files": {name: {"content": text, "sha256": sha(text)} for name, text in
                           {"helper.py": BUGGY, "test_helper.py": SUPPLIED}.items()},
                 "editable_paths": ["helper.py", "test_helper.py"],
@@ -95,7 +95,7 @@ class Fixture(unittest.TestCase):
     def config(self, profile=None, enabled=True):
         p = profile or self.profile()
         return {"schema_version": 1, "routing_enabled": enabled,
-                "preferred_by_capability": {"bounded_python_repair": p["profile_id"]},
+                "preferred_by_capability": {"python_code_change": p["profile_id"]},
                 "profiles": {p["profile_id"]: p}}
 
     def write_config(self, profile=None, enabled=True):
@@ -103,7 +103,7 @@ class Fixture(unittest.TestCase):
         path = self.state / "profiles.json"
         # Rebind only fictional test approval to its selected loopback fake endpoint.
         if profile is not None and profile.get("runtime_catalog"):
-            from local_repair.profiles import model_identity
+            from local_model_delegation.profiles import model_identity
             profile["approval"]["model_identity"] = model_identity(profile)
         path.write_text(json.dumps(self.config(profile, enabled)))
         path.chmod(0o600)

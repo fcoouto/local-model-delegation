@@ -4,14 +4,14 @@ from pathlib import Path
 import re
 import sys
 import uuid
-from .contracts import canonical, digest, load_json, text_hash, validate_brief
+from .contracts import PYTHON_CHANGE_CAPABILITIES, canonical, digest, load_json, text_hash, validate_brief
 from .profiles import fingerprint_artifact, model_identity, read_config, read_profiles
 from .store import Store, atomic_json, private_dir
 
 
 def fixtures_path():
     bundled=Path(__file__).resolve().parents[1]/'assessment-cases.json'
-    return bundled if bundled.exists() else Path(__file__).resolve().parents[3] / 'setup/fixtures/assessment-cases.json'
+    return bundled if bundled.exists() else Path(__file__).resolve().parents[1] / 'skills/setup/fixtures/assessment-cases.json'
 
 
 def discover_models(runtime):
@@ -63,6 +63,9 @@ def begin_assessment(state_dir, profile_id, owner_reference):
     target=min(target,32)
     trials = []
     for case in manifest['cases']:
+        if case['capability'] in PYTHON_CHANGE_CAPABILITIES and case['capability'] not in profile['capabilities']:
+            compatible = next((c for c in profile['capabilities'] if c in PYTHON_CHANGE_CAPABILITIES), None)
+            if compatible: case = {**case, 'capability':compatible}
         if case['capability'] not in profile['capabilities']: continue
         source = private_dir(root / case['id'])
         for name, text in case['files'].items():
@@ -75,9 +78,9 @@ def begin_assessment(state_dir, profile_id, owner_reference):
                      'editable_paths': case['editable_paths'], 'behavior_contract': case['contract'],
                      'task_requirements': {**{k: case[k] for k in ('language','complexity','context_bucket')}, 'urgency':'normal','wait_budget_seconds':120},
                      'fallback': profile['fallback'],
-                     'acceptance': {'method': 'python_isolated' if case['capability']=='bounded_python_repair' else 'native_verified',
+                     'acceptance': {'method': 'python_isolated' if case['capability'] in PYTHON_CHANGE_CAPABILITIES else 'native_verified',
                                     'criteria': ['Meets the stated contract; tests must distinguish the specified behaviors.'], 'protected_paths': [], 'checks': []}}
-            if case['capability'] == 'bounded_python_repair':
+            if case['capability'] in PYTHON_CHANGE_CAPABILITIES:
                 brief.update({k: case[k] for k in ('supplied_tests','independent_tests','checks')})
                 brief['acceptance']['checks'] = [{'id':'python','argv':[str(Path(sys.executable).resolve()),'-m','unittest'],'cwd':'.','timeout_seconds':30}]
             elif case['capability'] != 'file_summary':

@@ -2,8 +2,8 @@ import copy
 import json
 from pathlib import Path
 from unittest.mock import patch
-from local_repair.contracts import validate_brief, text_hash
-from local_repair.store import Store, atomic_json
+from local_model_delegation.contracts import validate_brief, text_hash
+from local_model_delegation.store import Store, atomic_json
 from tests.support import Fixture
 
 
@@ -48,7 +48,7 @@ class Delegation(Fixture):
         return store, job['job_id']
 
     def api(self, name):
-        from local_repair import validation
+        from local_model_delegation import validation
         function = getattr(validation, name, None)
         self.assertTrue(callable(function), name + ' must exist')
         return function
@@ -82,10 +82,10 @@ class Delegation(Fixture):
                 parse(json.dumps({'files': {name: 'bad'}, 'summary': 'bad'}), brief)
 
     def test_prompt_excludes_oracles_and_tools(self):
-        from local_repair import worker
-        self.assertTrue(callable(getattr(worker, 'build_request', None)), 'build_request must exist')
+        from local_model_delegation import worker
+        self.assertTrue(callable(getattr(worker, 'build_model_request', None)), 'build_model_request must exist')
         brief = self.brief()
-        request = worker.build_request(brief, self.profile(), 'fictional-instance')
+        request = worker.build_model_request(brief, self.profile(), 'fictional-instance')
         self.assertNotIn('independent_tests', request['input'])
         self.assertNotIn('checks', request['input'])
         self.assertNotIn('tools', request)
@@ -134,14 +134,14 @@ class Delegation(Fixture):
     def test_missing_isolation_never_executes_candidate(self):
         prepare = self.api('prepare_verification')
         store, identifier = self.stage_job(self.generic())
-        with patch('local_repair.validation._qualified_isolation', return_value=False):
+        with patch('local_model_delegation.validation._qualified_isolation', return_value=False):
             with self.assertRaisesRegex(ValueError, 'verification_unsupported'): prepare(self.state, identifier)
         self.assertNotEqual(store.job(identifier)['status'], 'accepted')
 
     def test_javascript_checks_cannot_read_private_receipt_or_network(self):
         import shutil
         import sys
-        from local_repair.validation import run_native_checks
+        from local_model_delegation.validation import run_native_checks
         node = shutil.which('node')
         if not node or sys.platform != 'darwin': self.skipTest('JavaScript/macOS isolation unavailable')
         brief = self.generic()
@@ -164,7 +164,7 @@ class Delegation(Fixture):
         with self.assertRaisesRegex(ValueError, 'source_changed'): record(self.state, identifier, self.receipt(session))
 
     def test_native_candidate_without_selected_local_model_uses_same_checks(self):
-        from local_repair.validation import prepare_verification,record_verification
+        from local_model_delegation.validation import prepare_verification,record_verification
         brief=self.generic('file_summary')
         atomic_json(self.state/'config.json',{'schema_version':2,'routing_enabled':True,'visibility_enabled':True})
         store=Store(self.state);job=store.enqueue(brief,brief['fallback'])
@@ -177,13 +177,13 @@ class Delegation(Fixture):
         self.assertEqual(record_verification(self.state,job['job_id'],receipt)['status'],'accepted')
 
     def test_invalid_generic_candidate_selects_fallback_automatically(self):
-        from local_repair.validation import prepare_verification
+        from local_model_delegation.validation import prepare_verification
         brief=self.generic();store,identifier=self.stage_job(brief,{'files':{'unauthorized.js':'bad'},'summary':'bad'})
         with self.assertRaises(ValueError):prepare_verification(self.state,identifier)
         self.assertEqual(store.job(identifier)['status'],'fallback_required')
 
     def test_malformed_summary_path_selects_fallback(self):
-        from local_repair.validation import prepare_verification
+        from local_model_delegation.validation import prepare_verification
         brief=self.generic('file_summary');candidate=self.proposal(brief);candidate['claims'][0]['path']=[]
         store,identifier=self.stage_job(brief,candidate)
         with self.assertRaises(ValueError):prepare_verification(self.state,identifier)

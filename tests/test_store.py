@@ -1,7 +1,7 @@
 import copy
 import multiprocessing
 import time
-from local_repair.store import Store, atomic_json
+from local_model_delegation.store import Store, atomic_json
 from tests.support import Fixture
 
 
@@ -50,7 +50,7 @@ class Slots(Fixture):
         first = self.store.reserve(self.brief(), self.profile(), self.loaded())
         again = self.store.reserve(self.brief(), self.profile(), self.loaded())
         self.assertEqual(first, again)
-        self.assertEqual(self.store.lookup("fixture-chat", "repair-one")["job_id"], first["job_id"])
+        self.assertEqual(self.store.lookup("fixture-chat", "change-one")["job_id"], first["job_id"])
         changed = self.brief()
         changed["behavior_contract"] = "different task"
         with self.assertRaisesRegex(ValueError, "job_conflict"):

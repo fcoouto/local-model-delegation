@@ -4,15 +4,15 @@ import subprocess
 import sys
 import time
 from unittest.mock import patch
-from local_repair.store import Store
-from local_repair.worker import run_attempt, start_worker, wait_job, reconcile_attempts
-from tests.support import Fixture, FakeRuntime, SCRIPTS
+from local_model_delegation.store import Store
+from local_model_delegation.worker import run_local_attempt, start_worker, wait_job, reconcile_attempts
+from tests.support import Fixture, FakeRuntime, REPO_ROOT
 
 
 class Worker(Fixture):
     def setUp(self):
         super().setUp()
-        recovery = patch("local_repair.recovery.request_recovery")
+        recovery = patch("local_model_delegation.recovery.request_recovery")
         self.recovery_patch = recovery
         recovery.start()
         self.addCleanup(recovery.stop)
@@ -30,18 +30,18 @@ class Worker(Fixture):
 
     def test_eof_without_chat_end(self):
         server, store, job = self.prepare(incomplete=True)
-        run_attempt(self.state, job["attempt_id"])
+        run_local_attempt(self.state, job["attempt_id"])
         self.assertEqual(store.job(job["job_id"])["status"], "fallback_required")
         self.assertEqual(store.attempt(job["attempt_id"])["state"], "uncertain")
 
     def test_mismatched_final_result(self):
         server, store, job = self.prepare(mismatch=True)
-        run_attempt(self.state, job["attempt_id"])
+        run_local_attempt(self.state, job["attempt_id"])
         self.assertEqual(store.job(job["job_id"])["status"], "fallback_required")
 
     def test_parent_exit_does_not_stop_observer(self):
         server, store, job = self.prepare(delay=.3)
-        code = f'import sys;sys.path.insert(0,{str(SCRIPTS)!r});from local_repair.worker import start_worker;from pathlib import Path;print(start_worker(Path({str(self.state)!r}),{job["attempt_id"]!r}))'
+        code = f'import sys;sys.path.insert(0,{str(REPO_ROOT)!r});from local_model_delegation.worker import start_worker;from pathlib import Path;print(start_worker(Path({str(self.state)!r}),{job["attempt_id"]!r}))'
         parent = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True)
         self.assertEqual(parent.returncode, 0, parent.stderr)
         result = wait_job(self.state, job["job_id"], 5)
@@ -67,7 +67,7 @@ class Worker(Fixture):
         os.waitpid(pid, 0)
         reconcile_attempts(self.state)
         self.assertEqual(store.attempt(job["attempt_id"])["state"], "uncertain")
-        run_attempt(self.state, job["attempt_id"])
+        run_local_attempt(self.state, job["attempt_id"])
         self.assertEqual(server.calls.count(("POST", "/api/v1/chat")), 1)
 
     def test_recover_reserved_without_post_intent(self):
@@ -78,7 +78,7 @@ class Worker(Fixture):
         self.assertEqual(server.calls.count(("POST", "/api/v1/chat")), 1)
 
     def test_review_status_restarts_lost_recovery_owner(self):
-        from local_repair.recovery import close_instance
+        from local_model_delegation.recovery import close_instance
         server, store, job = self.prepare()
         store.transition(job["attempt_id"], 0, "reserved", "uncertain", {})
         store.select_fallback(job["job_id"], "observer_lost")
@@ -95,15 +95,17 @@ class Worker(Fixture):
     def test_cache_refresh_keeps_detached_worker_alive(self):
         import shutil
         server,store,job=self.prepare(delay=.3)
-        cache=self.root/'cache';scripts=cache/'skills/local-python-repair/scripts'
-        shutil.copytree(SCRIPTS,scripts)
+        cache=self.root/'cache';scripts=cache
+        scripts.mkdir()
+        shutil.copytree(REPO_ROOT/'local_model_delegation',scripts/'local_model_delegation')
+        shutil.copyfile(REPO_ROOT/'delegate.py',scripts/'delegate.py')
         fixtures=cache/'skills/setup/fixtures';fixtures.mkdir(parents=True)
-        shutil.copyfile(SCRIPTS.parents[1]/'setup/fixtures/assessment-cases.json',fixtures/'assessment-cases.json')
-        code=f'import sys;sys.path.insert(0,{str(scripts)!r});from pathlib import Path;from local_repair.worker import start_worker;print(start_worker(Path({str(self.state)!r}),{job["attempt_id"]!r}))'
+        shutil.copyfile(REPO_ROOT/'skills/setup/fixtures/assessment-cases.json',fixtures/'assessment-cases.json')
+        code=f'import sys;sys.path.insert(0,{str(scripts)!r});from pathlib import Path;from local_model_delegation.worker import start_worker;print(start_worker(Path({str(self.state)!r}),{job["attempt_id"]!r}))'
         parent=subprocess.run([sys.executable,'-B','-c',code],capture_output=True,text=True)
         self.assertEqual(parent.returncode,0,parent.stderr)
         shutil.rmtree(cache)
         self.assertEqual(wait_job(self.state,job['job_id'],5)['status'],'candidate_ready')
         self.assertEqual(server.calls.count(('POST','/api/v1/chat')),1)
         instance=store.instance(store.attempt(job['attempt_id'])['instance_key'])
-        self.assertTrue((self.state/'runtimes'/instance['data']['runtime_bundle']/'repair.py').is_file())
+        self.assertTrue((self.state/'runtimes'/instance['data']['runtime_bundle']/'delegate.py').is_file())

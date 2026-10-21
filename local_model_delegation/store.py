@@ -251,7 +251,7 @@ class Store:
             first = row is None
             if first:
                 if job["status"] != "fallback_required": raise ValueError("fallback_not_required")
-                token, task_name = uuid.uuid4().hex, "local_repair_" + job_id
+                token, task_name = uuid.uuid4().hex, "local_delegation_" + job_id
                 db.execute("INSERT INTO fallback_dispatches VALUES (?,?,?,NULL,'dispatching')", (job_id, token, task_name))
                 db.execute("UPDATE jobs SET status='fallback_dispatching' WHERE job_id=?", (job_id,))
                 row = db.execute("SELECT * FROM fallback_dispatches WHERE job_id=?", (job_id,)).fetchone()

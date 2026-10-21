@@ -1,7 +1,7 @@
 import importlib.util
 import json
 from unittest.mock import patch
-from local_repair.store import Store,atomic_json
+from local_model_delegation.store import Store,atomic_json
 from tests import test_scheduler
 from tests.support import Fixture
 
@@ -12,8 +12,8 @@ class Visibility(Fixture):
     resources=test_scheduler.Scheduler.resources
 
     def module(self):
-        self.assertIsNotNone(importlib.util.find_spec('local_repair.visibility'),'visibility module must exist')
-        from local_repair import visibility
+        self.assertIsNotNone(importlib.util.find_spec('local_model_delegation.visibility'),'visibility module must exist')
+        from local_model_delegation import visibility
         return visibility
 
     def test_visibility_defaults_on_while_routing_stays_off(self):

@@ -32,7 +32,7 @@ def ownership(store, name):
 
 def launch(state_dir, command, identifier):
     store = Store(state_dir)
-    from .package import pin_runtime_bundle, validate_bundle
+    from .package import pin_runtime_bundle, validate_bundle, runtime_entrypoint
     bundle = None
     job = None
     instance = None
@@ -66,7 +66,7 @@ def launch(state_dir, command, identifier):
         if name and re.fullmatch(r"[A-Z][A-Z0-9_]*", name) and name not in environment and name in os.environ:
             environment[name] = os.environ[name]
     try:
-        child = subprocess.Popen([sys.executable, "-B", str(bundle / "repair.py"),
+        child = subprocess.Popen([sys.executable, "-B", str(runtime_entrypoint(bundle)),
                                   "--state-dir", str(store.root), command, identifier], stdin=subprocess.DEVNULL,
                                  stdout=fd, stderr=fd, start_new_session=True, close_fds=True,
                                  env=environment)
@@ -80,7 +80,7 @@ def start_worker(state_dir, attempt_id):
     return launch(state_dir, "worker", attempt_id)
 
 
-def build_request(brief, profile, instance_id):
+def build_model_request(brief, profile, instance_id):
     summary = brief["capability"] == "file_summary"
     output = ("Return one JSON object with summary and claims. Each claim has text, path, sha256, start_line and end_line."
               if summary else "Return one JSON object with files (path to complete replacement text) and summary.")
@@ -90,7 +90,7 @@ def build_request(brief, profile, instance_id):
             **profile["request_settings"], "stream": True, "store": False}
 
 
-def run_attempt(state_dir, attempt_id):
+def run_local_attempt(state_dir, attempt_id):
     store = Store(state_dir)
     with ownership(store, "attempt-" + attempt_id) as owned:
         if not owned: return 0
@@ -132,7 +132,7 @@ def run_attempt(state_dir, attempt_id):
         thread.start()
         answer, total, complete = [], 0, False
         try:
-            body = build_request(job["brief"], job["profile"], store.instance(attempt["instance_key"])["data"]["instance_id"])
+            body = build_model_request(job["brief"], job["profile"], store.instance(attempt["instance_key"])["data"]["instance_id"])
             for event, data in runtime.stream(body):
                 if stale.is_set(): raise ValueError("stale")
                 counts[event] = counts.get(event, 0) + 1
@@ -189,8 +189,8 @@ def reconcile_attempts(state_dir):
     for job_id in checking:
         with ownership(store, "check-" + job_id) as owned:
             if owned:
-                from .validation import reclaim_check
-                reclaim_check(store, job_id)
+                from .validation import reclaim_python_verification
+                reclaim_python_verification(store, job_id)
     for attempt in attempts:
         start = False
         with ownership(store, "attempt-" + attempt["attempt_id"]) as owned:

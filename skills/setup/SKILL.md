@@ -5,9 +5,9 @@ description: Use when setting up, assessing models for, updating or removing the
 
 # Set up Local Model Delegation
 
-Use the packaged `../local-python-repair/scripts/repair.py` with Python 3.11+. Run `doctor` first; runtime inspection requires `doctor --inspect-runtime` and an explicit configured loopback endpoint. Do not scan ports or change native credentials/provider/default settings.
+Use the packaged `../../delegate.py` with Python 3.11+. Run `doctor` first; runtime inspection requires `doctor --inspect-runtime` and an explicit configured loopback endpoint. Do not scan ports or change native credentials/provider/default settings.
 
-Installation uses native Codex plugin controls. This skill does not install itself. After authorized setup, `setup` initializes private shared state with routing disabled and visibility enabled. Existing state remains at `~/.local/state/codex-local-repairs`. Existing legacy state requires explicit `migrate`; it preserves exact backups and refuses unresolved work. Never copy private profiles/evidence into the plugin.
+Installation uses native Codex plugin controls. This skill does not install itself. After authorized setup, `setup` initializes private shared state at `~/.local/state/local-model-delegation` with routing disabled and visibility enabled. If the previous `~/.local/state/codex-local-repairs` directory exists, pass it explicitly with `--state-dir`; never move it or silently create a second queue. Legacy state schemas require explicit `migrate` in place; it preserves exact backups and refuses unresolved work. Never copy private profiles/evidence into the plugin.
 
 Explain and separate the four decisions: plugin installation, optional standing synthetic-assessment consent, one-time approval of an exact model/scope, and routing activation. Setup itself grants none of the later decisions. Visibility can be enabled or disabled independently with `visibility` commands; no viewer is needed.
 

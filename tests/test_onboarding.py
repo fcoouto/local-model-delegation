@@ -2,14 +2,14 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
-from local_repair.store import atomic_json
+from local_model_delegation.store import atomic_json
 from tests.support import Fixture, FakeRuntime
 
 
 class Onboarding(Fixture):
     def module(self):
-        self.assertIsNotNone(importlib.util.find_spec('local_repair.onboarding'), 'onboarding module must exist')
-        from local_repair import onboarding
+        self.assertIsNotNone(importlib.util.find_spec('local_model_delegation.onboarding'), 'onboarding module must exist')
+        from local_model_delegation import onboarding
         return onboarding
 
     def setup_policy(self):
@@ -21,7 +21,7 @@ class Onboarding(Fixture):
 
     def test_discovery_has_no_lifecycle_side_effect(self):
         module = self.module()
-        from local_repair.lmstudio import Runtime
+        from local_model_delegation.lmstudio import Runtime
         server = FakeRuntime(); self.addCleanup(server.close)
         result = module.discover_models(Runtime(server.endpoint))
         self.assertEqual(len(result), 1)
@@ -93,8 +93,8 @@ class Onboarding(Fixture):
         module = self.module(); profile = self.setup_policy()
         profile['assessment'] = {'recommendation': 'approve', 'passed': True}
         atomic_json(self.state / 'profiles/fictional.json', profile)
-        from local_repair.profiles import read_profile_by_id
-        with self.assertRaises(ValueError): read_profile_by_id(self.state, 'fictional', 'bounded_python_repair')
+        from local_model_delegation.profiles import read_profile_by_id
+        with self.assertRaises(ValueError): read_profile_by_id(self.state, 'fictional', 'python_code_change')
         with self.assertRaisesRegex(ValueError, 'assessment_consent_required'):
             module.begin_assessment(self.state, 'fictional', 'unrelated-consent')
 
@@ -102,9 +102,9 @@ class Onboarding(Fixture):
         module = self.module(); profile = self.setup_policy()
         assessment = module.begin_assessment(self.state, 'fictional', 'fixture-standing-consent')
         trial = assessment['trials'][0]
-        from local_repair.store import Store
-        from local_repair.contracts import canonical
-        from local_repair.profiles import authorize_job
+        from local_model_delegation.store import Store
+        from local_model_delegation.contracts import canonical
+        from local_model_delegation.profiles import authorize_job
         store = Store(self.state)
         saved = store.reserve(trial['brief'], profile, self.loaded())
         permit = {'assessment_id':assessment['assessment_id'], 'permit_token':assessment['permit_token']}
@@ -125,17 +125,17 @@ class Onboarding(Fixture):
         trial = assessment['trials'][0]; brief = trial['brief']
         server.answer = json.dumps({'files': {'helper.py':'def transform(text):\n    return text.strip()\n',
             'test_helper.py':brief['files']['test_helper.py']['content']+'    def test_both(self):\n        self.assertEqual(transform(" x "), "x")\n'}, 'summary':'Trim both ends'})
-        from local_repair.store import Store
-        from local_repair.contracts import canonical
-        from local_repair.worker import run_attempt
-        from local_repair.validation import check_candidate
+        from local_model_delegation.store import Store
+        from local_model_delegation.contracts import canonical
+        from local_model_delegation.worker import run_local_attempt
+        from local_model_delegation.validation import verify_candidate
         store = Store(self.state)
         saved = store.reserve(brief, profile, {**self.loaded(),'endpoint':server.endpoint})
         permit = {'assessment_id':assessment['assessment_id'], 'permit_token':assessment['permit_token']}
         with store.db(write=True) as db:
             db.execute('UPDATE jobs SET route_data=? WHERE job_id=?', (canonical({'assessment':permit}), saved['job_id']))
-        self.assertEqual(run_attempt(self.state, saved['attempt_id']), 0)
-        self.assertEqual(check_candidate(self.state, saved['job_id'])['status'], 'accepted')
+        self.assertEqual(run_local_attempt(self.state, saved['attempt_id']), 0)
+        self.assertEqual(verify_candidate(self.state, saved['job_id'])['status'], 'accepted')
         report = module.record_trial(self.state, assessment['assessment_id'], {'trial_id':trial['trial_id'], 'job_id':saved['job_id']})
         self.assertEqual(report['completed_trials'], 1)
         self.assertEqual(report['recommendation'], 'do_not_approve_yet')
@@ -146,7 +146,7 @@ class Onboarding(Fixture):
     def test_optional_token_uses_named_environment_only(self):
         import os
         from unittest.mock import patch
-        from local_repair.lmstudio import Runtime
+        from local_model_delegation.lmstudio import Runtime
         with patch.dict(os.environ, {'FIXTURE_RUNTIME_TOKEN':'synthetic-secret'}):
             runtime = Runtime('http://127.0.0.1:1', token_env='FIXTURE_RUNTIME_TOKEN')
             self.assertEqual(runtime.headers['Authorization'], 'Bearer synthetic-secret')
@@ -156,7 +156,7 @@ class Onboarding(Fixture):
     def test_usage_proxy_is_not_subscription_savings(self):
         module=self.module();self.assertTrue(hasattr(module,'record_outcome'),'record_outcome must exist')
         self.setup_policy()
-        from local_repair.store import Store
+        from local_model_delegation.store import Store
         profile=module._profile(self.state,'fictional');store=Store(self.state)
         job=store.reserve(self.brief(),profile,None)
         with store.db(write=True) as db:db.execute("UPDATE jobs SET status='accepted'")
@@ -178,14 +178,14 @@ class Onboarding(Fixture):
         receipt={'native_usage':{'kind':'unknown','value':None},'coordination_tokens':None,'checking_tokens':None,'fallback_tokens':None,
                  'native_baseline_tokens':None,'onboarding_tokens':None,'latency_seconds':5,'provenance':'fixture failure'}
         module.record_outcome(fixture.state,job['job_id'],receipt)
-        from local_repair.profiles import read_profiles
-        from local_repair.scheduler import rank_profiles
+        from local_model_delegation.profiles import read_profiles
+        from local_model_delegation.scheduler import rank_profiles
         self.assertEqual(rank_profiles(brief,read_profiles(fixture.state)),[])
 
     def test_capacity_record_requires_accepted_local_trial_jobs(self):
         module=self.module();self.assertTrue(hasattr(module,'record_capacity'),'record_capacity must exist')
         self.setup_policy();assessment=module.begin_assessment(self.state,'fictional','fixture-standing-consent')
-        from local_repair.store import Store
+        from local_model_delegation.store import Store
         trial=assessment['trials'][0];store=Store(self.state);job=store.reserve(trial['brief'],module._profile(self.state,'fictional'),self.loaded())
         receipt={'context_length':8192,'resources':{},'batches':[{'job_ids':[job['job_id']],'request_bytes':1024,'pressure':'normal','swapout_delta_bytes':0}]}
         with self.assertRaisesRegex(ValueError,'capacity_trial_not_accepted'):
@@ -193,7 +193,7 @@ class Onboarding(Fixture):
 
     def test_onboarding_overhead_is_amortized_before_claiming_benefit(self):
         module=self.module();self.setup_policy()
-        from local_repair.store import Store
+        from local_model_delegation.store import Store
         store=Store(self.state);job=store.reserve(self.brief(),module._profile(self.state,'fictional'),None)
         with store.db(write=True) as db:db.execute("UPDATE jobs SET status='accepted'")
         receipt={'native_usage':{'kind':'tokens','value':10},'coordination_tokens':3,'checking_tokens':7,'fallback_tokens':0,
@@ -204,8 +204,8 @@ class Onboarding(Fixture):
 
     def test_native_fallback_success_does_not_qualify_local_model(self):
         module=self.module();profile=self.setup_policy();assessment=module.begin_assessment(self.state,'fictional','fixture-standing-consent')
-        from local_repair.store import Store
-        from local_repair.contracts import canonical
+        from local_model_delegation.store import Store
+        from local_model_delegation.contracts import canonical
         trial=assessment['trials'][0];store=Store(self.state);job=store.reserve(trial['brief'],profile,None)
         permit={'assessment_id':assessment['assessment_id'],'permit_token':assessment['permit_token']}
         with store.db(write=True) as db:
@@ -216,8 +216,8 @@ class Onboarding(Fixture):
 
     def test_assessment_failure_cannot_dispatch_native_fallback(self):
         module=self.module();profile=self.setup_policy();assessment=module.begin_assessment(self.state,'fictional','fixture-standing-consent')
-        from local_repair.store import Store
-        from local_repair.contracts import canonical
+        from local_model_delegation.store import Store
+        from local_model_delegation.contracts import canonical
         store=Store(self.state);job=store.reserve(assessment['trials'][0]['brief'],profile,None)
         with store.db(write=True) as db:
             db.execute('UPDATE jobs SET route_data=?',(canonical({'assessment':{'assessment_id':assessment['assessment_id'],'permit_token':assessment['permit_token']}}),))

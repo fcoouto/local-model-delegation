@@ -1,10 +1,10 @@
 import threading
 import time
 from unittest.mock import patch
-from local_repair.recovery import close_instance, recover_once, recover_instance
-from local_repair.lmstudio import Runtime
-from local_repair.store import Store
-from local_repair.worker import run_attempt, start_worker, wait_job
+from local_model_delegation.recovery import close_instance, recover_once, recover_instance
+from local_model_delegation.lmstudio import Runtime
+from local_model_delegation.store import Store
+from local_model_delegation.worker import run_local_attempt, start_worker, wait_job
 from tests.support import Fixture, FakeRuntime
 
 
@@ -55,7 +55,7 @@ class Recovery(Fixture):
     def profile_for(self, server):
         p = self.profile()
         p["endpoint"] = server.endpoint
-        from local_repair.profiles import model_identity
+        from local_model_delegation.profiles import model_identity
         p["approval"]["model_identity"] = model_identity(p)
         return p
 
@@ -86,8 +86,8 @@ class Recovery(Fixture):
         self.write_config(profile)
         store = Store(self.state)
         job = store.reserve(self.brief(), profile, {**self.loaded(), "endpoint": server.endpoint})
-        with patch("local_repair.recovery.request_recovery"):
-            run_attempt(self.state, job["attempt_id"])
+        with patch("local_model_delegation.recovery.request_recovery"):
+            run_local_attempt(self.state, job["attempt_id"])
         self.assertEqual(store.job(job["job_id"])["status"], "fallback_required")
         key = store.attempt(job["attempt_id"])["instance_key"]
         self.assertNotEqual(store.instance(key)["state"], "ready")
@@ -132,12 +132,12 @@ class Recovery(Fixture):
         with patch.object(runtime, "stream", starts_then_dies), self.assertRaises(KeyboardInterrupt):
             recover_once(store, key, runtime)
         # SIGKILL cannot run exception handlers; its durable intent still fences retry.
-        from local_repair.recovery import update_instance
+        from local_model_delegation.recovery import update_instance
         update_instance(store, key, {"recovery_phase": "probe_submitting"}, "closed")
         self.assertTrue(recover_once(store, key, Runtime(server.endpoint)))
         self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 2)
         self.assertEqual(server.calls.count(("POST", "/api/v1/chat")), 2)
-        from local_repair.contracts import load_json
+        from local_model_delegation.contracts import load_json
         receipts = [load_json(p.read_text()) for p in (store.root / "probes" / key).glob("*.json")]
         self.assertEqual(sorted(r["state"] for r in receipts), ["complete", "uncertain"])
 
@@ -152,11 +152,11 @@ class Recovery(Fixture):
         self.assertNotEqual(store.instance(key)["state"], "ready")
 
     def test_recovery_restart_respects_owner_backoff_and_permanent_error(self):
-        from local_repair.contracts import digest
-        from local_repair.recovery import request_recovery, update_instance
-        from local_repair.worker import ownership
+        from local_model_delegation.contracts import digest
+        from local_model_delegation.recovery import request_recovery, update_instance
+        from local_model_delegation.worker import ownership
         server, store, job, key = self.prepare()
-        with patch("local_repair.recovery.launch") as launch:
+        with patch("local_model_delegation.recovery.launch") as launch:
             with ownership(store, "recovery-" + digest([server.endpoint, "fictional-model"])):
                 request_recovery(self.state, key)
             launch.assert_not_called()
@@ -171,7 +171,7 @@ class Recovery(Fixture):
             launch.assert_called_once()
 
     def test_repeated_recovery_tracks_replacement_instance(self):
-        from local_repair.contracts import digest
+        from local_model_delegation.contracts import digest
         server, store, job, key = self.prepare()
         server.change_instance_on_load = True
         for _ in range(2):
@@ -184,7 +184,7 @@ class Recovery(Fixture):
         self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 2)
 
     def test_probe_requires_one_matching_start(self):
-        from local_repair.recovery import probe
+        from local_model_delegation.recovery import probe
         server, store, job, key = self.prepare()
         runtime = Runtime(server.endpoint)
         stream = runtime.stream
@@ -200,7 +200,7 @@ class Recovery(Fixture):
                 with self.assertRaises(ValueError): probe(runtime, self.profile_for(server), server.instance_id)
 
     def test_resumed_probe_rejects_unverified_replacement(self):
-        from local_repair.recovery import update_instance
+        from local_model_delegation.recovery import update_instance
         server, store, job, key = self.prepare()
         update_instance(store, key, {"recovery_phase": "probe", "loaded": {
             **self.loaded(), "endpoint": server.endpoint}})
@@ -211,21 +211,21 @@ class Recovery(Fixture):
         self.assertEqual(store.attempt(job["attempt_id"])["state"], "uncertain")
 
     def test_changed_approval_during_probe_cannot_reopen(self):
-        from local_repair.recovery import probe
+        from local_model_delegation.recovery import probe
         server, store, job, key = self.prepare()
         def probe_then_change(runtime, profile, instance_id):
             probe(runtime, profile, instance_id)
             replacement = self.profile_for(server)
             replacement["approval"]["owner_reference"] = "fictional-new-confirmation"
             self.write_config(replacement)
-        with patch("local_repair.recovery.probe", side_effect=probe_then_change):
+        with patch("local_model_delegation.recovery.probe", side_effect=probe_then_change):
             with self.assertRaisesRegex(ValueError, "approval_changed"):
                 recover_once(store, key, Runtime(server.endpoint))
         self.assertNotEqual(store.instance(key)["state"], "ready")
         self.assertEqual(store.attempt(job["attempt_id"])["state"], "uncertain")
 
     def test_recovery_defers_to_healthy_replacement_peer(self):
-        from local_repair.recovery import update_instance
+        from local_model_delegation.recovery import update_instance
         server, store, job, key = self.prepare()
         update_instance(store, key, {"recovery_phase": "load"})
         server.instance_id = "replacement-with-healthy-work"
@@ -238,8 +238,8 @@ class Recovery(Fixture):
         self.assertEqual(store.attempt(peer["attempt_id"])["state"], "reserved")
 
     def test_old_load_phase_cannot_probe_another_uncertain_instance(self):
-        from local_repair.contracts import digest
-        from local_repair.recovery import update_instance
+        from local_model_delegation.contracts import digest
+        from local_model_delegation.recovery import update_instance
         server, store, job, key = self.prepare()
         update_instance(store, key, {"recovery_phase": "load"})
         server.instance_id = "replacement-with-uncertain-probe"
@@ -255,9 +255,9 @@ class Recovery(Fixture):
         self.assertEqual(store.attempt(job["attempt_id"])["state"], "uncertain")
 
     def test_replacement_discovery_cannot_start_competing_recovery(self):
-        from local_repair.contracts import digest
-        from local_repair.lmstudio import select_loaded
-        from local_repair.recovery import probe
+        from local_model_delegation.contracts import digest
+        from local_model_delegation.lmstudio import select_loaded
+        from local_model_delegation.recovery import probe
         server, store, job, key = self.prepare()
         server.change_instance_on_load = True
         entered, release = threading.Event(), threading.Event()
@@ -266,7 +266,7 @@ class Recovery(Fixture):
                 entered.set()
                 if not release.wait(5): raise ValueError("test_probe_release_timeout")
             return probe(runtime, profile, instance_id)
-        with patch("local_repair.recovery.probe", side_effect=paused_probe), patch("local_repair.recovery.request_recovery"):
+        with patch("local_model_delegation.recovery.probe", side_effect=paused_probe), patch("local_model_delegation.recovery.request_recovery"):
             owner = threading.Thread(target=recover_instance, args=(self.state, key))
             owner.start()
             try:

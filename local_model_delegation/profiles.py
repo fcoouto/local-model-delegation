@@ -6,7 +6,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
-from .contracts import CAPABILITY, canonical, digest, load_json, positive, safe_path
+from .contracts import CAPABILITIES, canonical, digest, load_json, positive, safe_path
 from .store import Store, atomic_json, private_dir
 
 
@@ -95,7 +95,7 @@ def eligible(profile: dict[str, Any], identity: dict[str, Any], capability: str)
                 and (profile.get("schema_version") != 2 or approval.get("scope") == profile.get("scope")))
 
 
-def read_profile(path: Path, capability: str) -> dict[str, Any]:
+def read_legacy_profile(path: Path, capability: str) -> dict[str, Any]:
     path = Path(path)
     if path.is_symlink():
         raise ValueError("unsafe_configuration")
@@ -119,7 +119,7 @@ def validate_profile(p, capability):
     try:
         settings, fallback = p["request_settings"], p["fallback"]
         if (p.get("schema_version") not in (1, 2) or not re.fullmatch(r"[A-Za-z0-9_-]+", p["profile_id"])
-                or p["adapter"] != "lmstudio_v1" or capability not in (CAPABILITY, "test_writing", "code_change", "file_summary")
+                or p["adapter"] != "lmstudio_v1" or capability not in CAPABILITIES
                 or not positive(p["stale_tolerance_seconds"]) or not isinstance(p["model_id"], str) or not p["model_id"]
                 or set(fallback) != {"model", "reasoning_effort"} or not all(isinstance(v, str) and v for v in fallback.values())
                 or set(settings) not in ({"reasoning", "temperature", "max_output_tokens"}, {"temperature", "max_output_tokens"})
@@ -230,7 +230,7 @@ def _quiescent(db):
             raise ValueError("unresolved_work")
 
 
-def migrate_state(state_dir):
+def migrate_profile_schema(state_dir):
     """Explicit, resumable migration; the old entry point stays disabled throughout."""
     from .worker import ownership
     store = Store(state_dir)
