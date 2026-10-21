@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 from .contracts import MAX_ANSWER_BYTES, canonical, envelope, text_hash
-from .lmstudio import ActivityWatch, Runtime, final_text
+from .lmstudio import ActivityWatch, ProgressWatch, Runtime, final_text
 from .profiles import authorize_job
 from .store import Store, atomic_json, private_dir
 
@@ -85,6 +85,7 @@ def run_attempt(state_dir, attempt_id):
         if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time()}): return 0
         runtime = Runtime(job["profile"]["endpoint"], token_env=job["profile"].get("token_env"))
         watch = ActivityWatch(job["profile"]["stale_tolerance_seconds"], time.monotonic())
+        progress = ProgressWatch({**job["profile"]["request_settings"], "require_completion_metadata": job["profile"].get("schema_version") == 2})
         stopped, stale = threading.Event(), threading.Event()
         counts = {}
 
@@ -98,7 +99,7 @@ def run_attempt(state_dir, attempt_id):
                     continue
                 if now - heartbeat >= 1:
                     try:
-                        store.observe(attempt_id, {"heartbeat": time.time(), "last_activity": watch.last, "counts": dict(counts)})
+                        store.observe(attempt_id, {"heartbeat": time.time(), "last_activity": watch.last, "counts": dict(counts), **progress.snapshot()})
                     except Exception: pass  # Failure never frees a reservation; the ownership lock remains held.
                     heartbeat = now
 
@@ -117,6 +118,8 @@ def run_attempt(state_dir, attempt_id):
                         raise ValueError("attempt_fenced")
                 if event == "error" or event.startswith(("tool_call.", "model_load.")):
                     raise ValueError("unsupported_stream_event")
+                reason = progress.observe(event, data)
+                if reason: raise ValueError(reason)
                 watch.observe(event, data, time.monotonic())
                 if event == "message.delta":
                     content = data.get("content")
@@ -125,6 +128,8 @@ def run_attempt(state_dir, attempt_id):
                     if total > MAX_ANSWER_BYTES: raise ValueError("oversized_answer")
                     answer.append(content)
                 if event == "chat.end":
+                    if job["profile"].get("schema_version") == 2 and data.get("result", {}).get("model_instance_id") != body["model"]:
+                        raise ValueError("instance_mismatch")
                     text = "".join(answer)
                     if not text or final_text(data.get("result")) != text: raise ValueError("final_result_mismatch")
                     path = store.root / "jobs" / job["job_id"] / attempt_id / "candidate.json"
@@ -139,7 +144,7 @@ def run_attempt(state_dir, attempt_id):
             current_state = store.attempt(attempt_id)["state"]
             if current_state in ("submitting", "streaming"):
                 store.transition(attempt_id, generation, current_state, "uncertain", {"error": type(error).__name__})
-            store.select_fallback(job["job_id"], "stale" if stale.is_set() else "local_request_uncertain")
+            store.select_fallback(job["job_id"], "stale" if stale.is_set() else progress.reason or "local_request_uncertain")
             from .recovery import close_instance, request_recovery
             close_instance(store, attempt["instance_key"])
             request_recovery(state_dir, attempt["instance_key"])

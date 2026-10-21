@@ -167,7 +167,7 @@ class FakeRuntime:
                 if outer.delay: time.sleep(outer.delay)
                 events += [("reasoning.end", {}), ("message.start", {}), ("message.delta", {"content": answer}), ("message.end", {})]
                 if not outer.incomplete:
-                    events.append(("chat.end", {"result": {"output": [{"type": "message", "content": answer + ("wrong" if outer.mismatch else "")}]}}))
+                    events.append(("chat.end", {"result": {"model_instance_id": outer.instance_id, "stats": {"total_output_tokens": 50}, "output": [{"type": "message", "content": answer + ("wrong" if outer.mismatch else "")}]}}))
                 try:
                     for event, data in events:
                         self.wfile.write(f"event: {event}\ndata: {json.dumps({'type': event, **data})}\n\n".encode())

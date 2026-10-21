@@ -134,6 +134,8 @@ class ActivityWatch:
 def final_text(result):
     if not isinstance(result, dict) or not isinstance(result.get("output"), list):
         raise ValueError("invalid_final_result")
+    if any(not isinstance(item, dict) or item.get("type") not in ("message", "reasoning") or not isinstance(item.get("content"), str) for item in result["output"]):
+        raise ValueError("unsupported_completion")
     return "".join(item["content"] for item in result["output"] if item.get("type") == "message")
 
 
@@ -158,3 +160,33 @@ def select_loaded(snapshot, profile, assessment_identity=None):
     if type(capacity) is not int or capacity <= 0: return None
     return {"endpoint": profile["endpoint"], "model_id": profile["model_id"], "instance_id": instance["id"],
             "capacity": capacity, "config": instance["config"], "binding_verified": profile.get("schema_version") == 2}
+
+
+class ProgressWatch:
+    def __init__(self, policy):
+        from collections import deque
+        if type(policy.get('max_output_tokens')) is not int or policy['max_output_tokens']<=0: raise ValueError('invalid_progress_policy')
+        self.limit=policy['max_output_tokens']
+        self.strict=policy.get('require_completion_metadata',True)
+        self.buffer='';self.hashes=deque(maxlen=8);self.characters=0;self.reason=None
+
+    def observe(self,event,data):
+        from .contracts import text_hash
+        if self.reason:return self.reason
+        if event=='reasoning.delta':
+            content=data.get('content')
+            if not isinstance(content,str):raise ValueError('invalid_content')
+            self.characters+=len(content);self.buffer+=content
+            while len(self.buffer)>=2048:
+                self.hashes.append(text_hash(self.buffer[:2048]));self.buffer=self.buffer[2048:]
+                if len(self.hashes)==8 and len(set(self.hashes))==1:self.reason='suspected_loop'
+        elif event=='chat.end':
+            result=data.get('result',{});stats=result.get('stats',{})
+            count=stats.get('total_output_tokens')
+            if type(count) is not int or count<0:
+                if self.strict:raise ValueError('unsupported_completion')
+            elif count>=self.limit:self.reason='output_budget_exhausted'
+        return self.reason
+
+    def snapshot(self):
+        return {'reasoning_characters':self.characters,'reasoning_window_hashes':list(self.hashes),'progress_reason':self.reason}

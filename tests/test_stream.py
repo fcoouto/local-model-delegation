@@ -39,3 +39,40 @@ class Stream(Fixture):
         for endpoint in ["https://127.0.0.1:1", "http://example.com", "http://user:secret@127.0.0.1", "http://127.0.0.1/other"]:
             with self.assertRaises(ValueError): Runtime(endpoint)
         with self.assertRaises(ValueError): list(sse_events(io.BytesIO(b"data:" + b"x" * 1100000 + b"\n\n")))
+
+
+class Progress(Fixture):
+    def watch(self, **policy):
+        from local_repair import lmstudio
+        self.assertTrue(hasattr(lmstudio,'ProgressWatch'),'ProgressWatch must exist')
+        return lmstudio.ProgressWatch({'max_output_tokens':100,**policy})
+
+    def test_repetition_detection_ignores_chunk_boundaries(self):
+        text=('a'*2048)*8
+        for size in (1,17,2048,len(text)):
+            watch=self.watch(); reason=None
+            for start in range(0,len(text),size): reason=watch.observe('reasoning.delta',{'content':text[start:start+size]}) or reason
+            self.assertEqual(reason,'suspected_loop')
+            self.assertNotIn('aaaa',str(watch.snapshot()))
+
+    def test_repeated_code_text_is_not_a_reasoning_loop(self):
+        watch=self.watch()
+        self.assertIsNone(watch.observe('message.delta',{'content':'a'*2048*8}))
+
+    def test_unique_reasoning_can_exceed_120_seconds(self):
+        watch=self.watch(); activity=ActivityWatch(120,0)
+        for i in range(300):
+            text=str(i).ljust(2048,'x');activity.observe('reasoning.delta',{'content':text},i*10)
+            self.assertIsNone(watch.observe('reasoning.delta',{'content':text}))
+            self.assertFalse(activity.is_stale(i*10+1))
+
+    def test_budget_exhaustion_cannot_accept_truncated_candidate(self):
+        self.assertEqual(self.watch().observe('chat.end',{'result':{'stats':{'total_output_tokens':100}}}),'output_budget_exhausted')
+        with self.assertRaisesRegex(ValueError,'unsupported_completion'):
+            self.watch().observe('chat.end',{'result':{}})
+
+    def test_nonreasoning_model_omits_unsupported_setting(self):
+        from local_repair.worker import build_request
+        result=build_request({'capability':'file_summary','behavior_contract':'summary','files':{},'editable_paths':[]},
+                             {'request_settings':{'temperature':0,'max_output_tokens':100}},'fixture')
+        self.assertNotIn('reasoning',result)

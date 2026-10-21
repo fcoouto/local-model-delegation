@@ -122,11 +122,12 @@ def validate_profile(p, capability):
                 or p["adapter"] != "lmstudio_v1" or capability not in (CAPABILITY, "test_writing", "code_change", "file_summary")
                 or not positive(p["stale_tolerance_seconds"]) or not isinstance(p["model_id"], str) or not p["model_id"]
                 or set(fallback) != {"model", "reasoning_effort"} or not all(isinstance(v, str) and v for v in fallback.values())
-                or set(settings) != {"reasoning", "temperature", "max_output_tokens"}
-                or settings["reasoning"] not in ("on", "off")
+                or set(settings) not in ({"reasoning", "temperature", "max_output_tokens"}, {"temperature", "max_output_tokens"})
+                or (p["schema_version"] == 1 and "reasoning" not in settings)
+                or ("reasoning" in settings and settings["reasoning"] not in ("on", "off"))
                 or type(settings["temperature"]) not in (int, float) or not 0 <= settings["temperature"] <= 2
                 or type(settings["max_output_tokens"]) is not int or settings["max_output_tokens"] <= 0
-                or (p["model_id"] == "qwen3.8-27b-splash" and settings["reasoning"] != "on")):
+                or (p["model_id"] == "qwen3.8-27b-splash" and settings.get("reasoning") != "on")):
             raise ValueError("invalid_profile")
         from .contracts import positive as finite_positive
         if settings["temperature"] != 0 and not finite_positive(settings["temperature"]):
