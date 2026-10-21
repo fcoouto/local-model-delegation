@@ -69,4 +69,3 @@ class Profiles(Fixture):
         manifest.write_text(json.dumps({"artifacts": [{"path": "weights.bin", "sha256": "0" * 64, "size": 29}]}))
         with self.assertRaises(ValueError): fingerprint_artifact(self.artifact, ["weights.bin", "manifest.json"])
         with self.assertRaises(ValueError): fingerprint_artifact(self.artifact, ["manifest.json"])
-

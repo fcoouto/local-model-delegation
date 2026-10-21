@@ -111,4 +111,3 @@ class CLI(Fixture):
         server, store, path = self.busy()
         with patch("local_repair.cli.Runtime.list_models", return_value={"models": [None]}):
             self.assertEqual(submit(self.state, path)["status"], "fallback_required")
-
