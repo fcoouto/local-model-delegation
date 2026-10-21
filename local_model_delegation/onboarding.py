@@ -135,6 +135,10 @@ def record_trial(state_dir, assessment_id, receipt):
             if not job['attempt_id'] or store.attempt(job['attempt_id'])['state']!='complete' or job['native_task_id']:
                 raise ValueError('memory_trial_not_complete')
             value['memory']=measure_request_memory(receipt['memory_samples'])
+            timing=store.attempt(job['attempt_id'])['data']
+            if (receipt['memory_samples'][0]['observed_at']>timing.get('submitted_at',0)
+                    or receipt['memory_samples'][-1]['observed_at']<timing.get('finished_at',float('inf'))):
+                raise ValueError('memory_samples_incomplete')
         previous = assessment['receipts'].get(receipt['trial_id'])
         if previous and previous != value: raise ValueError('trial_conflict')
         if 'memory_samples' in receipt:
