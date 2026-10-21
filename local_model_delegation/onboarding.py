@@ -120,7 +120,7 @@ def record_trial(state_dir, assessment_id, receipt):
     with ownership(store, 'assessment-' + assessment_id) as owned:
         if not owned: raise ValueError('assessment_busy')
         assessment = _assessment(state_dir, assessment_id)
-        if not isinstance(receipt, dict) or set(receipt) != {'trial_id','job_id'}: raise ValueError('invalid_trial_receipt')
+        if not isinstance(receipt, dict) or set(receipt) not in ({'trial_id','job_id'},{'trial_id','job_id','memory_samples'}): raise ValueError('invalid_trial_receipt')
         trial = next((t for t in assessment['trials'] if t['trial_id']==receipt['trial_id']), None)
         job = store.job(receipt['job_id'])
         permit = {'assessment_id': assessment_id, 'permit_token': assessment['permit_token']}
@@ -128,9 +128,21 @@ def record_trial(state_dir, assessment_id, receipt):
         if not trial or digest(job['brief']) != trial['brief_hash'] or job.get('route_data', {}).get('assessment') != permit:
             raise ValueError('assessment_scope_mismatch')
         if job['status'] not in ('accepted','failed','fallback_required'): raise ValueError('trial_not_complete')
-        value = {**receipt, 'passed': job['status']=='accepted' and not job['native_task_id'], 'status': job['status']}
+        value = {k:receipt[k] for k in ('trial_id','job_id')}
+        value.update(passed=job['status']=='accepted' and not job['native_task_id'],status=job['status'])
+        if 'memory_samples' in receipt:
+            from .capacity import measure_request_memory
+            if not job['attempt_id'] or store.attempt(job['attempt_id'])['state']!='complete' or job['native_task_id']:
+                raise ValueError('memory_trial_not_complete')
+            value['memory']=measure_request_memory(receipt['memory_samples'])
+            timing=store.attempt(job['attempt_id'])['data']
+            if (receipt['memory_samples'][0]['observed_at']>timing.get('submitted_at',0)
+                    or receipt['memory_samples'][-1]['observed_at']<timing.get('finished_at',float('inf'))):
+                raise ValueError('memory_samples_incomplete')
         previous = assessment['receipts'].get(receipt['trial_id'])
         if previous and previous != value: raise ValueError('trial_conflict')
+        if 'memory_samples' in receipt:
+            atomic_json(store.root/'assessments'/assessment_id/(receipt['trial_id']+'-memory.json'),receipt['memory_samples'])
         assessment['receipts'][receipt['trial_id']] = value
         atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
     return assessment_report(state_dir, assessment_id)
@@ -251,12 +263,15 @@ def record_outcome(state_dir, job_id, receipt):
 
 
 def record_capacity(state_dir, assessment_id, receipt):
-    from .capacity import qualify_measurements
+    from .capacity import qualify_measurements, available_budget, machine_snapshot
+    if (not isinstance(receipt,dict) or set(receipt)!={'context_length','resources','batches'}
+            or not isinstance(receipt['batches'],list) or not isinstance(receipt['resources'],dict)):
+        raise ValueError('invalid_capacity_receipt')
+    initial_budget=available_budget(receipt['resources'],loaded=True)
     assessment=_assessment(state_dir,assessment_id)
     profile=_profile(state_dir,assessment['profile_id'])
     _policy(state_dir,assessment['owner_reference'])
     if _binding(profile)!=assessment['binding']:raise ValueError('assessment_identity_changed')
-    if not isinstance(receipt,dict) or set(receipt)!={'context_length','resources','batches'} or not isinstance(receipt['batches'],list):raise ValueError('invalid_capacity_receipt')
     store=Store(state_dir);batches=[];seen=set()
     for batch in receipt['batches']:
         if not isinstance(batch,dict) or set(batch)!={'job_ids','request_bytes','pressure','swapout_delta_bytes'} or not isinstance(batch['job_ids'],list) or not batch['job_ids']:raise ValueError('invalid_capacity_receipt')
@@ -275,9 +290,16 @@ def record_capacity(state_dir, assessment_id, receipt):
             timings.append((data['submitted_at'],data['finished_at']))
         if min(end for start,end in timings)<=max(start for start,end in timings):raise ValueError('capacity_overlap_unproven')
         batches.append({k:v for k,v in batch.items() if k!='job_ids'}|{'concurrency':len(timings),'task_seconds':[end-start for start,end in timings],'all_correct':True})
-    evidence=qualify_measurements(profile,batches,receipt['resources'],receipt['context_length'])
+    if not initial_budget: raise ValueError('resources_unqualified')
+    # Artifact authorization may outlast the observation window for every trial.
+    resources=machine_snapshot()
+    if (resources.get('machine_fingerprint')!=receipt['resources'].get('machine_fingerprint')
+            or resources.get('physical_bytes')!=receipt['resources'].get('physical_bytes')):
+        raise ValueError('capacity_machine_changed')
+    evidence=qualify_measurements(profile,batches,resources,receipt['context_length'])
     evidence['assessment_id']=assessment_id
     profile['capacity_evidence']=evidence
     atomic_json(Path(state_dir)/'profiles'/(profile['profile_id']+'.json'),profile)
     atomic_json(Path(state_dir)/'assessments'/assessment_id/'capacity.json',receipt)
+    atomic_json(Path(state_dir)/'assessments'/assessment_id/'capacity-resources.json',resources)
     return evidence
