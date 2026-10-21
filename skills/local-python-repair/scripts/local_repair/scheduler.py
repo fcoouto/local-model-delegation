@@ -14,15 +14,15 @@ def rank_profiles(brief, profiles):
 
 
 def admission_limit(profile, loaded, resources):
-    # Task 5 replaces this conservative provisional one-slot guard with measured capacity.
-    if not loaded or resources.get('pressure')!='normal' or resources.get('swapout_delta_bytes')!=0: return 0
-    if not isinstance(resources.get('available_bytes'),int) or resources['available_bytes']<4*1024**3: return 0
-    return 1 if type(loaded.get('capacity')) is int and loaded['capacity']>0 else 0
+    from .capacity import qualified_limit
+    return qualified_limit(profile,loaded,resources)
 
 
 def schedule_once(state_dir, resources=None):
     from .worker import ownership,start_worker
     from .lmstudio import Runtime,select_loaded
+    from .capacity import machine_snapshot
+    resources=machine_snapshot() if resources is None else resources
     store=Store(state_dir)
     with ownership(store,'scheduler') as owned:
         if not owned: return {'status':'scheduler_busy'}
@@ -35,12 +35,19 @@ def schedule_once(state_dir, resources=None):
                 results.append(store.decide_wait(job['job_id'],{'action':'fallback','reason':'routing_disabled'})); continue
             profiles=read_profiles(store.root)
             ids=rank_profiles(job['brief'],profiles)
+            permit=job['route_data'].get('assessment')
+            if permit:
+                from .onboarding import authorize_assessment
+                try: ids=[authorize_assessment(store.root,job['brief'],permit)['profile_id']]
+                except ValueError:
+                    results.append(store.decide_wait(job['job_id'],{'action':'fallback','reason':'assessment_revoked'}));continue
             if not ids:
                 results.append(store.decide_wait(job['job_id'],{'action':'fallback','reason':'no_qualified_model'})); continue
             for identifier in ids:
                 try:
-                    p=read_profile_by_id(store.root,identifier,job['brief']['capability'])
-                    loaded=select_loaded(Runtime(p['endpoint'],token_env=p.get('token_env')).list_models(),p)
+                    p=authorize_assessment(store.root,job['brief'],permit) if permit else read_profile_by_id(store.root,identifier,job['brief']['capability'])
+                    from .profiles import model_identity
+                    loaded=select_loaded(Runtime(p['endpoint'],token_env=p.get('token_env')).list_models(),p,model_identity(p) if permit else None)
                     result=store.admit(job['job_id'],p,loaded,resources or {})
                 except (ValueError,OSError): continue
                 if result['status']=='reserved':

@@ -137,14 +137,17 @@ def final_text(result):
     return "".join(item["content"] for item in result["output"] if item.get("type") == "message")
 
 
-def select_loaded(snapshot, profile):
+def select_loaded(snapshot, profile, assessment_identity=None):
     if (not isinstance(snapshot, dict) or not isinstance(snapshot.get("models"), list)
             or any(not isinstance(m, dict) for m in snapshot["models"])):
         raise ValueError("invalid_model_list")
     matches = [m for m in snapshot.get("models", []) if m.get("key") == profile["model_id"] and m.get("type") == "llm"]
     if len(matches) != 1: return None
-    from .profiles import verify_runtime_binding
-    verify_runtime_binding(profile, matches[0])
+    from .profiles import verify_runtime_binding, model_identity
+    if assessment_identity is None: verify_runtime_binding(profile, matches[0])
+    elif (assessment_identity != model_identity(profile)
+          or any(matches[0].get(k) != v for k,v in assessment_identity["metadata"].items())):
+        raise ValueError("runtime_binding_mismatch")
     instances = matches[0].get("loaded_instances")
     if not isinstance(instances, list): raise ValueError("invalid_model_list")
     if len(instances) != 1: return None
@@ -154,4 +157,4 @@ def select_loaded(snapshot, profile):
     capacity = instance.get("config", {}).get("parallel")
     if type(capacity) is not int or capacity <= 0: return None
     return {"endpoint": profile["endpoint"], "model_id": profile["model_id"], "instance_id": instance["id"],
-            "capacity": capacity, "config": instance["config"], "binding_verified": False}
+            "capacity": capacity, "config": instance["config"], "binding_verified": profile.get("schema_version") == 2}

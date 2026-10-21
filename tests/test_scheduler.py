@@ -16,6 +16,8 @@ class Scheduler(Fixture):
         p = self.profile(); p.update(schema_version=2, qualification_status='qualified', capabilities=['code_change'],
             scope=[{'capability':'code_change','language':'javascript','complexity':'simple','context_bucket':'small','max_input_bytes':100000}],
             benefit_evidence={'credible':True,'native_overhead':10})
+        from local_repair.contracts import digest
+        p['capacity_evidence']={'qualified':True,'limit':1,'machine_fingerprint':'fixture-machine','settings_digest':digest(p['request_settings']),'artifact_digest':p['artifact']['digest'],'context_length':8192,'request_bytes':1024**3,'batches':3,'median_slowdown':1}
         p['approval'].update(scope=copy.deepcopy(p['scope']),capabilities=p['capabilities'])
         atomic_json(self.state / 'config.json', {'schema_version':2,'routing_enabled':True,'visibility_enabled':True})
         atomic_json(self.state / 'profiles/fictional.json', p)

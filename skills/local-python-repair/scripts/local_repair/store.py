@@ -316,7 +316,14 @@ class Store:
             else:
                 current=authorize_job(self,{**job,'profile':profile})
                 from .scheduler import admission_limit
-                limit=admission_limit(current,loaded,resource_snapshot)
+                held=sum(load_json(r['data']).get('reserved_bytes',0) for r in db.execute("SELECT data FROM model_operations WHERE state IN ('reserved','submitting','uncertain')"))
+                held+=sum(load_json(r['profile']).get('capacity_evidence',{}).get('request_bytes',0) for r in db.execute("SELECT j.profile FROM jobs j JOIN attempts a USING(job_id) WHERE a.state='reserved'"))
+                resources=dict(resource_snapshot)
+                if type(resources.get('available_bytes')) is int: resources['available_bytes']=max(0,resources['available_bytes']-held)
+                limit=admission_limit(current,loaded,resources)
+                if route.get('assessment'):
+                    from .capacity import available_budget
+                    limit=1 if loaded and type(loaded.get('capacity')) is int and loaded['capacity']>0 and available_budget(resources)>0 else 0
                 if limit:
                     attempt,status,reason,key,generation=self._slot(db,current,{**loaded,'capacity':limit})
                     if attempt:
@@ -342,3 +349,25 @@ class Store:
                 db.execute("UPDATE jobs SET reason='waiting_for_slot',route_data=? WHERE job_id=?",(canonical(route),job_id))
             else: raise ValueError('invalid_wait_decision')
             return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()))
+
+    def reserve_load(self, profile, estimate, resources):
+        from .capacity import available_budget
+        from .contracts import positive
+        if not isinstance(estimate,dict) or estimate.get('non_evicting') is not True or not positive(estimate.get('bytes')):
+            raise ValueError('lifecycle_unqualified')
+        model_key=digest([profile['endpoint'],profile['model_id']])
+        with self.db(write=True) as db:
+            existing=db.execute("SELECT * FROM model_operations WHERE model_key=? AND state IN ('reserved','submitting','uncertain')",(model_key,)).fetchone()
+            if existing:
+                data=load_json(existing['data'])
+                if data['artifact_digest']!=profile['artifact']['digest'] or data['settings_digest']!=digest(profile['request_settings']):
+                    raise ValueError('operation_identity_changed')
+                return {**dict(existing),'data':data}
+            held=sum(load_json(r['data']).get('reserved_bytes',0) for r in db.execute("SELECT data FROM model_operations WHERE state IN ('reserved','submitting','uncertain')"))
+            if estimate['bytes']>available_budget(resources)-held:raise ValueError('insufficient_resources')
+            operation=uuid.uuid4().hex
+            data={'kind':'load','reserved_bytes':estimate['bytes'],'profile_id':profile['profile_id'],
+                  'artifact_digest':profile['artifact']['digest'],'settings_digest':digest(profile['request_settings']),
+                  'observed_at':time.time(),'machine_fingerprint':resources['machine_fingerprint']}
+            db.execute("INSERT INTO model_operations VALUES (?,?,'reserved',?)",(operation,model_key,canonical(data)))
+            return {'operation_id':operation,'model_key':model_key,'state':'reserved','data':data}

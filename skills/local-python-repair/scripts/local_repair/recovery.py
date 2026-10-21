@@ -88,6 +88,10 @@ def recover_once(store, key, runtime):
     instance = store.instance(key)
     if instance["state"] == "ready" or instance["data"].get("recovery_phase") == "retired": return True
     profile = instance["data"]["profile"]
+    if profile.get("schema_version") == 2:
+        from .capacity import owned_operation
+        if not owned_operation(store, instance): raise ValueError("instance_not_owned")
+        raise ValueError("lifecycle_unqualified")
     approved = authorize_job(store, {"profile": profile, "brief": {"capability": profile["capabilities"][0]}})
     if approved["approval"] != profile["approval"] or approved["model_id"] != profile["model_id"]:
         raise ValueError("approval_changed")
@@ -172,10 +176,10 @@ def recover_instance(state_dir, instance_key):
                 # Reconcile dead observers, but never infer that a live peer is free.
                 from .worker import reconcile_attempts
                 reconcile_attempts(state_dir)
-                if recover_once(store, instance_key, Runtime(instance["data"]["endpoint"])): return 0
+                if recover_once(store, instance_key, Runtime(instance["data"]["endpoint"], token_env=instance["data"]["profile"].get("token_env"))): return 0
                 time.sleep(.25)
             except (OSError, ValueError) as error:
-                if str(error) in ("approval_changed", "model_not_approved", "routing_disabled", "invalid_profile", "unaccounted_instances", "runtime_binding_unavailable", "runtime_binding_mismatch"):
+                if str(error) in ("instance_not_owned", "lifecycle_unqualified", "approval_changed", "model_not_approved", "routing_disabled", "invalid_profile", "unaccounted_instances", "runtime_binding_unavailable", "runtime_binding_mismatch"):
                     update_instance(store, instance_key, {"recovery_error": str(error), "recovery_blocked": True}, "closed")
                     return 2
                 update_instance(store, instance_key, {"next_recovery_at": time.time() + delay, "recovery_error": type(error).__name__}, "closed")

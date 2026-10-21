@@ -170,3 +170,16 @@ def approve_assessment(state_dir, assessment_id, owner_reference, scope):
                            'capabilities':profile['capabilities'], 'request_settings':profile['request_settings'], 'scope':scope}
     atomic_json(Path(state_dir) / 'profiles' / (profile['profile_id']+'.json'), profile)
     return {'status':'approval_recorded','routing_enabled':read_config(state_dir).get('routing_enabled') is True}
+
+
+def submit_trial(state_dir, assessment_id, trial_id):
+    assessment=_assessment(state_dir,assessment_id)
+    trial=next((t for t in assessment['trials'] if t['trial_id']==trial_id),None)
+    if trial is None:raise ValueError('unknown_trial')
+    permit={'assessment_id':assessment_id,'permit_token':assessment['permit_token']}
+    authorize_assessment(state_dir,trial['brief'],permit)
+    store=Store(state_dir)
+    result=store.enqueue(trial['brief'],trial['brief']['fallback'],assessment=permit)
+    from .worker import launch
+    launch(state_dir,'scheduler','queue')
+    return result
