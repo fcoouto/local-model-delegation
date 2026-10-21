@@ -14,7 +14,7 @@ ACTIVE = ("reserved", "submitting", "streaming", "uncertain")
 
 def private_dir(path: Path) -> Path:
     path = Path(path)
-    if path.is_symlink():
+    if path.is_symlink() or any(parent.is_symlink() for parent in path.absolute().parents):
         raise ValueError("unsafe_state")
     if not path.parent.exists():
         private_dir(path.parent)
@@ -164,6 +164,10 @@ class Store:
             row = db.execute("SELECT a.*,i.generation AS current_generation FROM attempts a JOIN instances i USING(instance_key) WHERE attempt_id=?", (attempt_id,)).fetchone()
             if row is None or row["generation"] != generation or row["current_generation"] != generation or row["state"] != expected:
                 return False
+            if target == "submitting":
+                job = db.execute("SELECT status FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+                instance = db.execute("SELECT state FROM instances WHERE instance_key=?", (row["instance_key"],)).fetchone()
+                if job["status"] != "reserved" or instance["state"] != "ready": return False
             data = {**load_json(row["data"]), **fields}
             db.execute("UPDATE attempts SET state=?,data=? WHERE attempt_id=?", (target, canonical(data), attempt_id))
             if target in ("submitting", "streaming"):
@@ -236,8 +240,6 @@ class Store:
         candidate = Path(candidate)
         if candidate.is_symlink() or candidate.stat().st_size > MAX_ANSWER_BYTES: raise ValueError("unsafe_candidate")
         text = candidate.read_text()
-        from .validation import parse_candidate
-        parse_candidate(text, job["brief"])
         path = self.root / "jobs" / job_id / ("native-" + uuid.uuid4().hex) / "candidate.json"
         atomic_json(path, {"text": text, "sha256": text_hash(text), "native_task_id": native_task_id})
         with self.db(write=True) as db:

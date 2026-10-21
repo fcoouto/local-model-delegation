@@ -1,7 +1,7 @@
 import copy
 import multiprocessing
 import time
-from local_repair.store import Store
+from local_repair.store import Store, atomic_json
 from tests.support import Fixture
 
 
@@ -83,3 +83,15 @@ class Slots(Fixture):
         bad = self.root / "bad"
         bad.symlink_to(self.state, target_is_directory=True)
         with self.assertRaises(ValueError): Store(bad)
+
+    def test_submission_cannot_start_after_fallback_or_recovery(self):
+        first = self.store.reserve(self.brief(), self.profile(), self.loaded())
+        self.store.select_fallback(first["job_id"], "cancel_before_send")
+        self.assertFalse(self.store.transition(first["attempt_id"], 0, "reserved", "submitting", {}))
+
+    def test_private_state_rejects_parent_symlink(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (self.state / "jobs").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(ValueError): atomic_json(self.state / "jobs/child/result.json", {"data": "private"})
+        self.assertFalse((outside / "child").exists())

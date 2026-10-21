@@ -68,3 +68,10 @@ class Worker(Fixture):
         self.assertEqual(store.attempt(job["attempt_id"])["state"], "uncertain")
         run_attempt(self.state, job["attempt_id"])
         self.assertEqual(server.calls.count(("POST", "/api/v1/chat")), 1)
+
+    def test_recover_reserved_without_post_intent(self):
+        server, store, job = self.prepare()
+        reconcile_attempts(self.state)
+        result = wait_job(self.state, job["job_id"], 3)
+        self.assertEqual(result["status"], "candidate_ready")
+        self.assertEqual(server.calls.count(("POST", "/api/v1/chat")), 1)

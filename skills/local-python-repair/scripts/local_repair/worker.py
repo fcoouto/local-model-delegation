@@ -140,14 +140,23 @@ def run_attempt(state_dir, attempt_id):
 def reconcile_attempts(state_dir):
     store = Store(state_dir)
     with store.db() as db:
-        attempts = [dict(r) for r in db.execute("SELECT * FROM attempts WHERE state IN ('submitting','streaming')")]
+        attempts = [dict(r) for r in db.execute("SELECT * FROM attempts WHERE state IN ('reserved','submitting','streaming')")]
     for attempt in attempts:
+        start = False
         with ownership(store, "attempt-" + attempt["attempt_id"]) as owned:
-            if owned and store.transition(attempt["attempt_id"], attempt["generation"], attempt["state"], "uncertain", {"error": "observer_lost"}):
+            if not owned: continue
+            if attempt["state"] == "reserved":
+                if store.instance(attempt["instance_key"])["state"] != "ready" or store.job(attempt["job_id"])["status"] != "reserved":
+                    store.transition(attempt["attempt_id"], attempt["generation"], "reserved", "released", {})
+                    store.select_fallback(attempt["job_id"], "instance_recovering")
+                else:
+                    start = True
+            elif store.transition(attempt["attempt_id"], attempt["generation"], attempt["state"], "uncertain", {"error": "observer_lost"}):
                 store.select_fallback(attempt["job_id"], "observer_lost")
                 from .recovery import close_instance, request_recovery
                 close_instance(store, attempt["instance_key"])
                 request_recovery(state_dir, attempt["instance_key"])
+        if start: start_worker(state_dir, attempt["attempt_id"])
 
 
 def wait_job(state_dir, job_id, seconds):

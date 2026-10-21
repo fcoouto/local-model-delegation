@@ -25,6 +25,13 @@ def fingerprint_artifact(root: Path, files: list[str]) -> dict[str, Any]:
         if stamp(before) != stamp(after):
             raise ValueError("artifact_changed_during_hash")
         entries[name] = {"sha256": h.hexdigest(), "size": after.st_size}
+    for name in files:
+        if Path(name).name == "manifest.json":
+            manifest = load_json((root / name).read_text())
+            for item in manifest.get("artifacts", []):
+                entry = entries.get(item["path"])
+                if entry is None or entry["sha256"] != item["sha256"] or entry["size"] != item["size"]:
+                    raise ValueError("artifact_manifest_mismatch")
     return {"digest": digest(entries), "entries": entries}
 
 

@@ -46,12 +46,19 @@ class Runtime:
     def _open(self, method, path, body=None, streaming=False, timeout=3):
         conn = http.client.HTTPConnection(self.host, self.port, timeout=timeout)
         self.connection = conn
-        conn.connect()
-        self.socket = conn.sock
-        if streaming: conn.sock.settimeout(None)
-        encoded = canonical(body).encode() if body is not None else None
-        conn.request(method, path, body=encoded, headers={"Content-Type": "application/json"})
-        response = conn.getresponse()
+        try:
+            conn.connect()
+            self.socket = conn.sock
+            if streaming: conn.sock.settimeout(None)
+            encoded = canonical(body).encode() if body is not None else None
+            conn.request(method, path, body=encoded, headers={"Content-Type": "application/json"})
+            response = conn.getresponse()
+        except http.client.HTTPException:
+            conn.close()
+            raise ValueError("runtime_protocol_error") from None
+        except BaseException:
+            conn.close()
+            raise
         if response.status != 200:
             conn.close()
             raise ValueError("runtime_http_error")
@@ -123,9 +130,17 @@ def final_text(result):
 
 
 def select_loaded(snapshot, profile):
+    if (not isinstance(snapshot, dict) or not isinstance(snapshot.get("models"), list)
+            or any(not isinstance(m, dict) for m in snapshot["models"])):
+        raise ValueError("invalid_model_list")
     matches = [m for m in snapshot.get("models", []) if m.get("key") == profile["model_id"] and m.get("type") == "llm"]
-    if len(matches) != 1 or len(matches[0].get("loaded_instances", [])) != 1: return None
+    if len(matches) != 1: return None
+    instances = matches[0].get("loaded_instances")
+    if not isinstance(instances, list): raise ValueError("invalid_model_list")
+    if len(instances) != 1: return None
     instance = matches[0]["loaded_instances"][0]
+    if not isinstance(instance, dict) or not isinstance(instance.get("config"), dict) or not isinstance(instance.get("id"), str):
+        raise ValueError("invalid_model_list")
     capacity = instance.get("config", {}).get("parallel")
     if type(capacity) is not int or capacity <= 0: return None
     return {"endpoint": profile["endpoint"], "model_id": profile["model_id"], "instance_id": instance["id"],

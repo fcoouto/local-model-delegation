@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from unittest.mock import patch
 from pathlib import Path
 from local_repair.cli import reconcile_native
 from local_repair.store import Store
@@ -92,3 +93,22 @@ class CLI(Fixture):
         result = store.record_fallback_candidate(job["job_id"], native_id, candidate)
         self.assertEqual(result["status"], "candidate_ready")
         self.assertEqual(self.invoke("check", "--job", job["job_id"])["status"], "accepted")
+
+    def test_invalid_native_output_is_terminal(self):
+        self.write_config()
+        store = Store(self.state)
+        job = store.reserve(self.brief(), self.profile(), None)
+        claim = store.claim_fallback(job["job_id"])
+        native_id = "/root/" + claim["task_name"]
+        store.attach_fallback(job["job_id"], claim["dispatch_token"], native_id)
+        candidate = self.root / "invalid.json"
+        candidate.write_text("not valid output")
+        store.record_fallback_candidate(job["job_id"], native_id, candidate)
+        self.assertEqual(self.invoke("check", "--job", job["job_id"])["status"], "failed")
+
+    def test_invalid_model_list_is_unavailable(self):
+        from local_repair.cli import submit
+        server, store, path = self.busy()
+        with patch("local_repair.cli.Runtime.list_models", return_value={"models": [None]}):
+            self.assertEqual(submit(self.state, path)["status"], "fallback_required")
+

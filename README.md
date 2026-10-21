@@ -45,3 +45,7 @@ Candidate checking protects supplied tests, runs independent oracles separately 
 Offline tests use fictional model approvals and an actual loopback fake server; they never contact a real model. They exercise cross-process reservations, monitor death, detached observation, lost lifecycle replies, healthy-peer protection, native dispatch records, and real macOS candidate isolation.
 
 Actual approved-model end-to-end operation and automatic desktop-host continuation through compaction remain separate activation gates. Native task model/effort declarations are requested settings, not independent serving-model attestation. No net subscription saving is claimed. Keep private benchmark evidence outside this portable source repository.
+
+`tests/live_acceptance.py` provides explicit `inspect` (HTTP discovery only), `native-prepare` (fictional local profile; no local HTTP), and `native-verify` (attach/check an actual native result) cases. It refuses non-temporary state paths and never approves a real model. Native model repair tests are functional qualification, not independent code review. Native task listings can reconcile canonical task names; an absent listing cannot prove a lost dispatch never happened.
+
+The bundled skill-format validator currently requires unavailable PyYAML on this machine. The source has no such dependency; its simple frontmatter/name/links and Python syntax are checked directly. Host-level automatic skill selection and desktop compaction continuity remain unqualified while the skill is uninstalled.

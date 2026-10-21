@@ -63,3 +63,10 @@ class Profiles(Fixture):
     def test_artifact_symlink_escape(self):
         (self.artifact / "evil.bin").symlink_to(self.project / "helper.py")
         with self.assertRaises(ValueError): fingerprint_artifact(self.artifact, ["evil.bin"])
+
+    def test_manifest_checksums_and_file_coverage(self):
+        manifest = self.artifact / "manifest.json"
+        manifest.write_text(json.dumps({"artifacts": [{"path": "weights.bin", "sha256": "0" * 64, "size": 29}]}))
+        with self.assertRaises(ValueError): fingerprint_artifact(self.artifact, ["weights.bin", "manifest.json"])
+        with self.assertRaises(ValueError): fingerprint_artifact(self.artifact, ["manifest.json"])
+
