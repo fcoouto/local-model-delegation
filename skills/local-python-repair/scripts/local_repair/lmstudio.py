@@ -1,6 +1,8 @@
 """Native HTTP/SSE only. Activity observations are independent of observer health."""
 import http.client
 import math
+import os
+import re
 import socket
 from urllib.parse import urlsplit
 from .contracts import MAX_ANSWER_BYTES, canonical, load_json, positive
@@ -29,13 +31,19 @@ def sse_events(stream):
 
 
 class Runtime:
-    def __init__(self, endpoint):
+    def __init__(self, endpoint, token_env=None):
         url = urlsplit(endpoint)
         if (url.scheme != "http" or url.hostname not in ("127.0.0.1", "::1") or url.username or url.password
                 or url.path not in ("", "/") or url.query or url.fragment):
             raise ValueError("unsupported_endpoint")
         self.host, self.port = url.hostname, url.port or 80
         self.connection = self.socket = None
+        self.headers = {"Content-Type": "application/json"}
+        if token_env is not None:
+            if not isinstance(token_env, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]*", token_env): raise ValueError("invalid_token_reference")
+            token = os.environ.get(token_env)
+            if not token or any(c in token for c in "\r\n"): raise ValueError("runtime_token_unavailable")
+            self.headers["Authorization"] = "Bearer " + token
 
     def abort(self):
         sock = self.socket
@@ -51,7 +59,7 @@ class Runtime:
             self.socket = conn.sock
             if streaming: conn.sock.settimeout(None)
             encoded = canonical(body).encode() if body is not None else None
-            conn.request(method, path, body=encoded, headers={"Content-Type": "application/json"})
+            conn.request(method, path, body=encoded, headers=self.headers)
             response = conn.getresponse()
         except http.client.HTTPException:
             conn.close()

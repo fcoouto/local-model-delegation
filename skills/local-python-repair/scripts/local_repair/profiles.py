@@ -191,6 +191,11 @@ def read_profile_by_id(state_dir, profile_id, capability):
 
 
 def authorize_job(store, job):
+    if job.get("route_data", {}).get("assessment"):
+        from .onboarding import authorize_assessment
+        current = authorize_assessment(store.root, job["brief"], job["route_data"]["assessment"])
+        if current["profile_id"] != job["profile"]["profile_id"]: raise ValueError("assessment_scope_mismatch")
+        return current
     profile = job["profile"]
     current = read_profile_by_id(store.root, profile["profile_id"], job["brief"]["capability"])
     if current["approval"] != profile["approval"]: raise ValueError("approval_changed")

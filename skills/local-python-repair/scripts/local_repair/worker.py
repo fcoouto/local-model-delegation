@@ -34,11 +34,18 @@ def launch(state_dir, command, identifier):
     store = Store(state_dir)
     log = store.root / "observer.log"
     fd = os.open(log, os.O_APPEND | os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    environment = {"PATH": "/usr/bin:/bin", "HOME": str(store.root), "PYTHONDONTWRITEBYTECODE": "1"}
+    from .profiles import read_profiles
+    import re
+    for profile in read_profiles(store.root):
+        name = profile.get("token_env")
+        if name and re.fullmatch(r"[A-Z][A-Z0-9_]*", name) and name not in environment and name in os.environ:
+            environment[name] = os.environ[name]
     try:
         child = subprocess.Popen([sys.executable, "-B", str(Path(__file__).resolve().parents[1] / "repair.py"),
                                   "--state-dir", str(store.root), command, identifier], stdin=subprocess.DEVNULL,
                                  stdout=fd, stderr=fd, start_new_session=True, close_fds=True,
-                                 env={"PATH": "/usr/bin:/bin", "HOME": str(store.root), "PYTHONDONTWRITEBYTECODE": "1"})
+                                 env=environment)
     finally: os.close(fd)
     _children[:] = [p for p in _children if p.poll() is None]
     _children.append(child)
@@ -76,7 +83,7 @@ def run_attempt(state_dir, attempt_id):
             store.select_fallback(job["job_id"], "approval_changed")
             return 1
         if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time()}): return 0
-        runtime = Runtime(job["profile"]["endpoint"])
+        runtime = Runtime(job["profile"]["endpoint"], token_env=job["profile"].get("token_env"))
         watch = ActivityWatch(job["profile"]["stale_tolerance_seconds"], time.monotonic())
         stopped, stale = threading.Event(), threading.Event()
         counts = {}

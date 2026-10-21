@@ -42,7 +42,7 @@ def submit(state_dir, path):
     if existing:
         if digest(store.job(existing["job_id"])["brief"]) != digest(brief): raise ValueError("job_conflict")
         return existing
-    try: loaded = select_loaded(Runtime(profile["endpoint"]).list_models(), profile)
+    try: loaded = select_loaded(Runtime(profile["endpoint"], token_env=profile.get("token_env")).list_models(), profile)
     except (OSError, ValueError): loaded = None
     result = store.reserve(brief, profile, loaded)
     if result["status"] == "reserved":
@@ -86,13 +86,31 @@ def main(argv=None):
     p.add_argument("action", choices=["prepare", "checks", "record"])
     p.add_argument("--job", required=True)
     p.add_argument("--receipt", type=Path)
+    p = commands.add_parser("discover")
+    p.add_argument("--endpoint", required=True)
+    p = commands.add_parser("assessment")
+    p.add_argument("action", choices=["begin", "report", "trial", "approve"])
+    p.add_argument("--profile-id")
+    p.add_argument("--assessment-id")
+    p.add_argument("--owner-reference")
+    p.add_argument("--receipt", type=Path)
+    p.add_argument("--scope", type=Path)
     args = parser.parse_args(argv)
     try:
         if args.command == "worker": return run_attempt(args.state_dir, args.identifier)
         if args.command == "recover":
             from .recovery import recover_instance
             return recover_instance(args.state_dir, args.identifier)
-        if args.command == "migrate":
+        if args.command == "discover":
+            from .onboarding import discover_models
+            result = discover_models(Runtime(args.endpoint))
+        elif args.command == "assessment":
+            from .onboarding import begin_assessment, assessment_report, record_trial, approve_assessment
+            if args.action == "begin": result = begin_assessment(args.state_dir, args.profile_id, args.owner_reference)
+            elif args.action == "report": result = assessment_report(args.state_dir, args.assessment_id)
+            elif args.action == "trial": result = record_trial(args.state_dir, args.assessment_id, read_input(args.receipt))
+            else: result = approve_assessment(args.state_dir, args.assessment_id, args.owner_reference, read_input(args.scope))
+        elif args.command == "migrate":
             from .profiles import migrate_state
             result = migrate_state(args.state_dir)
         elif args.command == "submit": result = submit(args.state_dir, args.brief)
@@ -101,6 +119,7 @@ def main(argv=None):
             identity = fingerprint_artifact(Path(profile["artifact"]["root"]), profile["artifact"]["files"])
             result = {"schema_version": 1, "profile_id": profile["profile_id"], "identity": identity, "model_identity": model_identity(profile), "routing_enabled": False}
             if args.action == "record-approval":
+                if profile.get("schema_version") == 2: raise ValueError("use_assessment_approval")
                 if not args.owner_reference: raise ValueError("owner_confirmation_required")
                 profile["artifact"].update(identity)
                 profile["approval"] = {"owner_reference": args.owner_reference, "timestamp": datetime.now(timezone.utc).isoformat(),

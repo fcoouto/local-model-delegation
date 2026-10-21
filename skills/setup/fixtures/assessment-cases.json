@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "python-repair-0",
+      "capability": "bounded_python_repair",
+      "language": "python",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.py": "def transform(text):\n    return text.lstrip()\n",
+        "test_helper.py": "import unittest\nfrom helper import transform\nclass Tests(unittest.TestCase):\n    def test_empty(self):\n        self.assertEqual(transform(\"\"), \"\")\n"
+      },
+      "editable_paths": [
+        "helper.py",
+        "test_helper.py"
+      ],
+      "supplied_tests": [
+        "test_helper.py"
+      ],
+      "independent_tests": {
+        "test_oracle.py": "import unittest\nfrom helper import transform\nclass Tests(unittest.TestCase):\n    def test_contract(self):\n        self.assertEqual(transform('  x  '), 'x')\n"
+      },
+      "checks": [
+        [
+          "unittest",
+          "test_oracle"
+        ]
+      ],
+      "contract": "Make transform return text.strip() and add a regression test."
+    },
+    {
+      "id": "python-repair-1",
+      "capability": "bounded_python_repair",
+      "language": "python",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.py": "def transform(text):\n    return text.lower()\n",
+        "test_helper.py": "import unittest\nfrom helper import transform\nclass Tests(unittest.TestCase):\n    def test_empty(self):\n        self.assertEqual(transform(\"\"), \"\")\n"
+      },
+      "editable_paths": [
+        "helper.py",
+        "test_helper.py"
+      ],
+      "supplied_tests": [
+        "test_helper.py"
+      ],
+      "independent_tests": {
+        "test_oracle.py": "import unittest\nfrom helper import transform\nclass Tests(unittest.TestCase):\n    def test_contract(self):\n        self.assertEqual(transform('Mixed'), 'MIXED')\n"
+      },
+      "checks": [
+        [
+          "unittest",
+          "test_oracle"
+        ]
+      ],
+      "contract": "Make transform return text.upper() and add a regression test."
+    },
+    {
+      "id": "python-repair-2",
+      "capability": "bounded_python_repair",
+      "language": "python",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.py": "def transform(text):\n    return text.replace(\"-\", \"\", 1)\n",
+        "test_helper.py": "import unittest\nfrom helper import transform\nclass Tests(unittest.TestCase):\n    def test_empty(self):\n        self.assertEqual(transform(\"\"), \"\")\n"
+      },
+      "editable_paths": [
+        "helper.py",
+        "test_helper.py"
+      ],
+      "supplied_tests": [
+        "test_helper.py"
+      ],
+      "independent_tests": {
+        "test_oracle.py": "import unittest\nfrom helper import transform\nclass Tests(unittest.TestCase):\n    def test_contract(self):\n        self.assertEqual(transform('a-b-c'), 'abc')\n"
+      },
+      "checks": [
+        [
+          "unittest",
+          "test_oracle"
+        ]
+      ],
+      "contract": "Make transform return text.replace(\"-\", \"\") and add a regression test."
+    },
+    {
+      "id": "python-code_change-0",
+      "capability": "code_change",
+      "language": "python",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.py": "def transform(text):\n    return text.lstrip()\n"
+      },
+      "editable_paths": [
+        "helper.py"
+      ],
+      "contract": "Change transform to return text.strip()"
+    },
+    {
+      "id": "python-test_writing-0",
+      "capability": "test_writing",
+      "language": "python",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.py": "def transform(text):\n    return text.lstrip()\n"
+      },
+      "editable_paths": [
+        "test_helper.py"
+      ],
+      "contract": "Write tests exposing the difference between text.lstrip() and text.strip()"
+    },
+    {
+      "id": "python-code_change-1",
+      "capability": "code_change",
+      "language": "python",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.py": "def transform(text):\n    return text.lower()\n"
+      },
+      "editable_paths": [
+        "helper.py"
+      ],
+      "contract": "Change transform to return text.upper()"
+    },
+    {
+      "id": "python-test_writing-1",
+      "capability": "test_writing",
+      "language": "python",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.py": "def transform(text):\n    return text.lower()\n"
+      },
+      "editable_paths": [
+        "test_helper.py"
+      ],
+      "contract": "Write tests exposing the difference between text.lower() and text.upper()"
+    },
+    {
+      "id": "python-code_change-2",
+      "capability": "code_change",
+      "language": "python",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.py": "def transform(text):\n    return text.replace(\"-\", \"\", 1)\n"
+      },
+      "editable_paths": [
+        "helper.py"
+      ],
+      "contract": "Change transform to return text.replace(\"-\", \"\")"
+    },
+    {
+      "id": "python-test_writing-2",
+      "capability": "test_writing",
+      "language": "python",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.py": "def transform(text):\n    return text.replace(\"-\", \"\", 1)\n"
+      },
+      "editable_paths": [
+        "test_helper.py"
+      ],
+      "contract": "Write tests exposing the difference between text.replace(\"-\", \"\", 1) and text.replace(\"-\", \"\")"
+    },
+    {
+      "id": "javascript-code_change-0",
+      "capability": "code_change",
+      "language": "javascript",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.js": "export const transform = text => text.trimStart();\n"
+      },
+      "editable_paths": [
+        "helper.js"
+      ],
+      "contract": "Change transform to return text.trim()"
+    },
+    {
+      "id": "javascript-test_writing-0",
+      "capability": "test_writing",
+      "language": "javascript",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.js": "export const transform = text => text.trimStart();\n"
+      },
+      "editable_paths": [
+        "test_helper.js"
+      ],
+      "contract": "Write tests exposing the difference between text.trimStart() and text.trim()"
+    },
+    {
+      "id": "javascript-code_change-1",
+      "capability": "code_change",
+      "language": "javascript",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.js": "export const transform = text => text.toLowerCase();\n"
+      },
+      "editable_paths": [
+        "helper.js"
+      ],
+      "contract": "Change transform to return text.toUpperCase()"
+    },
+    {
+      "id": "javascript-test_writing-1",
+      "capability": "test_writing",
+      "language": "javascript",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.js": "export const transform = text => text.toLowerCase();\n"
+      },
+      "editable_paths": [
+        "test_helper.js"
+      ],
+      "contract": "Write tests exposing the difference between text.toLowerCase() and text.toUpperCase()"
+    },
+    {
+      "id": "javascript-code_change-2",
+      "capability": "code_change",
+      "language": "javascript",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.js": "export const transform = text => text.replace(\"-\", \"\");\n"
+      },
+      "editable_paths": [
+        "helper.js"
+      ],
+      "contract": "Change transform to return text.replaceAll(\"-\", \"\")"
+    },
+    {
+      "id": "javascript-test_writing-2",
+      "capability": "test_writing",
+      "language": "javascript",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "helper.js": "export const transform = text => text.replace(\"-\", \"\");\n"
+      },
+      "editable_paths": [
+        "test_helper.js"
+      ],
+      "contract": "Write tests exposing the difference between text.replace(\"-\", \"\") and text.replaceAll(\"-\", \"\")"
+    },
+    {
+      "id": "summary-0",
+      "capability": "file_summary",
+      "language": "text",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "source.txt": "The archive keeps seven daily snapshots. Older snapshots are removed on Sunday."
+      },
+      "editable_paths": [],
+      "contract": "Summarize the supplied text with accurate source citations."
+    },
+    {
+      "id": "summary-1",
+      "capability": "file_summary",
+      "language": "text",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "source.txt": "Requests contain a task identifier and a source digest. Reusing the identifier with changed input is rejected."
+      },
+      "editable_paths": [],
+      "contract": "Summarize the supplied text with accurate source citations."
+    },
+    {
+      "id": "summary-2",
+      "capability": "file_summary",
+      "language": "text",
+      "complexity": "simple",
+      "context_bucket": "small",
+      "files": {
+        "source.txt": "Model output is a proposal. A native coordinator verifies it before applying changes."
+      },
+      "editable_paths": [],
+      "contract": "Summarize the supplied text with accurate source citations."
+    }
+  ]
+}
