@@ -413,6 +413,8 @@ def record_verification(state_dir, job_id, receipt):
             raise ValueError('incomplete_verification')
         passed = all(v is True for v in [*receipt['criteria'], *receipt['checks'].values(), *receipt['claims']])
         atomic_json(store.root / 'jobs' / job_id / 'native-checks.json', receipt)
+        if not passed and not job['native_task_id']:
+            return store.select_fallback(job_id, 'native_verification_failed')
         with store.db(write=True) as db:
             state = 'accepted' if passed else ('failed' if job['native_task_id'] else 'fallback_required')
             db.execute("UPDATE jobs SET status=?,reason=? WHERE job_id=?", (state, None if passed else 'native_verification_failed', job_id))

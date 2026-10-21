@@ -129,6 +129,7 @@ class Delegation(Fixture):
         session = prepare(self.state, identifier); receipt = self.receipt(session)
         receipt.update(checks={}, claims=[False])
         self.assertEqual(record(self.state, identifier, receipt)['status'], 'fallback_required')
+        self.assertEqual(store.job(identifier)['route_data'].get('local_failure'),'native_verification_failed')
 
     def test_missing_isolation_never_executes_candidate(self):
         prepare = self.api('prepare_verification')
