@@ -193,3 +193,53 @@ class Store:
             db.execute("UPDATE attempts SET state='complete' WHERE attempt_id=?", (attempt_id,))
             db.execute("UPDATE jobs SET status='candidate_ready',result_path=? WHERE job_id=?", (str(path), row["job_id"]))
             return True
+
+    def claim_fallback(self, job_id):
+        with self.db(write=True) as db:
+            job = self._job(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone())
+            row = db.execute("SELECT * FROM fallback_dispatches WHERE job_id=?", (job_id,)).fetchone()
+            first = row is None
+            if first:
+                if job["status"] != "fallback_required": raise ValueError("fallback_not_required")
+                token, task_name = uuid.uuid4().hex, "local_repair_" + job_id
+                db.execute("INSERT INTO fallback_dispatches VALUES (?,?,?,NULL,'dispatching')", (job_id, token, task_name))
+                db.execute("UPDATE jobs SET status='fallback_dispatching' WHERE job_id=?", (job_id,))
+                row = db.execute("SELECT * FROM fallback_dispatches WHERE job_id=?", (job_id,)).fetchone()
+            return {**envelope(job), "dispatch_token": row["token"], "task_name": row["task_name"],
+                    "native_task_id": row["native_task_id"], "may_dispatch": first, "brief": job["brief"],
+                    "status": "fallback_dispatching" if first else job["status"]}
+
+    def attach_fallback(self, job_id, dispatch_token, native_task_id):
+        with self.db(write=True) as db:
+            row = db.execute("SELECT * FROM fallback_dispatches WHERE job_id=?", (job_id,)).fetchone()
+            if (row is None or row["token"] != dispatch_token or not isinstance(native_task_id, str)
+                    or native_task_id.rsplit("/", 1)[-1] != row["task_name"]): return False
+            if row["native_task_id"]: return row["native_task_id"] == native_task_id
+            if row["state"] not in ("dispatching", "uncertain"): return False
+            db.execute("UPDATE fallback_dispatches SET state='running',native_task_id=? WHERE job_id=?", (native_task_id, job_id))
+            db.execute("UPDATE jobs SET status='fallback_running',native_task_id=? WHERE job_id=? AND status IN ('fallback_dispatching','dispatch_uncertain')", (native_task_id, job_id))
+            return True
+
+    def mark_dispatch_uncertain(self, job_id, dispatch_token):
+        with self.db(write=True) as db:
+            row = db.execute("SELECT * FROM fallback_dispatches WHERE job_id=?", (job_id,)).fetchone()
+            if row is None or row["token"] != dispatch_token: raise ValueError("invalid_dispatch_token")
+            if not row["native_task_id"]:
+                db.execute("UPDATE fallback_dispatches SET state='uncertain' WHERE job_id=?", (job_id,))
+                db.execute("UPDATE jobs SET status='dispatch_uncertain',reason='native_dispatch_uncertain' WHERE job_id=? AND status='fallback_dispatching'", (job_id,))
+
+    def record_fallback_candidate(self, job_id, native_task_id, candidate):
+        from .contracts import MAX_ANSWER_BYTES, text_hash
+        job = self.job(job_id)
+        if job["native_task_id"] != native_task_id: raise ValueError("native_task_mismatch")
+        if job["status"] != "fallback_running": return envelope(job)
+        candidate = Path(candidate)
+        if candidate.is_symlink() or candidate.stat().st_size > MAX_ANSWER_BYTES: raise ValueError("unsafe_candidate")
+        text = candidate.read_text()
+        from .validation import parse_candidate
+        parse_candidate(text, job["brief"])
+        path = self.root / "jobs" / job_id / ("native-" + uuid.uuid4().hex) / "candidate.json"
+        atomic_json(path, {"text": text, "sha256": text_hash(text), "native_task_id": native_task_id})
+        with self.db(write=True) as db:
+            db.execute("UPDATE jobs SET status='candidate_ready',result_path=? WHERE job_id=? AND native_task_id=? AND status='fallback_running'", (str(path), job_id, native_task_id))
+        return envelope(self.job(job_id))
