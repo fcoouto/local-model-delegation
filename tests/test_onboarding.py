@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import json
+from pathlib import Path
 from local_repair.store import atomic_json
 from tests.support import Fixture, FakeRuntime
 
@@ -35,6 +36,23 @@ class Onboarding(Fixture):
         result = module.discover_models(Runtime())
         self.assertEqual([p['model_id'] for p in result], ['a','b'])
         self.assertEqual(result[1]['status'], 'unsupported')
+
+    def test_splash_discovery_can_be_assessed_without_granting_approval(self):
+        from unittest.mock import Mock
+        module = self.module(); profile = self.setup_policy()
+        catalog = json.loads(Path(profile['runtime_catalog']).read_text())
+        catalog['models'][0]['format'] = 'splash'
+        atomic_json(Path(profile['runtime_catalog']), catalog)
+        runtime = Mock()
+        runtime.list_models.return_value = {'models': [{'type':'llm','key':profile['model_id'],
+            'format':'splash','loaded_instances':[]}]}
+        result = module.discover_models(runtime)
+        self.assertEqual(result[0]['status'], 'needs_assessment')
+        assessment = module.begin_assessment(self.state, 'fictional', 'fixture-standing-consent')
+        self.assertEqual(assessment['binding']['runtime']['metadata']['format'], 'splash')
+        self.assertIsNone(module._profile(self.state, 'fictional')['approval'])
+        self.assertFalse(json.loads((self.state/'config.json').read_text())['routing_enabled'])
+        self.assertEqual(module.assessment_report(self.state, assessment['assessment_id'])['recommendation'], 'do_not_approve_yet')
 
     def test_assessment_cannot_access_project_or_activate_route(self):
         module = self.module(); self.setup_policy()

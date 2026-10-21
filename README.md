@@ -37,6 +37,12 @@ After authorized installation, `setup` initializes disabled private state. Insta
 
 All projects use `~/.local/state/codex-local-repairs` by default, preserving the existing helper's state location. Override `--state-dir` only deliberately, such as disposable fixtures. Schema 2 separates `config.json` from `profiles/<profile_id>.json`. Profiles, approvals, database, model results and receipts stay private; weights remain where LM Studio manages them.
 
+### Server connection and supported runtimes
+
+The plugin does not scan ports or automatically locate the server. Select its loopback HTTP URL during setup. Optional `endpoint` and `token_env` fields in shared `config.json` supply `doctor --inspect-runtime`; `discover --endpoint URL` uses its explicit argument without saving it. Each model profile also contains an `endpoint`, which is the authoritative connection for that model's requests and is bound into its approval. Changing the shared discovery URL does not move existing profiles. Changing a profile's URL requires renewed assessment and approval. The coordinator manages these files; ordinary delegated tasks do not require manual configuration.
+
+Only the `lmstudio_v1` adapter is implemented. It uses the native `/api/v1/models` and `/api/v1/chat` APIs plus the owner-trusted local model index. GGUF, MLX and Splash text models can be assessment candidates; discovery does not qualify or approve them. Other inference platforms are unsupported, even when they offer OpenAI-compatible chat endpoints. They need adapters with verified discovery, identity, progress, capacity and lifecycle behavior. Current endpoints accept only `http` on literal `127.0.0.1` or `::1`; remote servers, non-text tasks and unrestricted model tools are outside this version.
+
 `migrate` backs up exact legacy configuration bytes and SQLite state, disables the old entry point, and refuses unresolved work. Migration never enables routing. `prepare-update` refuses unsettled work. Detached workers use verified content-addressed helper bundles outside mutable plugin caches; retain those bundles while jobs depend on them. No database rollback command can erase newer job history. `prepare-uninstall` disables admission and removes the current visibility export only after work settles; models, history and visibility preference remain. Native package removal follows that preparation.
 
 ## Contracts and trust
@@ -64,4 +70,4 @@ Tests use fictional approvals, disposable state and loopback fake servers. They 
 
 Still unqualified: real approved-model end-to-end execution, automatic model lifecycle, thinking-enabled two-slot recovery, native host dispatch/automatic compaction continuity, install/update behavior in the target desktop, broader language/model reliability and net account savings. No real inference should be run merely to replay a saved candidate.
 
-The bundled skill validator currently cannot run under Python 3.11 because PyYAML is absent. This does not add a runtime dependency. Offline tests validate package paths and behavior; they do not substitute for live skill-selection or desktop qualification.
+The bundled skill validator passed for all three skills in a disposable Python 3.11 environment with PyYAML 6.0.3. The host Python still lacks PyYAML; validation did not add a runtime dependency or install any skill. Offline checks do not substitute for live skill-selection or desktop qualification.

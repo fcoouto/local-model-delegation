@@ -22,7 +22,7 @@ def discover_models(runtime):
         if not isinstance(model, dict): raise ValueError('unsupported_discovery')
         if model.get('type') != 'llm': continue
         if not isinstance(model.get('key'), str) or not model['key']: raise ValueError('unsupported_discovery')
-        result.append({'model_id': model['key'], 'status': 'needs_assessment' if model.get('format') in ('gguf', 'mlx') else 'unsupported',
+        result.append({'model_id': model['key'], 'status': 'needs_assessment' if model.get('format') in ('gguf', 'mlx', 'splash') else 'unsupported',
                        'format': model.get('format'), 'loaded_instances': model.get('loaded_instances', [])})
     return result
 

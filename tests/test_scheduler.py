@@ -94,3 +94,48 @@ class Scheduler(Fixture):
         self.assertEqual(rank_profiles(brief,[p]),['fictional'])
         p.pop('benefit_evidence')
         self.assertEqual(rank_profiles(brief,[p]),[])
+
+    def test_scheduler_samples_memory_after_slow_artifact_authorization(self):
+        from tests.support import FakeRuntime
+        from local_repair.profiles import authorize_job, model_identity
+        from local_repair.scheduler import schedule_once
+        store, brief, p = self.setup_queue()
+        server = FakeRuntime(); self.addCleanup(server.close)
+        p['endpoint'] = server.endpoint; p['approval']['model_identity'] = model_identity(p)
+        atomic_json(self.state/'profiles/fictional.json', p)
+        now = [100]
+        def slow_authorization(*args):
+            result = authorize_job(*args)
+            now[0] += 6
+            return result
+        with patch('time.time', side_effect=lambda: now[0]), \
+             patch('local_repair.profiles.authorize_job', side_effect=slow_authorization), \
+             patch('local_repair.capacity.machine_snapshot', side_effect=self.resources) as sample, \
+             patch('local_repair.worker.start_worker') as start:
+            job = store.enqueue(brief, brief['fallback'])
+            schedule_once(self.state)
+            self.assertEqual(store.job(job['job_id'])['status'], 'reserved')
+            start.assert_called_once()
+            sample.assert_called_once()
+        self.assertFalse(any(method == 'POST' for method, _ in server.calls))
+
+    def test_explicit_stale_resource_snapshot_stays_ineligible(self):
+        store, brief, p = self.setup_queue(); job = store.enqueue(brief, brief['fallback'])
+        resources = self.resources(); resources['observed_at'] -= 6
+        with patch('local_repair.capacity.machine_snapshot') as sample:
+            self.assertEqual(store.admit(job['job_id'], p, self.loaded(), resources)['status'], 'waiting')
+            sample.assert_not_called()
+
+    def test_authorization_cannot_admit_after_wait_policy_expires(self):
+        from local_repair.profiles import authorize_job
+        store, brief, p = self.setup_queue(); now = [100]
+        def slow_authorization(*args):
+            result = authorize_job(*args); now[0] = 131
+            return result
+        with patch('time.time', side_effect=lambda: now[0]), \
+             patch('local_repair.profiles.authorize_job', side_effect=slow_authorization):
+            job = store.enqueue(brief, brief['fallback'])
+            result = store.admit(job['job_id'], p, self.loaded(), self.resources())
+        self.assertEqual(result['reason'], 'route_decision_required')
+        self.assertIsNone(store.job(job['job_id'])['attempt_id'])
+        self.assertEqual(store.job(job['job_id'])['route_data']['wait_until'], 130)

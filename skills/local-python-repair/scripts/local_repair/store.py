@@ -319,7 +319,7 @@ class Store:
         with self.db() as db: jobs=[self._job(r) for r in db.execute("SELECT * FROM jobs WHERE status='waiting'")]
         return sorted(jobs,key=lambda j:(0 if j['brief']['task_requirements']['urgency']=='urgent' or now-j['queued_at']>=300 else 1,j['queued_at'],j['job_id']))
 
-    def admit(self, job_id, profile, loaded, resource_snapshot):
+    def admit(self, job_id, profile, loaded, resource_snapshot=None):
         from .profiles import authorize_job
         from .validation import source_matches
         with self.db(write=True) as db:
@@ -332,6 +332,12 @@ class Store:
                 db.execute("UPDATE jobs SET reason='route_decision_required' WHERE job_id=?",(job_id,))
             else:
                 current=authorize_job(self,{**job,'profile':profile})
+                from .capacity import machine_snapshot
+                # Artifact hashing can outlast the five-second resource observation window.
+                if resource_snapshot is None: resource_snapshot=machine_snapshot()
+                if time.time()>=route['wait_until']:
+                    db.execute("UPDATE jobs SET reason='route_decision_required' WHERE job_id=?",(job_id,))
+                    return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()))
                 from .scheduler import admission_limit
                 held=sum(load_json(r['data']).get('reserved_bytes',0) for r in db.execute("SELECT data FROM model_operations WHERE state IN ('reserved','submitting','uncertain')"))
                 held+=sum(load_json(r['profile']).get('capacity_evidence',{}).get('request_bytes',0) for r in db.execute("SELECT j.profile FROM jobs j JOIN attempts a USING(job_id) WHERE a.state='reserved'"))
