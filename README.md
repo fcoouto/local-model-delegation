@@ -107,6 +107,13 @@ Numbered updates follow the [guided update procedure](docs/updating.md). `prepar
 
 ## Contracts and trust
 
+This plugin owns local model discovery, assessment, capacity and proposal
+verification. [Vibe Setup](https://github.com/fcoouto/vibe-setup) owns its routing
+policy and native hook contract. When they are used together, follow the
+[integration pointers](skills/local-delegation/references/contracts.md#coordinator-policy-and-native-subagents)
+and docs matching the installed versions; neither project carries a copy of the
+other's procedures.
+
 The **host agent** prepares context, chooses tasks, verifies results and applies accepted work. The **runtime** serves local models. A model's approved **capabilities** describe which task families and operating limits it has demonstrated. A **task brief** contains the supplied context and acceptance requirements; a **candidate** is the proposed output awaiting verification. These terms apply across task types and host integrations.
 
 Read [task/verification contracts](skills/local-delegation/references/contracts.md) and [visibility format](skills/local-delegation/references/visibility.md). Keep origin/task keys stable through compaction. Wait-policy expiry requests an automatic native routing decision, not an owner model-selection prompt. The coordinator applies only accepted proposals after checking current source hashes.

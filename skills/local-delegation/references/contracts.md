@@ -2,6 +2,24 @@
 
 The delegation CLI's `--help` lists commands. State is shared at `~/.local/state/local-model-delegation`, with explicit `--state-dir` for fixtures or an existing installation. All participants must select the same queue. Routing defaults off. Profile schema 2 stores each model under `profiles/<safe-id>.json`; assessment observations never enlarge approval. Only schema-2 configuration, profiles, queues and briefs are supported.
 
+## Coordinator policy and native subagents
+
+The active project's instructions govern task selection, authorization, ownership
+and integration. When using [Vibe Setup](https://github.com/fcoouto/vibe-setup),
+read its [delegation policy and native contract](https://github.com/fcoouto/vibe-setup/blob/main/skills/vibe-setup/delegation-brief.md).
+Use the destination project's installed `.codex/delegation-brief.md` and active
+instructions, or source matching that installed revision; repository `main` does
+not silently replace a project's reviewed policy. Do not copy Vibe's native
+declaration/report schemas into this plugin or install Vibe merely to delegate.
+
+Local HTTP proposals do not invoke native subagent hooks. Native fallback must
+satisfy the active host/project's declaration and report contract as well as this
+plugin's dispatch/reconciliation protocol. If a required contract is unavailable,
+retain work with the coordinator rather than guessing or bypassing it. Local
+approval and routing remain governed by this plugin's contracts below.
+
+## Brief and verification schema
+
 A schema-2 brief has exactly `schema_version`, `origin_chat_id`, `task_key`, `capability`, `source_root`, `files`, `editable_paths`, `behavior_contract`, `task_requirements`, `acceptance` and `fallback`. Paths are relative to a canonical source root, with no symlinks/traversal. Supply at most eight UTF-8 files, 100,000 bytes each, mapped to `{content, sha256}`. New files must be absent at the snapshot. No deletes, renames, binary or mode changes.
 
 - Capabilities: `python_code_change`, `code_change`, `test_writing`, `file_summary`.
