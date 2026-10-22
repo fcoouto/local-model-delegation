@@ -105,7 +105,7 @@ Record local verification outcome with candidate/attempt/check hashes before fal
 
 Use existing monotonic intervals for same-process durations, with epoch timestamps for ordering. Clock reversal, incomplete intervals, or restart boundaries without proof yield unknown durations. New timing observations must not change stale detection, abort, or capacity behavior.
 
-Missing measurement schema or an exporter failure must not corrupt or stop already-authorized work. Report collection health and lost coverage; never manufacture missing successes. Integrity conflicts are reported for operator repair. Invalid explicit receipt commands fail without mutation.
+Missing measurement schema or an exporter failure must not corrupt or stop already-authorized work. Report collection health and lost coverage; never manufacture missing successes. Integrity conflicts are reported for operator correction. Invalid explicit receipt commands fail without mutation.
 
 Native telemetry is optional. The coordinator can supply verified receipts from a supported host source. Qualify the source's scope and token semantics before automatic collection; do not scrape authentication files or assume a stable undocumented session-log API. If task usage is unavailable, quality and timing still work and savings remain unknown.
 

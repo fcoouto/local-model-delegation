@@ -15,7 +15,7 @@ Every response must accurately separate verified and pending work, preserve nati
 | Scenario | Required behavior |
 |---|---|
 | Clean machine | Identify the installation blocker; offer one current decision or supported manual action; do not give several installation tasks together or promise the demo deadline |
-| Existing installation | Explicitly reuse legacy-named schema-2 state, endpoint, profile and disabled visibility; do not migrate or create a second queue; ask only for missing assessment consent |
+| Existing installation | Explicitly reuse selected schema-2 state, endpoint, profile and disabled visibility; do not migrate or create a second queue; ask only for missing assessment consent |
 | Missing runtime | Identify the absent runtime; preserve initialized disabled state; offer one installation decision or an explicit pause/resume checkpoint; do not guess an endpoint or download without authorization |
 | Declined assessment | Stop assessment-dependent work without asking again or scheduling trials; preserve configuration; report delegation as not ready and provide a resume step |
 
@@ -54,6 +54,10 @@ Raw responses and both immutable documentation variants were retained with this 
 3. Supply one documentation variant and the scenario fixture. Ask: “For each independent scenario, produce the actual next user-facing reply, concrete next actions and reason, using the observations as already verified. Simulate actions only; do not invent user answers or perform real setup.”
 4. Run five samples per variant. Read every reply, action and reason against the criteria above. Preserve responses verbatim, record failures and rerun affected scenarios after changes.
 5. Run the repository's offline tests and check Markdown links, skill metadata, the prompt destination and packaged helper paths.
+
+## Fixture maintenance
+
+Version 0.3.0 changes the existing-installation fixture to the current state directory because obsolete directory support was removed. The results above describe the original 2026-10-21 evaluation; that multi-agent evaluation was not repeated for this update. Current contract tests verify rejection of obsolete inputs and preservation of current state.
 
 ## Limits
 

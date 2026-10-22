@@ -20,12 +20,25 @@ The link reads the version published on `main`. To try an unpublished checkout, 
 
 **Development preview. Routing stays disabled by default.** Installation, permission for model assessments, approval of a tested model and task scope, and activation are separate decisions. You can pause and resume later.
 
+## Update your plugin
+
+Already installed? Open Codex with local computer access and paste:
+
+```text
+Read https://raw.githubusercontent.com/fcoouto/local-model-delegation/main/docs/updating.md and guide me through updating Local Model Delegation to the latest published numbered release. Preserve my settings, approvals and history, keep routing disabled, and verify the installed version and saved state.
+```
+
+The agent checks your installed version, stages the release, backs up private state, updates through Codex's native plugin installer, and verifies the result. It pauses for active or uncertain tasks. Updating never approves a model or enables delegation. A merged PR does not update installed plugins; a numbered release must be published first.
+
+Reopen Codex or start a fresh chat if the host needs to reload skills. The agent distinguishes verified package files from verified skill discovery. See the [update guide](docs/updating.md) for details and [release notes](CHANGELOG.md) for changes.
+
 ## Choose where to start
 
 | Your situation | Start here | What happens |
 |---|---|---|
 | New to local delegation | Paste the prompt above | The agent checks prerequisites and guides installation and setup |
-| Already installed or partly configured | Paste the same prompt | The agent resumes at the first unfinished step |
+| Partly configured | Paste the setup prompt | The agent resumes at the first unfinished step |
+| Want the latest plugin version | Paste the update prompt | The agent preserves state and verifies a numbered update |
 | Want to inspect the project first | [Clone and inspect](#clone-and-inspect) | Read the source and run a read-only check |
 | Want the technical details | [Shared state](#shared-state-and-updates) · [Contracts](#contracts-and-trust) | Review storage, approvals, verification and limits |
 
@@ -82,7 +95,7 @@ After authorized installation, `setup` initializes disabled private state. Insta
 
 All projects use `~/.local/state/local-model-delegation` by default. Override `--state-dir` deliberately, such as for disposable fixtures or an existing installation. All participating projects must select the same state directory. Schema 2 separates `config.json` from `profiles/<profile_id>.json`. Profiles, approvals, database, model results and receipts stay private; weights remain where the runtime manages them.
 
-Existing preview installations may have state at `~/.local/state/codex-local-repairs`. When that directory exists, commands require explicit `--state-dir` selection and return `explicit_state_directory_required` otherwise. Continue using that directory explicitly; it is not moved or rewritten. Do not create a second active queue for the same runtime. Saved jobs can contain absolute paths, so manually moving state is not a supported migration. The `migrate` command upgrades the state schema in place, not its directory name.
+Only current schema-2 configuration, profiles, queues and task briefs are supported. Obsolete directory detection, task aliases, worker script aliases and schema conversion commands have been removed. Unsupported state is rejected without rewriting its evidence. Custom directories remain explicit; do not move saved state or create a second active queue for the same runtime.
 
 ### Server connection and supported runtimes
 
@@ -90,7 +103,7 @@ The plugin does not scan ports or automatically locate the server. Select its lo
 
 Only the `lmstudio_v1` adapter is implemented. It uses the native `/api/v1/models` and `/api/v1/chat` APIs plus the owner-trusted local model index. GGUF, MLX and Splash text models can be assessment candidates; discovery does not qualify or approve them. Other inference platforms are unsupported, even when they offer OpenAI-compatible chat endpoints. They need adapters with verified discovery, identity, progress, capacity and lifecycle behavior. Current endpoints accept only `http` on literal `127.0.0.1` or `::1`; remote servers, non-text tasks and unrestricted model tools are outside this version.
 
-`migrate` backs up exact legacy configuration bytes and SQLite state, disables the old entry point, and refuses unresolved work. Migration never enables routing. `prepare-update` refuses unsettled work. Detached workers use verified content-addressed helper bundles outside mutable plugin caches; retain those bundles while jobs depend on them. No database rollback command can erase newer job history. `prepare-uninstall` disables admission and removes the current visibility export only after work settles; models, history and visibility preference remain. Native package removal follows that preparation.
+Numbered updates follow the [guided update procedure](docs/updating.md). `prepare-update --target PATH` backs up settings, approvals and history, binds the target package digest, and refuses unsettled work. `verify-update --receipt FILE` checks the installed bytes and preserved state. Detached workers use content-addressed helper bundles outside mutable plugin caches; retain those bundles while jobs depend on them. No database rollback command can erase newer history. `prepare-uninstall` disables admission and removes the current visibility export only after work settles; models, history and visibility preference remain. Native package removal follows that preparation.
 
 ## Contracts and trust
 
@@ -98,13 +111,13 @@ The **host agent** prepares context, chooses tasks, verifies results and applies
 
 Read [task/verification contracts](skills/local-delegation/references/contracts.md) and [visibility format](skills/local-delegation/references/visibility.md). Keep origin/task keys stable through compaction. Wait-policy expiry requests an automatic native routing decision, not an owner model-selection prompt. The coordinator applies only accepted proposals after checking current source hashes.
 
-New protected Python tasks use `python_code_change`; the legacy `bounded_python_repair` identifier remains readable for saved briefs and profiles. Approval remains bound to the exact recorded scope: renaming does not transfer or widen it. Existing fallback names and pinned worker entry points are also preserved when resuming saved work. The former dedicated Python skill is consolidated into the delegation workflow and its [Python verification contract](skills/local-delegation/references/python-checks.md).
+Protected Python tasks use `python_code_change` within the delegation workflow and its [Python verification contract](skills/local-delegation/references/python-checks.md). Approval remains bound to the exact recorded scope. A package update never transfers or widens approval.
 
 Approval binds artifact hashes, runtime key/index metadata, settings and permitted scope. Replacing bytes or identity requires fresh confirmation. Runtime identity trusts LM Studio/Bionic's owner-selected local index and matching discovery metadata; it does **not** attest weights in memory. Missing or ambiguous identity stays closed. Per-model profiles may reference a token environment-variable name; never store tokens in profiles or evidence.
 
 Capacity comes from measured correct batches tied to machine, artifact, settings and runtime context, capped by discovered concurrency and fresh resource observations. Disk size is not a thread limit. Already-loaded requests retain a 4 GiB host reserve and budget the measured additional memory per task. New loads retain the larger `max(4 GiB, 20% of RAM)` reserve. Both paths reject elevated pressure, increasing swap-outs and stale observations. Synthetic calibration starts with one task and at least 1 GiB of extra headroom. Native samples compare host availability and runtime-process memory against their pre-request baseline; the request budget adds the larger of 50% or 256 MiB to the observed peak. Sampled peaks are provisional observations, not guaranteed upper bounds. Active and uncertain requests retain their recorded memory reservations, and workers recheck resources after artifact authorization before posting. Shared reservations cover participating callers; unrelated runtime clients remain outside the helper's slot accounting. Existing external instances are never adopted for unloading.
 
-**Automatic loading/reloading is gated.** The documented [HTTP load API](https://lmstudio.ai/docs/developer/rest/load) does not establish a memory-estimation/non-eviction contract. The adapter returns `lifecycle_unqualified` without a load POST. No CLI workaround or global-setting change is used. Schema-2 uncertain slots stay closed without a verified reset. Legacy schema-1 recovery is retained for compatibility; migration requires it to be settled first.
+**Automatic loading/reloading is gated.** The documented [HTTP load API](https://lmstudio.ai/docs/developer/rest/load) does not establish a memory-estimation/non-eviction contract. The adapter returns `lifecycle_unqualified` without a load POST. No CLI workaround or global-setting change is used. Schema-2 uncertain slots stay closed without a verified reset.
 
 Python checking retains strict import/member/mutation guards, separate protected tests and private result markers. General code checks run predeclared commands with cleared credentials in qualified macOS isolation; missing toolchains stay native. A private receipt binds the proposal, source, checks, attempt/native ID and session token. Semantic acceptance trusts native review; model output cannot certify itself.
 
@@ -119,7 +132,7 @@ git diff --check 950c12dd763f2ecbc905ab9c034a1b3376503edb
 
 Tests use fictional approvals, disposable state and loopback fake servers. They include real macOS Python/JavaScript isolation canaries. Private historical evidence stays outside this repository.
 
-Still unqualified: real approved-model end-to-end execution, automatic model lifecycle, thinking-enabled two-slot recovery, native host dispatch/automatic compaction continuity, install/update behavior in the target desktop, broader language/model reliability and net account savings. No real inference should be run merely to replay a saved candidate.
+Still unqualified: real approved-model end-to-end execution, automatic model lifecycle, thinking-enabled two-slot recovery, native host dispatch/automatic compaction continuity, fresh desktop skill discovery after updates, broader language/model reliability and net account savings. No real inference should be run merely to replay a saved candidate.
 
 Skill validation uses the bundled validator with Python 3.11 and PyYAML 6.0.3. PyYAML is a validation dependency, not a plugin runtime dependency. Both source skills pass structural validation; see the [validation record](docs/project-measurements-validation.md). These checks do not install skills or substitute for live skill-selection or desktop qualification.
 

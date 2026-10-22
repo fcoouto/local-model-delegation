@@ -114,7 +114,7 @@ def run_local_attempt(state_dir, attempt_id):
         if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time(), "submitted_at": time.time()}): return 0
         runtime = Runtime(job["profile"]["endpoint"], token_env=job["profile"].get("token_env"))
         watch = ActivityWatch(job["profile"]["stale_tolerance_seconds"], time.monotonic())
-        progress = ProgressWatch({**job["profile"]["request_settings"], "require_completion_metadata": job["profile"].get("schema_version") == 2})
+        progress = ProgressWatch({**job["profile"]["request_settings"], "require_completion_metadata": True})
         stopped, stale = threading.Event(), threading.Event()
         counts = {}
         last_event_at = time.time()
@@ -159,7 +159,7 @@ def run_local_attempt(state_dir, attempt_id):
                     if total > MAX_ANSWER_BYTES: raise ValueError("oversized_answer")
                     answer.append(content)
                 if event == "chat.end":
-                    if job["profile"].get("schema_version") == 2 and data.get("result", {}).get("model_instance_id") != body["model"]:
+                    if data.get("result", {}).get("model_instance_id") != body["model"]:
                         raise ValueError("instance_mismatch")
                     text = "".join(answer)
                     if not text or final_text(data.get("result")) != text: raise ValueError("final_result_mismatch")

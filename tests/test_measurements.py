@@ -88,7 +88,7 @@ class Measurements(Fixture):
             self.project_id = invoke('register','--root',str(self.project),'--label','Example')['project_id']
             path = self.root/'context.json';path.write_text(json.dumps(self.context()))
             self.assertEqual(invoke('begin','--task','native-task','--context',str(path))['task_id'], 'native-task')
-        self.assertFalse(json.loads((self.state/'profiles.json').read_text())['routing_enabled'])
+        self.assertFalse(json.loads((self.state/'config.json').read_text())['routing_enabled'])
 
     def test_event_replay_and_correction_preserve_history(self):
         m = self.setup_metrics(); m.begin_measurement(self.state, 'task', self.context())
@@ -147,7 +147,6 @@ class Measurements(Fixture):
         m = self.setup_metrics(); brief = Delegation.generic(self)
         atomic_json(self.state/'config.json', {'schema_version':2,'routing_enabled':True})
         store = Store(self.state)
-        with store.db() as db: store.upgrade_schema(db)
         self.assertIn('measurement', __import__('inspect').signature(store.enqueue).parameters)
         context = self.context(scope={'capability':brief['capability'],
             **{k:brief['task_requirements'][k] for k in ('language','complexity','context_bucket')},
@@ -324,12 +323,12 @@ class Measurements(Fixture):
         except ValueError as error: self.fail('empty reports should describe missing state: '+str(error))
         self.assertEqual(report['cohorts'],[]);self.assertFalse(absent.exists())
         m=self.setup_metrics()
-        before=(self.state/'profiles.json').read_bytes()
+        before=(self.state/'config.json').read_bytes()
         report=m.read_report(self.state,project_id=self.project_id)
         self.assertEqual(report['cohorts'],[])
         self.assertTrue(hasattr(m,'render_text_report'))
         self.assertIn('No measured tasks',m.render_text_report(report))
-        self.assertEqual(before,(self.state/'profiles.json').read_bytes())
+        self.assertEqual(before,(self.state/'config.json').read_bytes())
 
     def test_visibility_is_optional_sanitized_and_removes_both_exports(self):
         from local_model_delegation import visibility

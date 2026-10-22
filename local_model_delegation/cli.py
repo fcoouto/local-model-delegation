@@ -1,23 +1,19 @@
 """Local delegation commands; native fallback dispatch remains with the host agent."""
 import argparse
-from datetime import datetime, timezone
 from pathlib import Path
 import re
 import sqlite3
-from .contracts import PYTHON_CODE_CHANGE, MAX_ANSWER_BYTES, canonical, digest, envelope, load_json, validate_brief
-from .lmstudio import Runtime, select_loaded
-from .profiles import fingerprint_artifact, model_identity, read_legacy_profile, read_config
+from .contracts import MAX_ANSWER_BYTES, canonical, digest, envelope, load_json, validate_brief
+from .lmstudio import Runtime
+from .profiles import fingerprint_artifact, model_identity, read_config
 from .store import Store, atomic_json
 from .worker import run_local_attempt, start_worker, wait_job
 
 DEFAULT_STATE = Path.home() / ".local/state/local-model-delegation"
-LEGACY_STATE = Path.home() / ".local/state/codex-local-repairs"
 
 
 def resolve_state_directory(explicit):
     if explicit is not None: return explicit
-    if LEGACY_STATE.exists() or LEGACY_STATE.is_symlink():
-        raise ValueError("explicit_state_directory_required")
     return DEFAULT_STATE
 
 
@@ -43,46 +39,33 @@ def submit_task(state_dir, path, measurement_path=None):
     # Disabled/missing configuration causes no database, process or HTTP side effects.
     config = read_config(state_dir)
     if config.get("routing_enabled") is not True: raise ValueError("routing_disabled")
-    if config["schema_version"] == 2:
-        validate_brief(brief)
-        store = Store(state_dir)
-        result = store.enqueue(brief, brief["fallback"], measurement=read_input(measurement_path) if measurement_path else None)
-        from .scheduler import schedule_once
-        schedule_once(state_dir)
-        result = envelope(store.job(result["job_id"]))
-        if result["status"] == "waiting" and result["reason"] != "route_decision_required":
-            from .worker import launch
-            launch(state_dir, "scheduler", "queue")
-        return result
-    profile = read_legacy_profile(state_dir / "profiles.json", brief.get("capability", PYTHON_CODE_CHANGE))
     validate_brief(brief)
-    from .validation import python_isolation_supported
-    if not python_isolation_supported(brief): raise ValueError("isolation_unsupported")
     store = Store(state_dir)
-    existing = store.lookup(brief["origin_chat_id"], brief["task_key"])
-    if existing:
-        if digest(store.job(existing["job_id"])["brief"]) != digest(brief): raise ValueError("job_conflict")
-        return existing
-    try: loaded = select_loaded(Runtime(profile["endpoint"], token_env=profile.get("token_env")).list_models(), profile)
-    except (OSError, ValueError): loaded = None
-    result = store.reserve(brief, profile, loaded)
-    if result["status"] == "reserved":
-        start_worker(state_dir, result["attempt_id"])
-    elif result["reason"] == "instance_closed" and loaded:
-        from .recovery import request_recovery
-        key = digest([loaded["endpoint"], loaded["model_id"], loaded["instance_id"]])
-        request_recovery(state_dir, key)
+    result = store.enqueue(brief, brief["fallback"], measurement=read_input(measurement_path) if measurement_path else None)
+    from .scheduler import schedule_once
+    schedule_once(state_dir)
+    result = envelope(store.job(result["job_id"]))
+    if result["status"] == "waiting" and result["reason"] != "route_decision_required":
+        from .worker import launch
+        launch(state_dir, "scheduler", "queue")
     return result
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Delegate tasks to assessed local models with native verification and fallback. Routing is disabled by default.")
-    parser.add_argument("--state-dir", type=Path, help="Shared private state directory; required when legacy state exists.")
+    parser.add_argument("--state-dir", type=Path, help="Shared private state directory (default: ~/.local/state/local-model-delegation).")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("migrate")
     commands.add_parser("resources")
-    for name in ("setup", "prepare-update", "prepare-uninstall"):
+    for name in ("setup", "prepare-uninstall"):
         commands.add_parser(name)
+    p = commands.add_parser('version')
+    p.add_argument('--root', type=Path)
+    p = commands.add_parser('prepare-update')
+    p.add_argument('--target', type=Path, required=True)
+    p.add_argument('--installed', type=Path)
+    p = commands.add_parser('verify-update')
+    p.add_argument('--receipt', type=Path, required=True)
+    p.add_argument('--installed', type=Path)
     p = commands.add_parser("doctor")
     p.add_argument("--inspect-runtime", action="store_true")
     for name in ("worker", "recover", "scheduler"):
@@ -106,9 +89,8 @@ def main(argv=None):
     p.add_argument("--candidate", type=Path)
     p.add_argument("--listing", type=Path)
     p = commands.add_parser("profile")
-    p.add_argument("action", choices=["inspect", "record-approval"])
+    p.add_argument("action", choices=["inspect"])
     p.add_argument("--file", type=Path, required=True)
-    p.add_argument("--owner-reference")
     p = commands.add_parser("verify")
     p.add_argument("action", choices=["prepare", "checks", "record"])
     p.add_argument("--job", required=True)
@@ -184,13 +166,18 @@ def main(argv=None):
             elif args.action == 'comparison-record': result = measurements.record_comparison_run(args.state_dir, args.comparison, read_input(args.receipt))
             elif args.action == 'comparison-revoke': result = measurements.revoke_comparison(args.state_dir, args.comparison, args.at, args.evidence_hash)
             else: result = measurements.append_event(args.state_dir, args.task, read_input(args.receipt))
+        elif args.command in ('version', 'prepare-update', 'verify-update'):
+            from .updates import package_identity, prepare_update, verify_update, PACKAGE_ROOT
+            if args.command == 'version': result = package_identity(args.root or PACKAGE_ROOT)
+            elif args.command == 'prepare-update': result = prepare_update(args.state_dir, args.target, args.installed or PACKAGE_ROOT)
+            else: result = verify_update(args.state_dir, args.receipt, args.installed or PACKAGE_ROOT)
         elif args.command == "resources":
             from .capacity import machine_snapshot
             result = machine_snapshot()
-        elif args.command in ("setup", "doctor", "prepare-update", "prepare-uninstall"):
-            from .package import initialize_state, doctor, prepare_update, prepare_uninstall
+        elif args.command in ("setup", "doctor", "prepare-uninstall"):
+            from .package import initialize_state, doctor, prepare_uninstall
             if args.command == "doctor": result = doctor(args.state_dir, args.inspect_runtime)
-            else: result = {"setup": initialize_state, "prepare-update": prepare_update, "prepare-uninstall": prepare_uninstall}[args.command](args.state_dir)
+            else: result = {"setup": initialize_state, "prepare-uninstall": prepare_uninstall}[args.command](args.state_dir)
         elif args.command == "visibility":
             from .visibility import set_visibility, visibility_status
             result = visibility_status(args.state_dir) if args.action == "status" else set_visibility(args.state_dir, args.action == "enable")
@@ -205,23 +192,12 @@ def main(argv=None):
             elif args.action == "submit": result = submit_trial(args.state_dir, args.assessment_id, args.trial_id)
             elif args.action == "trial": result = record_trial(args.state_dir, args.assessment_id, read_input(args.receipt))
             else: result = approve_assessment(args.state_dir, args.assessment_id, args.owner_reference, read_input(args.scope))
-        elif args.command == "migrate":
-            from .profiles import migrate_profile_schema
-            result = migrate_profile_schema(args.state_dir)
         elif args.command == "submit": result = submit_task(args.state_dir, args.brief, args.measurement_context)
         elif args.command == "profile":
             profile = read_input(args.file)
+            if profile.get("schema_version") != 2: raise ValueError("invalid_profile")
             identity = fingerprint_artifact(Path(profile["artifact"]["root"]), profile["artifact"]["files"])
             result = {"schema_version": 1, "profile_id": profile["profile_id"], "identity": identity, "model_identity": model_identity(profile), "routing_enabled": False}
-            if args.action == "record-approval":
-                if profile.get("schema_version") == 2: raise ValueError("use_assessment_approval")
-                if not args.owner_reference: raise ValueError("owner_confirmation_required")
-                profile["artifact"].update(identity)
-                profile["approval"] = {"owner_reference": args.owner_reference, "timestamp": datetime.now(timezone.utc).isoformat(),
-                                       "artifact_digest": identity["digest"], "model_identity": model_identity(profile), "capabilities": profile["capabilities"],
-                                       "request_settings": profile["request_settings"]}
-                atomic_json(args.file, profile)
-                result["status"] = "approval_recorded"
         else:
             if not (args.state_dir / "state.sqlite3").exists(): raise ValueError("no_saved_jobs")
             store = Store(args.state_dir)

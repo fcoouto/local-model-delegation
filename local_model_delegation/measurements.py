@@ -147,11 +147,11 @@ def _begin(db, task_id, context, job_id=None):
         require(job is not None,'unknown_job')
         brief = load_json(job['brief'])
         require(resolve_project_identity(Path(brief['source_root']))['identity'] == project['identity'], 'measurement_project_mismatch')
-        if brief['schema_version'] == 2:
-            scope = {'capability':brief['capability'], **{k:brief['task_requirements'][k] for k in ('language','complexity','context_bucket')},
-                     'input_bytes':len(canonical({'contract':brief['behavior_contract'],'files':brief['files'],'editable_paths':brief['editable_paths']}).encode()),
-                     'file_count':len(brief['files'])}
-            require(context['scope'] == scope, 'measurement_scope_mismatch')
+        require(brief.get('schema_version') == 2, 'invalid_brief')
+        scope = {'capability':brief['capability'], **{k:brief['task_requirements'][k] for k in ('language','complexity','context_bucket')},
+                 'input_bytes':len(canonical({'contract':brief['behavior_contract'],'files':brief['files'],'editable_paths':brief['editable_paths']}).encode()),
+                 'file_count':len(brief['files'])}
+        require(context['scope'] == scope, 'measurement_scope_mismatch')
         route = load_json(dict(job).get('route_data') or '{}')
         require(not route.get('assessment') or context['origin'] == 'synthetic_assessment','measurement_origin_mismatch')
     previous = db.execute('SELECT * FROM measurement_tasks WHERE task_id=? OR job_id=?', (task_id, job_id)).fetchone()

@@ -38,7 +38,7 @@ class Plugin(Fixture):
         self.assertNotIn(str(REPO_ROOT),(first/'delegate.py').read_text())
 
     def test_incompatible_upgrade_refuses_active_state(self):
-        module=self.module();self.write_config();store=Store(self.state);store.reserve(self.brief(),self.profile(),self.loaded())
+        module=self.module();self.write_config(enabled=False);store=Store(self.state);store.reserve(self.brief(),self.profile(),self.loaded())
         with self.assertRaisesRegex(ValueError,'unresolved_work'):module.prepare_update(self.state)
 
     def test_unsupported_host_is_explicit(self):
@@ -63,6 +63,7 @@ class Plugin(Fixture):
         store=Store(self.state);job=store.enqueue(brief,brief['fallback']);store.decide_wait(job['job_id'],{'action':'fallback','reason':'no_qualified_model'})
         claim=store.claim_fallback(job['job_id']);store.attach_fallback(job['job_id'],claim['dispatch_token'],'/root/'+claim['task_name'])
         with store.db(write=True) as db:db.execute("UPDATE jobs SET status='accepted' WHERE job_id=?",(job['job_id'],))
+        config['routing_enabled']=False;atomic_json(self.state/'config.json',config)
         self.assertEqual(module.prepare_update(self.state)['status'],'ready')
 
     def test_release_contains_no_machine_local_evidence(self):

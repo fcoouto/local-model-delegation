@@ -7,8 +7,7 @@ from pathlib import Path
 from typing import Any
 
 PYTHON_CODE_CHANGE = "python_code_change"
-# Keep stored briefs and approval scopes byte-for-byte; aliases do not transfer approval.
-PYTHON_CHANGE_CAPABILITIES = {PYTHON_CODE_CHANGE, "bounded_python_repair"}
+PYTHON_CHANGE_CAPABILITIES = {PYTHON_CODE_CHANGE}
 CAPABILITIES = PYTHON_CHANGE_CAPABILITIES | {"test_writing", "code_change", "file_summary"}
 MAX_ANSWER_BYTES = 2 * 1024 * 1024
 
@@ -58,10 +57,10 @@ def safe_path(root: Path, name: str) -> Path:
 def validate_brief(data: dict[str, Any]) -> dict[str, Any]:
     if isinstance(data, dict) and type(data.get("schema_version")) is int and data["schema_version"] == 2:
         return validate_v2(data)
-    required = {"schema_version", "origin_chat_id", "task_key", "capability", "source_root", "files",
-                "editable_paths", "supplied_tests", "behavior_contract", "checks", "independent_tests"}
-    if not isinstance(data, dict) or set(data) != required or type(data["schema_version"]) is not int or data["schema_version"] != 1:
-        raise ValueError("invalid_brief")
+    raise ValueError("invalid_brief")
+
+
+def validate_python_checks(data):
     if data["capability"] not in PYTHON_CHANGE_CAPABILITIES:
         raise ValueError("unsupported_capability")
     for key in ("origin_chat_id", "task_key", "behavior_contract"):
@@ -116,8 +115,8 @@ def validate_fallback(value):
 def validate_v2(data):
     common = {"schema_version", "origin_chat_id", "task_key", "capability", "source_root", "files",
               "editable_paths", "behavior_contract", "task_requirements", "acceptance", "fallback"}
-    legacy = {"supplied_tests", "checks", "independent_tests"} if data.get("capability") in PYTHON_CHANGE_CAPABILITIES else set()
-    if set(data) != common | legacy or data["capability"] not in CAPABILITIES: raise ValueError("invalid_brief")
+    python_fields = {"supplied_tests", "checks", "independent_tests"} if data.get("capability") in PYTHON_CHANGE_CAPABILITIES else set()
+    if set(data) != common | python_fields or data["capability"] not in CAPABILITIES: raise ValueError("invalid_brief")
     validate_fallback(data["fallback"])
     for key in ("origin_chat_id", "task_key", "behavior_contract"):
         if not isinstance(data[key], str) or not data[key] or len(data[key]) > 20000: raise ValueError("invalid_brief")
@@ -138,7 +137,7 @@ def validate_v2(data):
     if sum(len(i["content"].encode()) for i in data["files"].values()) > MAX_ANSWER_BYTES: raise ValueError("oversized_context")
     acceptance = data["acceptance"]
     if (not isinstance(acceptance, dict) or set(acceptance) != {"method", "criteria", "protected_paths", "checks"}
-            or acceptance["method"] != ("python_isolated" if legacy else "native_verified")
+            or acceptance["method"] != ("python_isolated" if python_fields else "native_verified")
             or not isinstance(acceptance["criteria"], list) or not acceptance["criteria"]
             or not all(isinstance(c, str) and c.strip() for c in acceptance["criteria"])):
         raise ValueError("invalid_acceptance")
@@ -164,8 +163,8 @@ def validate_v2(data):
     if data["capability"] == "file_summary":
         if data["editable_paths"] or checks: raise ValueError("summary_is_read_only")
     elif not data["editable_paths"] or not checks: raise ValueError("missing_checks")
-    if legacy:
-        validate_brief({**{k: v for k, v in data.items() if k not in ("task_requirements", "acceptance", "fallback")}, "schema_version": 1})
+    if python_fields:
+        validate_python_checks(data)
     return data
 
 

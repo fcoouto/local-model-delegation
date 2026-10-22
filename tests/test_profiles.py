@@ -1,7 +1,7 @@
 import copy
 import json
 from local_model_delegation.contracts import validate_brief, load_json
-from local_model_delegation.profiles import eligible, fingerprint_artifact, read_legacy_profile
+from local_model_delegation.profiles import eligible, fingerprint_artifact, read_profile_by_id
 from tests.support import Fixture
 
 
@@ -17,7 +17,7 @@ class Profiles(Fixture):
     def test_fallback_is_per_profile(self):
         p = self.profile()
         p["fallback"] = {"model": "another-owner-selected-model", "reasoning_effort": "high"}
-        loaded = read_legacy_profile(self.write_config(p), "python_code_change")
+        loaded = read_profile_by_id(self.write_config(p).parent, p["profile_id"], "python_code_change")
         self.assertEqual(loaded["fallback"], p["fallback"])
 
     def test_same_name_new_bytes_needs_confirmation(self):
@@ -27,10 +27,10 @@ class Profiles(Fixture):
         self.assertFalse(eligible(p, identity, "python_code_change"))
 
     def test_disabled_configuration_has_no_side_effects(self):
-        path = self.root / "disabled.json"
+        path = self.root / "config.json"
         path.write_text(json.dumps(self.config(enabled=False)))
         with self.assertRaisesRegex(ValueError, "routing_disabled"):
-            read_legacy_profile(path, "python_code_change")
+            read_profile_by_id(self.root, "fictional", "python_code_change")
         self.assertFalse(self.state.exists())
 
     def test_invalid_brief(self):
@@ -52,13 +52,13 @@ class Profiles(Fixture):
     def test_invalid_profile_settings(self):
         for value in [0, -1, float("nan"), True, "120"]:
             with self.subTest(value=value), self.assertRaises(ValueError):
-                read_legacy_profile(self.write_config({**self.profile(), "stale_tolerance_seconds": value}), "python_code_change")
+                read_profile_by_id(self.write_config({**self.profile(), "stale_tolerance_seconds": value}).parent, "fictional", "python_code_change")
         p = self.profile()
         p.pop("fallback")
-        with self.assertRaises(ValueError): read_legacy_profile(self.write_config(p), "python_code_change")
+        with self.assertRaises(ValueError): read_profile_by_id(self.write_config(p).parent, p["profile_id"], "python_code_change")
         p = self.profile()
         p["adapter"] = "unknown"
-        with self.assertRaises(ValueError): read_legacy_profile(self.write_config(p), "python_code_change")
+        with self.assertRaises(ValueError): read_profile_by_id(self.write_config(p).parent, p["profile_id"], "python_code_change")
 
     def test_artifact_symlink_escape(self):
         (self.artifact / "evil.bin").symlink_to(self.project / "helper.py")
@@ -144,87 +144,6 @@ class VersionedProfiles(Fixture):
         atomic_json(self.state / "profiles/fictional.json", p)
         with self.assertRaisesRegex(ValueError, "model_not_approved"):
             read(self.state, "fictional", "python_code_change")
-
-    def test_migrate_keeps_legacy_bytes_and_disables_routing(self):
-        migrate = self.api("migrate_profile_schema")
-        old = self.write_config().read_bytes()
-        result = migrate(self.state)
-        from pathlib import Path
-        from local_model_delegation.store import Store
-        self.assertEqual((Path(result["backup_dir"]) / "profiles.json").read_bytes(), old)
-        self.assertFalse(json.loads((self.state / "config.json").read_text())["routing_enabled"])
-        p = json.loads((self.state / "profiles/fictional.json").read_text())
-        self.assertEqual(p["qualification_status"], "needs_assessment")
-        self.assertEqual(p["approval"], json.loads(old)["profiles"]["fictional"]["approval"])
-        with Store(self.state).db() as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
-            self.assertTrue({"fallback", "queued_at", "route_data"} <= {r[1] for r in db.execute("PRAGMA table_info(jobs)")})
-
-    def test_old_entrypoint_cannot_submit_after_migration(self):
-        migrate = self.api("migrate_profile_schema")
-        path = self.write_config()
-        migrate(self.state)
-        with self.assertRaisesRegex(ValueError, "routing_disabled"):
-            read_legacy_profile(path, "python_code_change")
-        from local_model_delegation.store import Store
-        import sqlite3
-        store = Store(self.state)
-        with self.assertRaisesRegex(ValueError, "mixed_state_version"):
-            store.reserve(self.brief(), self.profile(), self.loaded())
-        # The previous executable used a positional 11-column insert.
-        with store.db(write=True) as db, self.assertRaises(sqlite3.OperationalError):
-            db.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (None,) * 11)
-
-    def test_migration_admission_race_keeps_database_v1(self):
-        migrate = self.api("migrate_profile_schema")
-        from local_model_delegation import profiles
-        from local_model_delegation.store import Store, atomic_json
-        from unittest.mock import patch
-        p = self.profile(); self.write_config(p); store = Store(self.state)
-        raced = []
-        def write(path, value):
-            atomic_json(path, value)
-            if path.name == "profiles.json" and value.get("routing_enabled") is False:
-                raced.append(store.reserve(self.brief(), p, self.loaded()))
-        with patch.object(profiles, "atomic_json", side_effect=write):
-            with self.assertRaisesRegex(ValueError, "unresolved_work"):
-                migrate(self.state)
-        self.assertEqual(store.job(raced[0]["job_id"])["status"], "reserved")
-        with store.db() as db: self.assertLess(db.execute("PRAGMA user_version").fetchone()[0], 2)
-        self.assertTrue(json.loads((self.state / "profiles.json").read_text())["routing_enabled"])
-
-    def test_migrate_refuses_unresolved_work(self):
-        migrate = self.api("migrate_profile_schema")
-        from local_model_delegation.store import Store
-        p = self.profile(); self.write_config(p); store = Store(self.state)
-        job = store.reserve(self.brief(), p, self.loaded())
-        for status in ("checking", "dispatch_uncertain", "reserved"):
-            with store.db(write=True) as db: db.execute("UPDATE jobs SET status=?", (status,))
-            with self.subTest(status=status), self.assertRaisesRegex(ValueError, "unresolved_work"):
-                migrate(self.state)
-        with store.db(write=True) as db:
-            db.execute("UPDATE jobs SET status='failed'")
-            db.execute("UPDATE attempts SET state='uncertain'")
-        with self.assertRaisesRegex(ValueError, "unresolved_work"): migrate(self.state)
-        self.assertEqual(store.job(job["job_id"])["status"], "failed")
-
-    def test_migration_interruption_is_recoverable(self):
-        migrate = self.api("migrate_profile_schema")
-        from local_model_delegation import profiles
-        from local_model_delegation.store import atomic_json
-        from unittest.mock import patch
-        old = self.write_config().read_bytes()
-        def interrupt(path, value):
-            if path.name == "config.json": raise OSError("fixture interruption")
-            return atomic_json(path, value)
-        with patch.object(profiles, "atomic_json", side_effect=interrupt):
-            with self.assertRaises(OSError): migrate(self.state)
-        with self.assertRaisesRegex(ValueError, "routing_disabled"):
-            read_legacy_profile(self.state / "profiles.json", "python_code_change")
-        result = migrate(self.state)
-        from pathlib import Path
-        self.assertEqual((Path(result["backup_dir"]) / "profiles.json").read_bytes(), old)
-        self.assertFalse(json.loads((self.state / "config.json").read_text())["routing_enabled"])
 
     def test_authorize_job_uses_exact_profile_and_rechecks_revocation(self):
         authorize = self.api("authorize_job")

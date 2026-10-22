@@ -14,7 +14,7 @@ Inspect the host, local file/terminal access, Python version, plugin availabilit
 
 If the host or agent is unsupported, explain that blocker and the next supported action. If local computer access is unavailable, offer instructions and clearly mark checks as unperformed. Do not claim installation from reading this page.
 
-For an installed plugin, locate its packaged setup skill and helper through the host. Resume with that version's [setup skill](../skills/setup/SKILL.md); avoid mixing commands from a newer checkout with an older installed helper. Preserve existing state and preferences. If the legacy state directory exists, follow the skill's explicit directory-selection rules before running commands.
+For an installed plugin, locate its packaged setup skill and helper through the host. Resume with that version's [setup skill](../skills/setup/SKILL.md); avoid mixing commands from a newer checkout with an older installed helper. Preserve existing state and preferences. For a newer release, use the [update procedure](updating.md); it explicitly bootstraps update checks from the staged target package.
 
 ### 2. Install the plugin if missing
 

@@ -63,7 +63,7 @@ class Fixture(unittest.TestCase):
         catalog.chmod(0o600)
         profile = {
             "runtime_catalog": str(catalog),
-            "schema_version": 1, "profile_id": "fictional", "endpoint": "http://127.0.0.1:1",
+            "schema_version": 2, "profile_id": "fictional", "endpoint": "http://127.0.0.1:1",
             "adapter": "lmstudio_v1", "model_id": "fictional-model",
             "artifact": {"root": str(self.artifact), "files": ["weights.bin"], **identity},
             "capabilities": ["python_code_change"], "request_settings": settings,
@@ -74,18 +74,25 @@ class Fixture(unittest.TestCase):
                          "request_settings": copy.deepcopy(settings)},
         }
         from local_model_delegation.profiles import model_identity
+        profile['qualification_status']='qualified'
+        profile['scope']=[{'capability':'python_code_change','language':'python','complexity':'simple','context_bucket':'small','max_input_bytes':100000}]
+        profile['approval']['scope']=copy.deepcopy(profile['scope'])
         profile["approval"]["model_identity"] = model_identity(profile)
         return profile
 
     def brief(self, key="change-one"):
-        return {"schema_version": 1, "origin_chat_id": "fixture-chat", "task_key": key,
+        return {"schema_version": 2, "origin_chat_id": "fixture-chat", "task_key": key,
                 "capability": "python_code_change", "source_root": str(self.project),
                 "files": {name: {"content": text, "sha256": sha(text)} for name, text in
                           {"helper.py": BUGGY, "test_helper.py": SUPPLIED}.items()},
                 "editable_paths": ["helper.py", "test_helper.py"],
                 "supplied_tests": ["test_helper.py"], "behavior_contract": "strip both ends",
                 "checks": [["unittest", "test_oracle"]],
-                "independent_tests": {"test_oracle.py": ORACLE}}
+                "independent_tests": {"test_oracle.py": ORACLE},
+                'task_requirements':{'language':'python','complexity':'simple','context_bucket':'small','urgency':'normal','wait_budget_seconds':30},
+                'fallback':{'model':'gpt-6.1-sol','reasoning_effort':'medium'},
+                'acceptance':{'method':'python_isolated','criteria':['Strip both ends'], 'protected_paths':[],
+                              'checks':[{'id':'oracle','argv':['/usr/bin/true'],'cwd':'.','timeout_seconds':5}]}}
 
     def loaded(self, capacity=1):
         return {"endpoint": "http://127.0.0.1:1", "model_id": "fictional-model", "instance_id": "fixture-instance",
@@ -93,21 +100,17 @@ class Fixture(unittest.TestCase):
                 "binding_verified": True}
 
     def config(self, profile=None, enabled=True):
-        p = profile or self.profile()
-        return {"schema_version": 1, "routing_enabled": enabled,
-                "preferred_by_capability": {"python_code_change": p["profile_id"]},
-                "profiles": {p["profile_id"]: p}}
+        return {"schema_version": 2, "routing_enabled": enabled, "visibility_enabled": True}
 
     def write_config(self, profile=None, enabled=True):
-        self.state.mkdir(mode=0o700, exist_ok=True)
-        path = self.state / "profiles.json"
-        # Rebind only fictional test approval to its selected loopback fake endpoint.
-        if profile is not None and profile.get("runtime_catalog"):
-            from local_model_delegation.profiles import model_identity
-            profile["approval"]["model_identity"] = model_identity(profile)
-        path.write_text(json.dumps(self.config(profile, enabled)))
-        path.chmod(0o600)
-        return path
+        from local_model_delegation.store import atomic_json
+        from local_model_delegation.profiles import model_identity
+        p=profile if profile is not None else self.profile()
+        if p.get('approval') is not None and p.get('runtime_catalog'):
+            p['approval']['model_identity']=model_identity(p)
+        atomic_json(self.state/'config.json',self.config(p,enabled))
+        atomic_json(self.state/'profiles'/ (p['profile_id']+'.json'),p)
+        return self.state/'config.json'
 
 
 class FakeRuntime:

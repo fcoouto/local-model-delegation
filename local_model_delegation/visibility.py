@@ -53,7 +53,7 @@ def build_visibility_snapshot(rows,generated_at):
         if native:
             fallback=row.get('fallback')
             if isinstance(fallback,str):fallback=load_json(fallback)
-            model=clean((fallback or profile.get('fallback') or {}).get('model',''))
+            model=clean((fallback or {}).get('model',''))
         value={'job_id':row['job_id'],'origin_chat_id':brief['origin_chat_id'],'project_id':digest(brief['source_root']),
                'capability':brief['capability'],'model_name':model,'execution_kind':kind,'state':state,
                'label':model if state=='running' else LABELS.get(state,'Unknown'),
@@ -112,7 +112,7 @@ def set_visibility(state_dir,enabled):
     root=private_dir(Path(state_dir))
     with _lock(root):
         config=read_config(root);config['visibility_enabled']=enabled
-        path=root/('config.json' if config['schema_version']==2 else 'profiles.json')
+        path=root/'config.json'
         atomic_json(path,config)
         if not enabled:
             try:
