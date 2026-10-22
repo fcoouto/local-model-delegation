@@ -121,7 +121,7 @@ Tests use fictional approvals, disposable state and loopback fake servers. They 
 
 Still unqualified: real approved-model end-to-end execution, automatic model lifecycle, thinking-enabled two-slot recovery, native host dispatch/automatic compaction continuity, install/update behavior in the target desktop, broader language/model reliability and net account savings. No real inference should be run merely to replay a saved candidate.
 
-Skill validation uses the bundled validator in a disposable Python 3.11 environment with PyYAML 6.0.3. The host Python still lacks PyYAML; validation does not add a runtime dependency or install any skill. Offline checks do not substitute for live skill-selection or desktop qualification.
+Skill validation uses the bundled validator with Python 3.11 and PyYAML 6.0.3. PyYAML is a validation dependency, not a plugin runtime dependency. Both source skills pass structural validation; see the [validation record](docs/project-measurements-validation.md). These checks do not install skills or substitute for live skill-selection or desktop qualification.
 
 ## Credits and license
 

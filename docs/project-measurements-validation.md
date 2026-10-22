@@ -48,7 +48,7 @@ Real configuration and model-profile hashes matched their pre-implementation val
 
 ## Remaining qualification
 
-The bundled skill validator could not run because PyYAML is unavailable. No dependency was installed to bypass that limitation.
+The initial run could not execute the bundled skill validator because PyYAML was unavailable. On 2026-10-22, the owner authorized installing PyYAML. Version 6.0.3 was installed in the user's Python 3.11 package directory, preserving the managed interpreter files. A parsing smoke check and the bundled `quick_validate.py` checks for both `skills/local-delegation` and `skills/setup` passed. This closes the structural-validation gap; it does not establish live skill behavior or add a plugin runtime dependency.
 
 Before deployment or a project pilot, qualify a supported native usage source, real project reliability, collection continuity, and total native overhead/net benefit. Extra comparison calls require separate bounded authorization and an executor that enforces it. Counts and fictional arithmetic do not establish real savings or statistical reliability.
 
