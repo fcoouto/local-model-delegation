@@ -179,8 +179,21 @@ def authorize_job(store, job):
     return current
 
 
+def generation_settings(brief, profile):
+    """Select the coordinator's task allowance within the approved model ceiling."""
+    settings = profile['request_settings']
+    ceiling = settings['max_output_tokens']
+    requested = brief.get('task_requirements', {}).get('max_output_tokens', ceiling)
+    if type(ceiling) is not int or ceiling <= 0 or type(requested) is not int or not 0 < requested <= ceiling:
+        raise ValueError('generation_budget_exceeded')
+    return {**settings, 'max_output_tokens':requested}
+
+
 def scope_matches(profile, brief):
     from .contracts import canonical
+    if 'request_settings' in profile:
+        try: generation_settings(brief, profile)
+        except ValueError: return False
     requirements = brief["task_requirements"]
     size = len(canonical({"contract": brief["behavior_contract"], "files": brief["files"], "editable_paths": brief["editable_paths"]}).encode())
     return any(isinstance(scope, dict) and scope.get("capability") == brief["capability"]

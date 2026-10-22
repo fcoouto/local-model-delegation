@@ -115,8 +115,9 @@ class Fixture(unittest.TestCase):
 
 class FakeRuntime:
     """Actual loopback HTTP, deterministic lifecycle and stream faults."""
-    def __init__(self, answer=None, delay=0, incomplete=False, mismatch=False):
-        self.answer = answer or json.dumps({"files": {"helper.py": FIXED, "test_helper.py": SUPPLIED + ADDED}, "summary": "strip both ends"})
+    def __init__(self, answer=None, delay=0, incomplete=False, mismatch=False, output_tokens=50):
+        self.answer = json.dumps({"files": {"helper.py": FIXED, "test_helper.py": SUPPLIED + ADDED}, "summary": "strip both ends"}) if answer is None else answer
+        self.output_tokens, self.terminal_result = output_tokens, None
         self.delay, self.incomplete, self.mismatch = delay, incomplete, mismatch
         self.calls, self.requests = [], []
         self.loaded, self.parallel = True, 1
@@ -177,7 +178,8 @@ class FakeRuntime:
                 if outer.delay: time.sleep(outer.delay)
                 events += [("reasoning.end", {}), ("message.start", {}), ("message.delta", {"content": answer}), ("message.end", {})]
                 if not outer.incomplete:
-                    events.append(("chat.end", {"result": {"model_instance_id": outer.instance_id, "stats": {"total_output_tokens": 50}, "output": [{"type": "message", "content": answer + ("wrong" if outer.mismatch else "")}]}}))
+                    result = outer.terminal_result if outer.terminal_result is not None else {"model_instance_id": outer.instance_id, "stats": {"total_output_tokens": outer.output_tokens}, "output": [{"type": "message", "content": answer + ("wrong" if outer.mismatch else "")}]}
+                    events.append(("chat.end", {"result": result}))
                 try:
                     for event, data in events:
                         self.wfile.write(f"event: {event}\ndata: {json.dumps({'type': event, **data})}\n\n".encode())

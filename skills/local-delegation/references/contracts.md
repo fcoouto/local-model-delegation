@@ -29,12 +29,22 @@ Keep native authentication, provider, defaults, permissions and hooks unchanged.
 A schema-2 brief has exactly `schema_version`, `origin_chat_id`, `task_key`, `capability`, `source_root`, `files`, `editable_paths`, `behavior_contract`, `task_requirements`, `acceptance` and `fallback`. Paths are relative to a canonical source root, with no symlinks/traversal. Supply at most eight UTF-8 files, 100,000 bytes each, mapped to `{content, sha256}`. New files must be absent at the snapshot. No deletes, renames, binary or mode changes.
 
 - Capabilities: `python_code_change`, `code_change`, `test_writing`, `file_summary`.
-- Requirements: `language`, `complexity` (`simple`, `moderate`, `complex`), `context_bucket`, `urgency` (`normal`, `urgent`), positive `wait_budget_seconds`. Match an explicitly approved operating scope; context bounds measure serialized input bytes, not guessed tokens.
+- Requirements: `language`, `complexity` (`simple`, `moderate`, `complex`), `context_bucket`, `urgency` (`normal`, `urgent`), positive `wait_budget_seconds`; optional positive integer `max_output_tokens`. Match an explicitly approved operating scope; context bounds measure serialized input bytes, not guessed tokens.
 - Fallback: exact `{model, reasoning_effort}`. Persist it before local selection; never read an unrelated default.
 - Acceptance: `{method, criteria, protected_paths, checks}`. Method is `native_verified` for general work. Each trusted check is `{id, argv, cwd, timeout_seconds}`; executable is absolute, cwd is `.` or a safe relative directory. Checks and criteria remain outside model input.
 - Protected Python verification also retains `supplied_tests`, `independent_tests` and `checks` from the [protected Python verification contract](python-checks.md), with acceptance method `python_isolated`.
 
 `python_code_change` names the restrictive Python verification path; it does not describe the whole delegation system. Updates never transfer or widen approval. Assessment fixture updates require fresh assessments; saved evidence is retained rather than relabelled.
+
+### Generation budgets
+
+The profile's approved `request_settings.max_output_tokens` is the model ceiling. Set `task_requirements.max_output_tokens` to the generation allowance for this task; it includes reasoning and visible output. Omission uses the profile value, preserving saved briefs. Other request settings, including thinking, remain those approved for the model.
+
+Choose the allowance from the task's complexity, expected answer size and comparable observations for that model. A short answer can still require substantial reasoning; input bytes and context-window size do not predict the required generation allowance. For example, an approved 32,768-token ceiling permits a 16,384-token task allowance, but those numbers are illustrative, not measured recommendations for any model. Do not silently reduce an explicit allowance to make a model eligible. An allowance above the ceiling keeps the task native unless the owner authorizes a new ceiling.
+
+Admission and the pre-POST check require the full supplied prompt's UTF-8 byte bound, the selected generation allowance and 2,048 tokens of template headroom to fit the discovered context. No total inference deadline is added. Stale and loop monitoring remain active.
+
+Verified budget exhaustion records terminal identity, token counts and an answer hash, completes only that generation's attempt, and requests native fallback. It does not accept a candidate or require a reset. Missing/malformed completion, mismatched output or generation, and uncertain historical attempts retain their protections. Never release old uncertain work from its reason code alone. New jobs record effective request settings; old evidence is not rewritten. A larger budget on a later authorized task does not justify replaying completed work.
 
 Code output is `{files, summary}` with complete replacement text for allowed paths only. Summary output is `{summary, claims}`; each claim has `text`, `path`, `sha256`, `start_line` and `end_line`. Summary briefs have no editable paths or executable checks.
 

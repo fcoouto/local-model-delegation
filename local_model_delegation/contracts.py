@@ -121,7 +121,8 @@ def validate_v2(data):
     for key in ("origin_chat_id", "task_key", "behavior_contract"):
         if not isinstance(data[key], str) or not data[key] or len(data[key]) > 20000: raise ValueError("invalid_brief")
     requirements = data["task_requirements"]
-    if (not isinstance(requirements, dict) or set(requirements) != {"language", "complexity", "context_bucket", "urgency", "wait_budget_seconds"}
+    if (not isinstance(requirements, dict) or set(requirements) - {'max_output_tokens'} != {"language", "complexity", "context_bucket", "urgency", "wait_budget_seconds"}
+            or ('max_output_tokens' in requirements and (type(requirements['max_output_tokens']) is not int or requirements['max_output_tokens'] <= 0))
             or requirements["complexity"] not in ("simple", "moderate", "complex")
             or requirements["urgency"] not in ("normal", "urgent") or not positive(requirements["wait_budget_seconds"])
             or any(not isinstance(requirements[k], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", requirements[k]) for k in ("language", "context_bucket"))):
