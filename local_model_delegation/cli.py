@@ -89,14 +89,24 @@ def main(argv=None):
     p.add_argument("--candidate", type=Path)
     p.add_argument("--listing", type=Path)
     p = commands.add_parser("profile")
-    p.add_argument("action", choices=["inspect"])
-    p.add_argument("--file", type=Path, required=True)
+    p.add_argument("action", choices=["inspect", "approve"])
+    p.add_argument("--file", type=Path)
+    p.add_argument("--profile-id")
+    p.add_argument("--owner-reference")
+    p.add_argument("--scope", type=Path)
     p = commands.add_parser("verify")
     p.add_argument("action", choices=["prepare", "checks", "record"])
     p.add_argument("--job", required=True)
     p.add_argument("--receipt", type=Path)
     p = commands.add_parser("discover")
     p.add_argument("--endpoint", required=True)
+    p = commands.add_parser('models')
+    p.add_argument('action', choices=['permit-load','load','reconcile-load','reset'])
+    p.add_argument('--profile-id')
+    p.add_argument('--owner-reference')
+    p.add_argument('--context-length', type=int)
+    p.add_argument('--instance-key')
+    p.add_argument('--operation-id')
     p = commands.add_parser("assessment")
     p.add_argument("action", choices=["begin", "report", "trial", "submit", "capacity", "approve"])
     p.add_argument("--profile-id")
@@ -152,6 +162,15 @@ def main(argv=None):
         if args.command == "recover":
             from .recovery import recover_instance
             return recover_instance(args.state_dir, args.identifier)
+        if args.command == 'models':
+            from . import lifecycle
+            if args.action == 'permit-load':
+                result = lifecycle.configure_loading(args.state_dir,args.profile_id,args.owner_reference,args.context_length)
+            elif args.action == 'load': result = lifecycle.ensure_loaded(args.state_dir,args.profile_id)
+            elif args.action == 'reconcile-load': result = lifecycle.reconcile_load(args.state_dir,args.operation_id)
+            else: result = lifecycle.reset_external(args.state_dir,args.instance_key,args.owner_reference)
+            print(canonical(result))
+            return 0
         if args.command == 'metrics':
             from . import measurements
             if args.action == 'init': result = measurements.initialize_measurements(args.state_dir)
@@ -193,6 +212,9 @@ def main(argv=None):
             elif args.action == "trial": result = record_trial(args.state_dir, args.assessment_id, read_input(args.receipt))
             else: result = approve_assessment(args.state_dir, args.assessment_id, args.owner_reference, read_input(args.scope))
         elif args.command == "submit": result = submit_task(args.state_dir, args.brief, args.measurement_context)
+        elif args.command == "profile" and args.action == 'approve':
+            from .onboarding import approve_scope
+            result = approve_scope(args.state_dir, args.profile_id, args.owner_reference, read_input(args.scope))
         elif args.command == "profile":
             profile = read_input(args.file)
             if profile.get("schema_version") != 2: raise ValueError("invalid_profile")

@@ -42,10 +42,10 @@ The setup skill is the source of truth for the remaining procedure:
 |---|---|
 | Install and initialize | Make the plugin available and prepare private state |
 | Optional standing assessment consent | Run package-owned synthetic assessments; consent is revocable |
-| Exact-model approval | Approve the demonstrated model, settings and task scope |
+| Exact-model approval | Approve the exact model/settings and a bounded provisional operating scope |
 | Routing activation | Allow eligible project tasks to use approved local models |
 
-Setup grants none of the later decisions. If the owner declines assessments, retain the saved configuration, leave new profiles unapproved and stop assessment-dependent work. Offer a resume step without repeating the consent request. A successful assessment does not authorize activation.
+Setup grants none of the later decisions. If the owner declines synthetic assessments, do not run them. Offer the practical representative-task path only if useful; it still needs explicit exact-model provisional approval. Declining all model use leaves new profiles unapproved. Offer a resume step without repeating the consent request. A successful assessment does not authorize activation.
 
 ### 5. Verify and hand back a checkpoint
 
@@ -58,3 +58,5 @@ The project remains a development preview. Desktop installation and real-model e
 ## Project measurements
 
 After authorized setup/update, the agent can register project measurement context and record ordinary work without extra inference. Fresh setup initializes the ledger; existing state uses `metrics init`. [Measurement contracts](../skills/local-delegation/references/measurements.md) explain the commands and optional telemetry. Candidate acceptance, destination delivery, and later reported corrections remain distinct. Reports cannot approve a model or enable routing. Additional comparisons need separate bounded consent; missing usage or baselines leaves savings unknown.
+
+See the [practical qualification runbook](qualification.md) for realistic context budgets, one-slot admission and evidence that grows through normal work.

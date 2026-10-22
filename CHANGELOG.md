@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.3.5
+
+- Add owner-authorized external reset reconciliation with one unload request, verified absence, generation fencing and preserved failed outcomes/history.
+- Add separately permitted HTTP loading for approved models, exact context/one-slot verification, endpoint reservations and read-only reconciliation after ambiguous responses.
+- Let ordinary routing load permitted models before inference; preserve LM Studio guardrails and defer when peers or unresolved operations exist.
+- Let verified retired generations pass update preparation without accepting unsupported retirement flags.
+
+## 0.3.4 (unreleased)
+
+- Link Vibe Setup's delegation policy and native contract from agent and user documentation. Use installed-version instructions and preserve local approval, verification and fallback controls.
+- Documentation-only local update on top of 0.3.3; runtime code and private state are unchanged.
+
+## 0.3.3 (unreleased)
+
+- Refresh an idle instance's approval metadata after assessment or an authorized scope change when fresh discovery confirms identical runtime/artifact/settings/configuration. Preserve occupied and uncertain slots, recovery markers and lifecycle reservations.
+- Preserve never-submitted queued jobs during a disabled, idle plugin update. Uninstall remains stricter; active, uncertain and recovery work still blocks updates.
+
+## 0.3.2 (unreleased)
+
+- Separate explicit provisional operating budgets from observed fixture sizes. Add `profile approve` for owner-authorized practical scopes without inventing qualification or savings evidence.
+- Default loaded-model admission to one shared slot. Replace free-memory and zero-swap vetoes with fresh pressure checks; warning is advisory and critical/unknown readings defer admission.
+- Check full supplied prompt, output allowance and conservative template headroom against runtime context before reserving and before POST.
+- Simplify onboarding around a few representative project tasks with native verification and fallback; retain optional synthetic experiments and historical evidence.
+
+## 0.3.1 (unreleased)
+
+- Remove the circular savings prerequisite from exact-model approval and scheduling. Verified capability, capacity, owner approval and scope remain required; unknown savings stay unknown while ordinary authorized work supplies evidence.
+- Prefer matching measured benefit when available and retain the existing block on known negative benefit and suspended scopes.
+- Fall back before POST when every eligible runtime is unavailable or unloaded; healthy occupied runtimes still wait without disrupting peers.
+- Clarify how local proposals inherit the coordinator's project and skill constraints, including Vibe Setup, without impersonating native subagents or bypassing native fallback policy.
+
 ## 0.3.0
 
 - Add numbered release archives, immutable version/tag checks and package fingerprints.

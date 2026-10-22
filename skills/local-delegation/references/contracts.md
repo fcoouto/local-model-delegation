@@ -12,18 +12,24 @@ instructions, or source matching that installed revision; repository `main` does
 not silently replace a project's reviewed policy. Do not copy Vibe's native
 declaration/report schemas into this plugin or install Vibe merely to delegate.
 
+Before submission, the coordinator reads applicable AGENTS instructions and relevant skills/plugins. Put the objective and relevant constraints in `behavior_contract`, supplied context in `files`, proposed write scope in `editable_paths`, and native verification criteria/commands in `acceptance`. Resolve dependencies and resource ownership before dispatch. Keep protected oracle tests, credentials and unnecessary context private. Every supplied constraint counts toward the approved operating input limit; do not omit a requirement to fit the model. Unsupported context, capability, tool requirements or task budgets keep work native.
+
+The local model receives supplied text only. It cannot load installed skills, invoke plugins, run commands, write project files or attest compliance. The coordinator performs required tool actions and independently verifies each applicable requirement before integration. This is a coordinator obligation, not automatic semantic enforcement by the HTTP helper.
+
 Local HTTP proposals do not invoke native subagent hooks. Native fallback must
 satisfy the active host/project's declaration and report contract as well as this
 plugin's dispatch/reconciliation protocol. If a required contract is unavailable,
 retain work with the coordinator rather than guessing or bypassing it. Local
 approval and routing remain governed by this plugin's contracts below.
 
+Keep native authentication, provider, defaults, permissions and hooks unchanged. No copied skill catalog, parallel policy file or Vibe installation is needed. Read the active project's current policy at dispatch; this mapping does not pin or replace it.
+
 ## Brief and verification schema
 
 A schema-2 brief has exactly `schema_version`, `origin_chat_id`, `task_key`, `capability`, `source_root`, `files`, `editable_paths`, `behavior_contract`, `task_requirements`, `acceptance` and `fallback`. Paths are relative to a canonical source root, with no symlinks/traversal. Supply at most eight UTF-8 files, 100,000 bytes each, mapped to `{content, sha256}`. New files must be absent at the snapshot. No deletes, renames, binary or mode changes.
 
 - Capabilities: `python_code_change`, `code_change`, `test_writing`, `file_summary`.
-- Requirements: `language`, `complexity` (`simple`, `moderate`, `complex`), `context_bucket`, `urgency` (`normal`, `urgent`), positive `wait_budget_seconds`. Match an assessed approval scope; context bounds measure serialized input bytes, not guessed tokens.
+- Requirements: `language`, `complexity` (`simple`, `moderate`, `complex`), `context_bucket`, `urgency` (`normal`, `urgent`), positive `wait_budget_seconds`. Match an explicitly approved operating scope; context bounds measure serialized input bytes, not guessed tokens.
 - Fallback: exact `{model, reasoning_effort}`. Persist it before local selection; never read an unrelated default.
 - Acceptance: `{method, criteria, protected_paths, checks}`. Method is `native_verified` for general work. Each trusted check is `{id, argv, cwd, timeout_seconds}`; executable is absolute, cwd is `.` or a safe relative directory. Checks and criteria remain outside model input.
 - Protected Python verification also retains `supplied_tests`, `independent_tests` and `checks` from the [protected Python verification contract](python-checks.md), with acceptance method `python_isolated`.

@@ -18,7 +18,7 @@ Your agent checks the environment, handles the available setup steps, and asks f
 
 The link reads the version published on `main`. To try an unpublished checkout, ask your agent to read its local `docs/onboarding.md` instead. A chat without local computer access can explain setup but cannot perform or verify it.
 
-**Development preview. Routing stays disabled by default.** Installation, permission for model assessments, approval of a tested model and task scope, and activation are separate decisions. You can pause and resume later.
+**Development preview. Routing stays disabled by default.** Installation, permission for model assessments, approval of an exact model and provisional task scope, and activation are separate decisions. You can pause and resume later.
 
 ## Update your plugin
 
@@ -47,16 +47,16 @@ Reopen Codex or start a fresh chat if the host needs to reload skills. The agent
 1. **Check:** detect supported tools, an existing installation and saved configuration.
 2. **Prepare:** install missing prerequisites with your authorization and connect to your selected local server.
 3. **Assess:** with your consent, test a candidate model on package-owned synthetic tasks and report what passed.
-4. **Decide:** approve the exact demonstrated scope, then separately choose whether to enable delegation.
+4. **Decide:** approve the exact model and a practical provisional scope, then separately choose whether to enable delegation.
 5. **Verify:** report what was checked, what remains pending and how to resume. “Installed” does not mean “ready to delegate.”
 
-**Supported today:** Codex on macOS, Python 3.11+, and LM Studio over a loopback HTTP connection. Executable candidates require qualified macOS isolation. The shared core is host-agnostic; Claude integration, other runtimes and non-text tasks are future work. Automatic model loading remains unavailable until qualified; the agent reports a model-loading blocker instead of bypassing it.
+**Supported today:** Codex on macOS, Python 3.11+, and LM Studio over a loopback HTTP connection. Executable candidates require qualified macOS isolation. The shared core is host-agnostic; Claude integration, other runtimes and non-text tasks are future work. With separate loading permission, the plugin can load an approved model before delegation. See [model loading and recovery](docs/model-loading.md).
 
 Read the [onboarding guide](docs/onboarding.md) for the agent's workflow and [onboarding evaluation](docs/onboarding-validation.md) for what has been tested. Cloning this repository installs nothing, approves no model and changes no provider or authentication settings.
 
 ## What it does
 
-- Assesses package-owned synthetic tasks before recommending a narrowly scoped model approval.
+- Uses a few representative, natively verified tasks to assess a practical provisional scope; the synthetic fixture pack is optional.
 - Supports code changes, test writing and file summaries. Contracts support multiple languages and complexity levels; bundled assessment coverage currently includes simple Python, JavaScript and text cases.
 - Shares a durable queue and measured per-instance slots across projects. Healthy work can finish while other tasks wait.
 - Detects silence, a defined repeated-reasoning pattern and exhausted output budgets. It has no total inference deadline.
@@ -91,6 +91,10 @@ The root [plugin manifest](plugin.json) packages the [setup skill](skills/setup/
 
 After authorized installation, `setup` initializes disabled private state. Installation, standing assessment consent, exact-model approval and routing activation remain separate decisions. Current builds/tests do none of those on the developer's real machine.
 
+Approval records permission for an exact model, settings and practical operating scope; it does not certify reliability. Start with one slot and a few representative, natively verified tasks. Once the owner approves that provisional scope and enables routing, ordinary authorized tasks provide measurement evidence. Missing telemetry or comparable baselines keeps savings unknown. Known negative benefit and suspended scopes remain ineligible; measured benefit for the matching scope takes priority over unknown benefit.
+
+Delegation follows the coordinator's active project instructions, skills and permission policy, including Vibe Setup where installed. The coordinator supplies relevant constraints, runs required tools and verifies proposals. Local HTTP calls are not native subagents and do not receive native hook enforcement. See [coordinator policy](skills/local-delegation/references/contracts.md#coordinator-policy-and-native-subagents).
+
 ## Shared state and updates
 
 All projects use `~/.local/state/local-model-delegation` by default. Override `--state-dir` deliberately, such as for disposable fixtures or an existing installation. All participating projects must select the same state directory. Schema 2 separates `config.json` from `profiles/<profile_id>.json`. Profiles, approvals, database, model results and receipts stay private; weights remain where the runtime manages them.
@@ -122,9 +126,11 @@ Protected Python tasks use `python_code_change` within the delegation workflow a
 
 Approval binds artifact hashes, runtime key/index metadata, settings and permitted scope. Replacing bytes or identity requires fresh confirmation. Runtime identity trusts LM Studio/Bionic's owner-selected local index and matching discovery metadata; it does **not** attest weights in memory. Missing or ambiguous identity stays closed. Per-model profiles may reference a token environment-variable name; never store tokens in profiles or evidence.
 
-Capacity comes from measured correct batches tied to machine, artifact, settings and runtime context, capped by discovered concurrency and fresh resource observations. Disk size is not a thread limit. Already-loaded requests retain a 4 GiB host reserve and budget the measured additional memory per task. New loads retain the larger `max(4 GiB, 20% of RAM)` reserve. Both paths reject elevated pressure, increasing swap-outs and stale observations. Synthetic calibration starts with one task and at least 1 GiB of extra headroom. Native samples compare host availability and runtime-process memory against their pre-request baseline; the request budget adds the larger of 50% or 256 MiB to the observed peak. Sampled peaks are provisional observations, not guaranteed upper bounds. Active and uncertain requests retain their recorded memory reservations, and workers recheck resources after artifact authorization before posting. Shared reservations cover participating callers; unrelated runtime clients remain outside the helper's slot accounting. Existing external instances are never adopted for unloading.
+Already-loaded models start with one shared slot; disk size is not a thread limit. Admission and pre-POST checks read a fresh macOS pressure signal. Warning pressure is advisory; critical, unknown or stale pressure blocks new work without interrupting healthy peers. Free-memory arithmetic and swap deltas are diagnostics, not per-task vetoes. LM Studio owns loading guardrails; this helper does not change them. Higher concurrency still needs separate machine/settings/artifact/context-bound evidence. External clients remain outside shared slot accounting; uncertain attempts retain their slots.
 
-**Automatic loading/reloading is gated.** The documented [HTTP load API](https://lmstudio.ai/docs/developer/rest/load) does not establish a memory-estimation/non-eviction contract. The adapter returns `lifecycle_unqualified` without a load POST. No CLI workaround or global-setting change is used. Schema-2 uncertain slots stay closed without a verified reset.
+Operating context budgets are explicit approval limits, separate from observed assessment sizes. A useful starting budget is 65,536 UTF-8 bytes of serialized supplied context, adjusted to the task and loaded context. This is not a token count or a guarantee of quality. The helper screens the full prompt, reserved output and 2,048 tokens of template headroom against the discovered runtime context. Without a qualified HTTP tokenizer it conservatively counts UTF-8 bytes as input token budget. Larger tasks can fall back before POST. See the [practical qualification runbook](docs/qualification.md).
+
+**Model loading uses durable HTTP operations.** Loading permission binds the exact approval and context setting. The plugin preserves LM Studio's loading guardrails, checks current pressure, and requires an empty endpoint before loading a new model. It verifies discovery before inference and uses one slot. Ambiguous loads are never blindly repeated. An owner-authorized reset can retire an uncertain generation after verified unload/absence, preserving the failed job and its history. Unattended reset remains disabled; other clients' activity cannot be locked by this plugin. See [the operating procedure and limits](docs/model-loading.md).
 
 Python checking retains strict import/member/mutation guards, separate protected tests and private result markers. General code checks run predeclared commands with cleared credentials in qualified macOS isolation; missing toolchains stay native. A private receipt binds the proposal, source, checks, attempt/native ID and session token. Semantic acceptance trusts native review; model output cannot certify itself.
 

@@ -10,6 +10,25 @@ from .store import Store
 _last_swap = None
 
 
+def pressure_snapshot():
+    """Cheap admission signal; runtime guardrails own model load fit."""
+    pressure = 'unknown'
+    if platform.system() == 'Darwin':
+        try:
+            value = subprocess.check_output(['/usr/sbin/sysctl', '-n', 'kern.memorystatus_vm_pressure_level'],
+                                            text=True, timeout=3, stderr=subprocess.DEVNULL)
+            pressure = {1:'normal', 2:'warning', 4:'critical'}.get(int(value), 'unknown')
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    return {'pressure': pressure, 'observed_at': time.time()}
+
+
+def inference_available(resources):
+    return (resources.get('pressure') in ('normal', 'warning')
+            and positive(resources.get('observed_at'))
+            and -1 <= time.time() - resources['observed_at'] <= 5)
+
+
 def machine_snapshot():
     global _last_swap
     result={'physical_bytes':None,'available_bytes':None,'pressure':'unknown','swapout_delta_bytes':None,
@@ -76,17 +95,19 @@ def assessment_request_bytes(assessment):
 
 
 def qualified_limit(profile, loaded, resources):
-    if not loaded or not available_budget(resources,loaded=True): return 0
+    if (not loaded or not inference_available(resources)
+            or type(loaded.get('capacity')) is not int or loaded['capacity'] < 1): return 0
     evidence=profile.get('capacity_evidence',{})
-    if (evidence.get('qualified') is not True or evidence.get('machine_fingerprint')!=resources['machine_fingerprint']
+    if (evidence.get('qualified') is not True or not resources.get('machine_fingerprint')
+            or evidence.get('machine_fingerprint')!=resources['machine_fingerprint']
             or evidence.get('settings_digest')!=digest(profile['request_settings'])
             or evidence.get('artifact_digest')!=profile['artifact']['digest']
             or evidence.get('context_length')!=loaded.get('config',{}).get('context_length')
             or type(evidence.get('limit')) is not int or evidence['limit']<1
             or type(evidence.get('batches')) is not int or evidence['batches']<3
             or not positive(evidence.get('median_slowdown')) or evidence['median_slowdown']>1.5
-            or not positive(evidence.get('request_bytes')) or type(loaded.get('capacity')) is not int): return 0
-    return min(loaded['capacity'],evidence['limit'],int(available_budget(resources,loaded=True)//evidence['request_bytes']))
+            or not positive(evidence.get('request_bytes'))): return 1
+    return min(loaded['capacity'],evidence['limit'])
 
 
 def qualify_measurements(profile, batches, resources, context_length):
@@ -115,11 +136,9 @@ def qualify_measurements(profile, batches, resources, context_length):
 
 
 def ensure_loaded(state_dir, profile_id):
-    # shortcut: HTTP v1 has no documented estimator/non-eviction contract; qualify an adapter before implementing load POSTs.
-    from .onboarding import _profile
-    _profile(state_dir,profile_id)
-    return {'status':'not_eligible','reason':'lifecycle_unqualified',
-            'missing':['http_memory_estimate','verified_non_evicting_load_contract']}
+    from .lifecycle import ensure_loaded as load
+    try: return load(state_dir, profile_id)
+    except ValueError as error: return {'status': 'not_eligible', 'reason': str(error)}
 
 
 def owned_operation(store, instance):

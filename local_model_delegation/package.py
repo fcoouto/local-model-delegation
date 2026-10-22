@@ -31,7 +31,7 @@ def doctor(state_dir,inspect_runtime=False):
     config=read_config(state_dir)
     result={'supported':not limitations,'limitations':limitations,'routing_enabled':config.get('routing_enabled') is True,
             'visibility_enabled':config.get('visibility_enabled',True),'native_host_support':'requires_host_qualification',
-            'automatic_loading':'lifecycle_unqualified','subscription_savings':'unknown'}
+            'automatic_loading':'requires_profile_loading_consent','subscription_savings':'unknown'}
     if inspect_runtime:
         from .onboarding import discover_models
         from .lmstudio import Runtime

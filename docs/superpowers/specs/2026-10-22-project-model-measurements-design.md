@@ -16,7 +16,7 @@ The remaining choices below are proposed implementation defaults, not owner-appr
 2. **Normal work only.** Cheapest collection, but savings often remain unknown because tasks differ. This remains a supported operating practice within the selected approach.
 3. **Continuously execute both routes.** Rejected: duplicates native work, consumes the usage being saved, and creates additional execution and privacy risks.
 
-The first release records and compares evidence. It does not introduce automatic experiment dispatch or a new adaptive routing policy. Reports inform the coordinator; they cannot grant approval, expand scope, or override current routing gates. A later routing change must replace the existing global benefit gate with project-bound evidence before claiming project-aware automatic selection.
+The first release records and compares evidence. It does not introduce automatic experiment dispatch or a new adaptive routing policy. Reports inform the coordinator; they cannot grant approval, expand scope, or override current routing gates. Version 0.3.1 corrects the bootstrap cycle: unknown savings no longer block capability/capacity approval or ordinary approved work. Known negative benefit and suspended scope still block routing. This remains global selection; project-aware automatic selection would require a separate change using project-bound evidence.
 
 ## Current implementation and reuse
 

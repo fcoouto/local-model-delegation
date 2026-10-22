@@ -87,13 +87,86 @@ class Scheduler(Fixture):
         (self.project/'helper.js').write_text('unrelated change')
         self.assertEqual(store.admit(job['job_id'],p,self.loaded(),self.resources())['status'],'needs_reassessment')
 
-    def test_unknown_benefit_keeps_native(self):
+    def test_unknown_benefit_allows_approved_scope(self):
         self.assertIsNotNone(importlib.util.find_spec('local_model_delegation.scheduler'))
         from local_model_delegation.scheduler import rank_profiles
         store, brief, p=self.setup_queue()
         self.assertEqual(rank_profiles(brief,[p]),['fictional'])
         p.pop('benefit_evidence')
-        self.assertEqual(rank_profiles(brief,[p]),[])
+        self.assertEqual(rank_profiles(brief,[p]),['fictional'])
+        p['benefit_evidence'] = None
+        self.assertEqual(rank_profiles(brief,[p]),['fictional'])
+
+    def test_known_negative_benefit_stays_native(self):
+        from local_model_delegation.scheduler import rank_profiles
+        store, brief, p = self.setup_queue()
+        p['benefit_evidence'] = {'credible': False, 'kind': 'usage_proxy'}
+        self.assertEqual(rank_profiles(brief, [p]), [])
+
+    def test_benefit_priority_applies_only_to_its_measured_scope(self):
+        from local_model_delegation.scheduler import rank_profiles
+        store, brief, measured = self.setup_queue()
+        unknown = copy.deepcopy(measured); unknown['profile_id'] = 'unknown'
+        unknown.pop('benefit_evidence'); unknown['owned_loaded'] = True
+        self.assertEqual(rank_profiles(brief, [unknown, measured]), ['fictional', 'unknown'])
+        measured['benefit_evidence']['scope'][0]['language'] = 'python'
+        self.assertEqual(rank_profiles(brief, [measured, unknown]), ['unknown', 'fictional'])
+
+    def test_unknown_benefit_keeps_approval_scope_and_suspension_gates(self):
+        from local_model_delegation.scheduler import rank_profiles
+        store, brief, p = self.setup_queue(); p.pop('benefit_evidence')
+        for changes in ({'approval': None}, {'qualification_status': 'needs_assessment'},
+                        {'scope': []}, {'suspended_scope': copy.deepcopy(p['scope'])}):
+            with self.subTest(changes=changes):
+                self.assertEqual(rank_profiles(brief, [{**p, **changes}]), [])
+
+    def test_unknown_benefit_reaches_normal_admission_without_assessment_permit(self):
+        from tests.support import FakeRuntime
+        from local_model_delegation.profiles import model_identity
+        from local_model_delegation.scheduler import schedule_once
+        store, brief, p = self.setup_queue()
+        server = FakeRuntime(); self.addCleanup(server.close)
+        p['endpoint'] = server.endpoint; p['approval']['model_identity'] = model_identity(p)
+        p.pop('benefit_evidence')
+        atomic_json(self.state/'profiles/fictional.json', p)
+        job = store.enqueue(brief, brief['fallback'])
+        with patch('local_model_delegation.worker.start_worker'):
+            schedule_once(self.state, resources=self.resources())
+        self.assertEqual(store.job(job['job_id'])['status'], 'reserved')
+        self.assertNotIn('assessment', store.job(job['job_id'])['route_data'])
+        self.assertFalse(any(method == 'POST' for method, _ in server.calls))
+
+    def test_unloaded_runtime_falls_back_without_waiting_or_loading(self):
+        from tests.support import FakeRuntime
+        from local_model_delegation.profiles import model_identity
+        from local_model_delegation.scheduler import schedule_once
+        store, brief, p = self.setup_queue()
+        server = FakeRuntime(); self.addCleanup(server.close)
+        p['endpoint'] = server.endpoint; p['approval']['model_identity'] = model_identity(p)
+        atomic_json(self.state/'profiles/fictional.json', p)
+        job = store.enqueue(brief, brief['fallback'])
+        with patch('local_model_delegation.lmstudio.Runtime.list_models', return_value={'models': []}):
+            schedule_once(self.state, resources=self.resources())
+        self.assertEqual(store.job(job['job_id'])['reason'], 'model_unavailable')
+        self.assertEqual(store.job(job['job_id'])['status'], 'fallback_required')
+        self.assertIsNone(store.job(job['job_id'])['attempt_id'])
+        self.assertFalse(any(method == 'POST' for method, _ in server.calls))
+
+    def test_discovered_busy_runtime_keeps_healthy_peer_and_waiter(self):
+        from tests.support import FakeRuntime
+        from local_model_delegation.profiles import model_identity
+        from local_model_delegation.scheduler import schedule_once
+        store, brief, p = self.setup_queue()
+        server = FakeRuntime(); self.addCleanup(server.close)
+        p['endpoint'] = server.endpoint; p['approval']['model_identity'] = model_identity(p)
+        atomic_json(self.state/'profiles/fictional.json', p)
+        first = store.enqueue(brief, brief['fallback'])
+        second = store.enqueue({**brief, 'task_key': 'waiter'}, brief['fallback'])
+        with patch('local_model_delegation.worker.start_worker'):
+            schedule_once(self.state, resources=self.resources())
+        self.assertEqual(store.job(first['job_id'])['status'], 'reserved')
+        self.assertEqual(store.job(second['job_id'])['status'], 'waiting')
+        self.assertIsNone(store.job(second['job_id'])['attempt_id'])
 
     def test_scheduler_samples_memory_after_slow_artifact_authorization(self):
         from tests.support import FakeRuntime
@@ -110,7 +183,7 @@ class Scheduler(Fixture):
             return result
         with patch('time.time', side_effect=lambda: now[0]), \
              patch('local_model_delegation.profiles.authorize_job', side_effect=slow_authorization), \
-             patch('local_model_delegation.capacity.machine_snapshot', side_effect=self.resources) as sample, \
+             patch('local_model_delegation.capacity.pressure_snapshot', side_effect=self.resources) as sample, \
              patch('local_model_delegation.worker.start_worker') as start:
             job = store.enqueue(brief, brief['fallback'])
             schedule_once(self.state)
@@ -122,7 +195,7 @@ class Scheduler(Fixture):
     def test_explicit_stale_resource_snapshot_stays_ineligible(self):
         store, brief, p = self.setup_queue(); job = store.enqueue(brief, brief['fallback'])
         resources = self.resources(); resources['observed_at'] -= 6
-        with patch('local_model_delegation.capacity.machine_snapshot') as sample:
+        with patch('local_model_delegation.capacity.pressure_snapshot') as sample:
             self.assertEqual(store.admit(job['job_id'], p, self.loaded(), resources)['status'], 'waiting')
             sample.assert_not_called()
 

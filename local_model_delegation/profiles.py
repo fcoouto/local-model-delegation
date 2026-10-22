@@ -189,11 +189,21 @@ def scope_matches(profile, brief):
                for scope in profile.get("scope", []))
 
 
-def _quiescent(db, settled_jobs=()):
+def _quiescent(db, settled_jobs=(), *, allow_pending_admission=False):
+    settled_jobs = set(settled_jobs)
+    if allow_pending_admission:
+        settled_jobs.update(row[0] for row in db.execute("SELECT job_id FROM jobs j WHERE status='waiting' AND attempt_id IS NULL AND profile='{}' AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.job_id=j.job_id)"))
+    def unresolved_instance(row):
+        data = load_json(row['data'])
+        from .lifecycle import reset_verified
+        if data.get('recovery_phase') == 'retired' and reset_verified(db, row): return False
+        return not (allow_pending_admission and row['state'] == 'closed'
+                    and data.get('binding_verified') is True
+                    and not any(k.startswith('recovery_') for k in data))
     if (any(row[0] not in settled_jobs for row in db.execute("SELECT job_id FROM jobs WHERE status NOT IN ('accepted','failed','needs_reassessment')"))
             or db.execute("SELECT 1 FROM attempts WHERE state IN ('reserved','submitting','streaming','uncertain') LIMIT 1").fetchone()
             or db.execute("SELECT 1 FROM fallback_dispatches f JOIN jobs j USING(job_id) WHERE f.state NOT IN ('complete','failed') AND j.status NOT IN ('accepted','failed') LIMIT 1").fetchone()
-            or db.execute("SELECT 1 FROM instances WHERE state != 'ready' LIMIT 1").fetchone()):
+            or any(unresolved_instance(row) for row in db.execute("SELECT * FROM instances WHERE state != 'ready'"))):
         raise ValueError("unresolved_work")
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='model_operations'").fetchone():
         if db.execute("SELECT 1 FROM model_operations WHERE state NOT IN ('complete','failed') LIMIT 1").fetchone():

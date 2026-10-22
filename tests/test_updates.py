@@ -89,6 +89,25 @@ class Updates(Fixture):
         with self.assertRaisesRegex(ValueError,'unresolved_work'):api.prepare_update(self.state,target,old)
         self.assertEqual(store.attempt(job['attempt_id'])['state'],'uncertain')
 
+    def test_disabled_update_preserves_unsubmitted_queue_and_idle_policy_closure(self):
+        api=self.api();old,target=self.packages();store=Store(self.state)
+        self.write_config(enabled=True)
+        waiting=store.enqueue(self.brief(),self.brief()['fallback'])
+        # A completed assessment instance can retain a policy-only closure.
+        prior=store.reserve(self.brief('prior'),self.profile(),self.loaded())
+        with store.db(write=True) as db:
+            db.execute("UPDATE jobs SET status='accepted' WHERE job_id=?",(prior['job_id'],))
+            db.execute("UPDATE attempts SET state='complete'")
+            db.execute("UPDATE instances SET state='closed'")
+        self.write_config(enabled=False)
+        before=store.job(waiting['job_id'])
+        prepared=api.prepare_update(self.state,target,old)
+        self.assertEqual(api.verify_update(self.state,Path(prepared['receipt']),target)['status'],'verified')
+        self.assertEqual(store.job(waiting['job_id']),before)
+        with store.db(write=True) as db:
+            db.execute("UPDATE instances SET data=json_set(data,'$.recovery_phase','unload')")
+        with self.assertRaisesRegex(ValueError,'unresolved_work'):api.prepare_update(self.state,target,old)
+
     def settled_trial(self):
         store=Store(self.state);brief=self.brief();job=store.reserve(brief,self.profile(),None)
         identifier='a'*32;trial_id='b'*32;permit={'assessment_id':identifier,'permit_token':'fixture-token'}
