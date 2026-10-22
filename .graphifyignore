@@ -1,0 +1,20 @@
+# Local-only structural indexing: exclude private and generated inputs.
+.git/
+.codex/
+.agents/
+.claude/
+.env
+.env.*
+auth.json
+credentials.json
+*.pem
+*.key
+*.log
+.venv/
+venv/
+__pycache__/
+node_modules/
+graphify-out/
+build/
+dist/
+.codex-delegations/

@@ -6,3 +6,6 @@ profiles.json
 state.sqlite3*
 jobs/
 locks/
+/.codex/config.toml
+/AGENTS.override.md
+.codex-delegations/
