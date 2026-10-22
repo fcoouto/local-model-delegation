@@ -132,6 +132,19 @@ def main(argv=None):
     p.add_argument("--receipt", type=Path, required=True)
     p = commands.add_parser("visibility")
     p.add_argument("action", choices=["enable", "disable", "status"])
+    p = commands.add_parser('metrics')
+    metrics = p.add_subparsers(dest='action', required=True)
+    metrics.add_parser('init')
+    p = metrics.add_parser('register')
+    p.add_argument('--root', type=Path, required=True)
+    p.add_argument('--label', required=True)
+    p = metrics.add_parser('begin')
+    p.add_argument('--task', required=True)
+    p.add_argument('--context', type=Path, required=True)
+    p.add_argument('--job')
+    p = metrics.add_parser('record')
+    p.add_argument('--task', required=True)
+    p.add_argument('--receipt', type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         args.state_dir = resolve_state_directory(args.state_dir)
@@ -142,7 +155,13 @@ def main(argv=None):
         if args.command == "recover":
             from .recovery import recover_instance
             return recover_instance(args.state_dir, args.identifier)
-        if args.command == "resources":
+        if args.command == 'metrics':
+            from . import measurements
+            if args.action == 'init': result = measurements.initialize_measurements(args.state_dir)
+            elif args.action == 'register': result = measurements.register_project(args.state_dir, args.root, args.label)
+            elif args.action == 'begin': result = measurements.begin_measurement(args.state_dir, args.task, read_input(args.context), args.job)
+            else: result = measurements.append_event(args.state_dir, args.task, read_input(args.receipt))
+        elif args.command == "resources":
             from .capacity import machine_snapshot
             result = machine_snapshot()
         elif args.command in ("setup", "doctor", "prepare-update", "prepare-uninstall"):

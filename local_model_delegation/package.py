@@ -17,6 +17,8 @@ def initialize_state(state_dir):
     config.setdefault('routing_enabled',False);config.setdefault('visibility_enabled',True)
     atomic_json(root/'config.json',config)
     Store(root)
+    from .measurements import initialize_measurements
+    initialize_measurements(root)
     return config
 
 
