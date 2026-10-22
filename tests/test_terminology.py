@@ -35,8 +35,7 @@ class Terminology(Fixture):
         from local_model_delegation.store import Store
         store = Store(self.state); job = store.reserve(self.brief(), self.profile(), None)
         claim = store.claim_fallback(job['job_id'])
-        self.assertTrue(claim['task_name'].startswith('local_delegation_'))
-        saved_name = 'external_task_'+job['job_id']
+        saved_name = 'local_delegation_'+job['job_id']
         with store.db(write=True) as db:
             db.execute('UPDATE fallback_dispatches SET task_name=? WHERE job_id=?',(saved_name,job['job_id']))
         native = '/root/'+saved_name

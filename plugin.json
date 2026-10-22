@@ -1,6 +1,6 @@
 {
   "name": "local-model-delegation",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Delegate bounded text and code tasks to assessed local models, with native verification and fallback. Disabled by default.",
   "extensions": {
     "com.openai": {

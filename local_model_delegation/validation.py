@@ -223,7 +223,8 @@ def _verify_python_candidate(store, job_id):
     brief = job["brief"]
     if not source_matches(brief):
         with store.db(write=True) as db:
-            db.execute("UPDATE jobs SET status='needs_reassessment',reason='source_changed' WHERE job_id=? AND status='candidate_ready'", (job_id,))
+            db.execute("UPDATE jobs SET status=?,reason='source_changed' WHERE job_id=? AND status='candidate_ready'",
+                       ('failed' if job['native_task_id'] else 'needs_reassessment', job_id))
         return envelope(store.job(job_id))
     with store.db(write=True) as db:
         if not db.execute("UPDATE jobs SET status='checking' WHERE job_id=? AND status='candidate_ready'", (job_id,)).rowcount:
@@ -281,7 +282,9 @@ def _verify_python_candidate(store, job_id):
         from .measurements import collect_verdict
         collect_verdict(store.root,job_id,receipt,False,'source_changed' if str(error)=='source_changed' else 'verification')
         if str(error) == "source_changed":
-            with store.db(write=True) as db: db.execute("UPDATE jobs SET status='needs_reassessment',reason='source_changed' WHERE job_id=? AND status='checking'", (job_id,))
+            with store.db(write=True) as db:
+                db.execute("UPDATE jobs SET status=?,reason='source_changed' WHERE job_id=? AND status='checking'",
+                           ('failed' if job['native_task_id'] else 'needs_reassessment', job_id))
         elif job["native_task_id"]:
             with store.db(write=True) as db: db.execute("UPDATE jobs SET status='failed',reason='fallback_checks_failed' WHERE job_id=? AND status='checking'", (job_id,))
         else: store.select_fallback(job_id, "candidate_checks_failed")
@@ -347,7 +350,7 @@ def prepare_verification(state_dir, job_id):
             if str(error) == 'source_changed' or job['native_task_id']:
                 with store.db(write=True) as db:
                     db.execute('UPDATE jobs SET status=?,reason=? WHERE job_id=?',
-                               ('needs_reassessment' if str(error) == 'source_changed' else 'failed',
+                               ('failed' if job['native_task_id'] else 'needs_reassessment',
                                 'source_changed' if str(error) == 'source_changed' else 'native_verification_failed', job_id))
             else: store.select_fallback(job_id, 'verification_unsupported' if str(error) == 'verification_unsupported' else 'candidate_checks_failed')
         raise
@@ -410,7 +413,11 @@ def record_verification(state_dir, job_id, receipt):
                 raise ValueError('verification_mismatch')
             return envelope(job)
         authorize_job(store, job)
-        if not source_matches(job['brief']): raise ValueError('source_changed')
+        if not source_matches(job['brief']):
+            with store.db(write=True) as db:
+                db.execute("UPDATE jobs SET status=?,reason='source_changed' WHERE job_id=? AND status='checking'",
+                           ('failed' if job['native_task_id'] else 'needs_reassessment', job_id))
+            raise ValueError('source_changed')
         if job['attempt_id'] and not job['native_task_id']:
             attempt = store.attempt(job['attempt_id'])
             if attempt['state'] != 'complete' or attempt['generation'] != store.instance(attempt['instance_key'])['generation']:

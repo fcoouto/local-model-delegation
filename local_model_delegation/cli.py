@@ -96,6 +96,7 @@ def main(argv=None):
     p.add_argument("--native-task-id")
     p.add_argument("--candidate", type=Path)
     p.add_argument("--listing", type=Path)
+    p.add_argument("--task-name")
     p = commands.add_parser("profile")
     p.add_argument("action", choices=["inspect", "approve"])
     p.add_argument("--file", type=Path)
@@ -264,7 +265,7 @@ def main(argv=None):
                     from .worker import launch
                     launch(args.state_dir, "scheduler", "queue")
             elif args.command == "fallback":
-                if args.action == "claim": result = store.claim_fallback(args.job)
+                if args.action == "claim": result = store.claim_fallback(args.job, args.task_name)
                 elif args.action == "attach":
                     if not store.attach_fallback(args.job, args.dispatch_token, args.native_task_id): raise ValueError("dispatch_mismatch")
                     result = envelope(store.job(args.job))
