@@ -24,7 +24,7 @@ approval and routing remain governed by this plugin's contracts below.
 
 Keep native authentication, provider, defaults, permissions and hooks unchanged. No copied skill catalog, parallel policy file or Vibe installation is needed. Read the active project's current policy at dispatch; this mapping does not pin or replace it.
 
-## Brief schema
+## Brief and verification schema
 
 A schema-2 brief has exactly `schema_version`, `origin_chat_id`, `task_key`, `capability`, `source_root`, `files`, `editable_paths`, `behavior_contract`, `task_requirements`, `acceptance` and `fallback`. Paths are relative to a canonical source root, with no symlinks/traversal. Supply at most eight UTF-8 files, 100,000 bytes each, mapped to `{content, sha256}`. New files must be absent at the snapshot. No deletes, renames, binary or mode changes.
 
