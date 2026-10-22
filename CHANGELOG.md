@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.7
+
+- Show real local attempts beneath their coordinator in unchanged Habblaud through its existing hooks, for local npm and Docker deployments.
+- Display the assignment role and actual model display name, preserve specialty metadata, and report generation, verification and terminal phases without changing execution or acceptance.
+- Add opt-in enable/status/bind/resume/disable controls, bounded loopback transport, stable display identities, restart recovery and observer cleanup during updates.
+- Preserve running job identity when duplicate presentation context conflicts; retain all published 0.3.6 generation-budget behavior.
+- Document inherited Codex icons, clipped badges, unavailable local model Stats and completion/statistics limitations.
+
+## 0.3.6
+
+- Let the coordinator select a positive per-task generation allowance within the model's approved ceiling. Admission and the HTTP request use that allowance, including reasoning tokens, with runtime context checks before POST.
+- Add explicit `profile approve --max-output-tokens` support. Ceiling changes preserve assessment history and wait for occupied instances before refreshing idle approval metadata; loading permission remains bound to the approval.
+- Complete budget-exhausted attempts only after validating terminal identity, token metadata, output and generation. Request native fallback without accepting truncated output or closing healthy slots. Missing or malformed terminal evidence remains uncertain.
+- Record effective request settings and terminal exhaustion evidence. Measurement cohorts distinguish the actual generation allowance; historical attempts and outcomes remain unchanged.
+
 ## 0.3.5
 
 - Add owner-authorized external reset reconciliation with one unload request, verified absence, generation fencing and preserved failed outcomes/history.

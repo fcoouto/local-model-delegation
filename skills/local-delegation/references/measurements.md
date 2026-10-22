@@ -34,6 +34,8 @@ Every field is required; unknown optional values use null:
 
 Job-bound scope and source-root identity must match the durable brief. `input_bytes` is the UTF-8 size of canonical JSON with `contract`, `files`, and `editable_paths`, as sent by the helper. `file_count` counts supplied files. Synthetic jobs cannot be labelled normal work.
 
+New execution bindings hash the effective request settings, including the task's generation allowance, rather than an unused model ceiling. Attempt observations retain those settings and validated exhaustion metadata when available. Different allowances remain separate cohorts. Historical attempts without this metadata stay unchanged; reconciliation cannot invent it. Exhausted local work followed by successful native delivery remains local failure/fallback, not local acceptance or proven savings.
+
 Canonical JSON uses sorted keys, compact separators, UTF-8, and finite numbers. The package provides `contracts.canonical` and `contracts.digest`. Do not expose independent oracle source to the model.
 
 ## Receipt envelope

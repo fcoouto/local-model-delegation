@@ -183,10 +183,13 @@ def approve_assessment(state_dir, assessment_id, owner_reference, scope):
     return approve_scope(state_dir, report['profile_id'], owner_reference, scope)
 
 
-def approve_scope(state_dir, profile_id, owner_reference, scope):
+def approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_tokens=None):
     """Record explicit provisional operating permission, never fabricated assessment evidence."""
     if not isinstance(owner_reference, str) or not owner_reference.strip(): raise ValueError('owner_confirmation_required')
     profile = _profile(state_dir, profile_id)
+    if max_output_tokens is not None:
+        if type(max_output_tokens) is not int or max_output_tokens <= 0: raise ValueError('invalid_generation_ceiling')
+        profile['request_settings'] = {**profile['request_settings'], 'max_output_tokens':max_output_tokens}
     if not isinstance(scope, list) or not scope: raise ValueError('invalid_scope')
     for item in scope:
         if (not isinstance(item, dict)

@@ -118,6 +118,8 @@ def prepare_update(state_dir, target_root=PACKAGE_ROOT, installed_root=PACKAGE_R
         with store.db() as db:
             settled = _settled_assessments(store, db)
             _quiescent(db, settled, allow_pending_admission=True)
+        from .habblaud import quiesce
+        quiesce(store.root)
         bundle = pin_runtime_bundle(store.root, Path(installed_root))
         directory = private_dir(store.root / 'updates' / uuid.uuid4().hex)
         backup = private_dir(directory / 'backup')

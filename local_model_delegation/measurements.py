@@ -353,11 +353,11 @@ def bind_enqueued(db, job_id, context):
     _begin(db, job_id, context, job_id)
 
 
-def model_binding(profile, *, executed=False):
+def model_binding(profile, *, executed=False, request_settings=None):
     if not profile: return {}
     return {'profile_id':profile['profile_id'], 'artifact_digest':profile['artifact']['digest'],
             'runtime_digest':digest((profile.get('approval') or {}).get('model_identity')) if profile.get('approval') else None,
-            'settings_digest':digest(profile['request_settings']), 'helper_digest':helper_digest() if executed else None}
+            'settings_digest':digest(profile['request_settings'] if request_settings is None else request_settings), 'helper_digest':helper_digest() if executed else None}
 
 
 def helper_digest():
@@ -374,7 +374,8 @@ def job_observation(db, job_id):
     for a in db.execute('SELECT * FROM attempts WHERE job_id=? ORDER BY rowid',(job_id,)):
         data = load_json(a['data'])
         attempts.append({'attempt_id':a['attempt_id'],'state':a['state'],
-                         **{k:data.get(k) for k in ('submitted_at','finished_at','inference_seconds')}})
+                         **{k:data.get(k) for k in ('submitted_at','finished_at','inference_seconds')},
+                         **{k:data[k] for k in ('request_settings','terminal') if k in data}})
     return {'status':job['status'],'reason':job['reason'],'binding':route.get('measurement_binding',model_binding(profile)),
             'attempts':attempts,'native_task_id':job['native_task_id'],
             'fallback': bool(route.get('local_failure') or job['native_task_id'] or job['status'].startswith(('fallback','dispatch'))),
