@@ -147,6 +147,15 @@ def main(argv=None):
     p = metrics.add_parser('record')
     p.add_argument('--task', required=True)
     p.add_argument('--receipt', type=Path, required=True)
+    p = metrics.add_parser('comparison-register')
+    p.add_argument('--manifest', type=Path, required=True)
+    p = metrics.add_parser('comparison-record')
+    p.add_argument('--comparison', required=True)
+    p.add_argument('--receipt', type=Path, required=True)
+    p = metrics.add_parser('comparison-revoke')
+    p.add_argument('--comparison', required=True)
+    p.add_argument('--at', type=float, required=True)
+    p.add_argument('--evidence-hash', required=True)
     args = parser.parse_args(argv)
     try:
         args.state_dir = resolve_state_directory(args.state_dir)
@@ -163,6 +172,9 @@ def main(argv=None):
             elif args.action == 'reconcile': result = measurements.reconcile_measurements(args.state_dir)
             elif args.action == 'register': result = measurements.register_project(args.state_dir, args.root, args.label)
             elif args.action == 'begin': result = measurements.begin_measurement(args.state_dir, args.task, read_input(args.context), args.job)
+            elif args.action == 'comparison-register': result = measurements.register_comparison(args.state_dir, read_input(args.manifest))
+            elif args.action == 'comparison-record': result = measurements.record_comparison_run(args.state_dir, args.comparison, read_input(args.receipt))
+            elif args.action == 'comparison-revoke': result = measurements.revoke_comparison(args.state_dir, args.comparison, args.at, args.evidence_hash)
             else: result = measurements.append_event(args.state_dir, args.task, read_input(args.receipt))
         elif args.command == "resources":
             from .capacity import machine_snapshot

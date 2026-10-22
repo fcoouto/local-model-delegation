@@ -83,7 +83,7 @@ def initialize_measurements(state_dir: Path) -> dict:
                 receipt TEXT NOT NULL, supersedes TEXT UNIQUE REFERENCES measurement_events(event_id),
                 UNIQUE(producer,source_key))''',
             '''CREATE TABLE IF NOT EXISTS measurement_comparisons
-               (comparison_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, consent_reference TEXT NOT NULL UNIQUE)''',
+               (comparison_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, consent_reference TEXT NOT NULL UNIQUE, revocation TEXT)''',
         ]
         for statement in statements: db.execute(statement)
     return {'measurement_version': 1}
@@ -163,6 +163,8 @@ def begin_measurement(state_dir: Path, task_id: str, context: dict, job_id=None)
 def _validate_payload(kind, payload):
     if kind == 'usage':
         validate_usage(payload)
+    elif kind == 'comparison_run':
+        require(isinstance(payload,dict) and sha(payload.get('comparison_id')))
     elif kind == 'local_verdict':
         fields(payload, {'attempt_id','candidate_hash','checks_hash','accepted','category'})
         require(identifier(payload['attempt_id']) and sha(payload['candidate_hash']) and sha(payload['checks_hash']))
@@ -191,7 +193,7 @@ def _append(db, task_id, receipt, *, internal=False):
     require(identifier(receipt['producer']) and identifier(receipt['source_key']) and number(receipt['observed_at']))
     require(len(canonical(receipt).encode()) <= MAX_ANSWER_BYTES)
     _validate_payload(receipt['kind'], receipt['payload'])
-    require(internal or receipt['kind'] not in ('local_verdict','job_observation'), 'helper_observation_required')
+    require(internal or receipt['kind'] not in ('local_verdict','job_observation','comparison_run'), 'helper_observation_required')
     task = db.execute('SELECT * FROM measurement_tasks WHERE task_id=?', (task_id,)).fetchone()
     require(task is not None, 'unknown_measurement_task')
     previous = db.execute('SELECT * FROM measurement_events WHERE producer=? AND source_key=?',
@@ -272,12 +274,32 @@ def read_measurement_rows(db):
         rows['tasks'].append(task)
     for r in db.execute('SELECT * FROM measurement_events ORDER BY rowid'):
         rows['events'].append({**load_json(r['receipt']),'event_id':r['event_id'],'task_id':r['task_id']})
+    from .measurement_comparisons import comparison_status
+    rows['comparisons']=[]
+    for r in db.execute('SELECT * FROM measurement_comparisons'):
+        summary=comparison_status(db,r['comparison_id'])
+        rows['comparisons'].append(summary);rows['pairs'].extend(summary['pairs'])
     return rows
 
 
 def build_report(rows: dict, *, project_id: str, profile_id=None, now: float) -> dict:
     from .measurement_reports import build_report as build
     return build(rows,project_id=project_id,profile_id=profile_id,now=now)
+
+
+def register_comparison(state_dir, manifest):
+    from .measurement_comparisons import register_comparison as register
+    return register(state_dir,manifest)
+
+
+def record_comparison_run(state_dir, comparison_id, receipt):
+    from .measurement_comparisons import record_comparison_run as record
+    return record(state_dir,comparison_id,receipt)
+
+
+def revoke_comparison(state_dir, comparison_id, revoked_at, evidence_hash):
+    from .measurement_comparisons import revoke_comparison as revoke
+    return revoke(state_dir,comparison_id,revoked_at,evidence_hash)
 
 
 def bind_enqueued(db, job_id, context):

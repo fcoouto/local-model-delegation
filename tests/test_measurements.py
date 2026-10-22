@@ -266,3 +266,53 @@ class Measurements(Fixture):
         m.append_event(self.state,'task',self.receipt('delivery',payload))
         with self.assertRaisesRegex(ValueError,'delivery_already_recorded'):
             m.append_event(self.state,'task',self.receipt('delivery',{**payload,'outcome':'native_edited'},key='other'))
+
+    def comparison(self):
+        m,store,job=self.staged_measurement()
+        with store.db() as db:
+            db.execute('UPDATE jobs SET route_data=? WHERE job_id=?',(json.dumps({'measurement_binding':BINDING}),job))
+            context=json.loads(db.execute('SELECT context FROM measurement_tasks WHERE task_id=?',(job,)).fetchone()[0])
+        m.begin_measurement(self.state,'baseline',context)
+        manifest={'project_id':self.project_id,'scope':context['scope'],'environment_digest':context['environment_digest'],
+            'local_binding':BINDING,'native_binding':NATIVE,'method':'paired','limits':{'local':1,'native':1},
+            'consent_reference':'fictional-owner-consent','consent_at':1,'expires_at':1000,
+            'cases':[{'case_id':'case','case_hash':'a'*64,'source_hash':'b'*64,'checks_hash':'c'*64,'contract_hash':'d'*64}]}
+        receipt={'case_id':'case','route':'local','task_id':job,'attempt_id':store.job(job)['attempt_id'],
+                 'state':'completed','submitted_at':10,'recorded_at':20,'source_hash':'b'*64,'checks_hash':'c'*64,
+                 'contract_hash':'d'*64,'order':0,'isolated':True,'isolation_hash':'e'*64,'evaluator':'fixture'}
+        return m,store,manifest,receipt
+
+    def test_comparison_replay_consumes_one_call_and_never_dispatches(self):
+        m,store,manifest,receipt=self.comparison()
+        self.assertTrue(hasattr(m,'register_comparison'),'comparison ingestion is missing')
+        from unittest.mock import patch
+        with patch('local_model_delegation.lmstudio.Runtime.stream',side_effect=AssertionError('no inference')):
+            cid=m.register_comparison(self.state,manifest)['comparison_id']
+            first=m.record_comparison_run(self.state,cid,receipt)
+            again=m.record_comparison_run(self.state,cid,receipt)
+            self.assertEqual(first,again);self.assertEqual(first['consumed']['local'],1)
+            self.assertEqual(first['violations'],[])
+        changed={**manifest,'limits':{'local':2,'native':1}}
+        with self.assertRaisesRegex(ValueError,'comparison_consent_conflict'):m.register_comparison(self.state,changed)
+
+    def test_comparison_rejects_mismatch_and_retains_overbudget_attempts(self):
+        m,store,manifest,receipt=self.comparison()
+        self.assertTrue(hasattr(m,'register_comparison'),'comparison ingestion is missing')
+        cid=m.register_comparison(self.state,manifest)['comparison_id']
+        with self.assertRaisesRegex(ValueError,'comparison_case_mismatch'):
+            m.record_comparison_run(self.state,cid,{**receipt,'source_hash':'f'*64})
+        m.record_comparison_run(self.state,cid,receipt)
+        native={**receipt,'route':'native','task_id':'baseline','attempt_id':'native-one','state':'uncertain','order':1}
+        m.record_comparison_run(self.state,cid,native)
+        second=m.record_comparison_run(self.state,cid,{**native,'attempt_id':'native-two','order':2})
+        self.assertEqual(second['consumed']['native'],2)
+        self.assertIn('native_allowance_exceeded',second['violations'])
+        self.assertIn('duplicate_case_leg',second['violations'])
+
+    def test_revocation_prevents_later_evidence_from_qualifying(self):
+        m,store,manifest,receipt=self.comparison()
+        self.assertTrue(hasattr(m,'register_comparison'),'comparison ingestion is missing')
+        cid=m.register_comparison(self.state,manifest)['comparison_id']
+        m.revoke_comparison(self.state,cid,5,'f'*64)
+        result=m.record_comparison_run(self.state,cid,receipt)
+        self.assertIn('consent_not_valid_at_submission',result['violations'])

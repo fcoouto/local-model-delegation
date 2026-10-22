@@ -162,4 +162,5 @@ def build_report(rows, *, project_id, profile_id=None, now):
             'resources':{'request_bytes':sorted({t.get('observation',{}).get('request_bytes') for t in tasks if t.get('observation',{}).get('request_bytes') is not None}),
                          'pressure':'unknown','swap':'unknown','limit':'Admission estimates are not measured model residency.'}})
     return {'schema_version':1,'project_id':project_id,'generated_at':now,'cohorts':cohorts,
+            'comparisons':[c for c in rows.get('comparisons',[]) if c['project_id']==project_id],
             'control':'read_only_recommendations','reliability_limit':'Descriptive counts are not a statistical reliability guarantee.'}
