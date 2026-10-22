@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 from local_model_delegation.contracts import validate_brief, text_hash
 from local_model_delegation.store import Store, atomic_json
-from tests.support import Fixture
+from tests.support import Fixture, FIXED, SUPPLIED, ADDED
 
 
 class Delegation(Fixture):
@@ -162,6 +162,7 @@ class Delegation(Fixture):
         session = prepare(self.state, identifier)
         (self.project / 'test_helper.js').write_text('unrelated work')
         with self.assertRaisesRegex(ValueError, 'source_changed'): record(self.state, identifier, self.receipt(session))
+        self.assertEqual(store.job(identifier)['status'],'needs_reassessment')
 
     def test_native_candidate_without_selected_local_model_uses_same_checks(self):
         from local_model_delegation.validation import prepare_verification,record_verification
@@ -175,6 +176,51 @@ class Delegation(Fixture):
         store.record_fallback_candidate(job['job_id'],native,candidate)
         session=prepare_verification(self.state,job['job_id']);receipt=self.receipt(session);receipt.update(checks={},claims=[True])
         self.assertEqual(record_verification(self.state,job['job_id'],receipt)['status'],'accepted')
+
+    def test_source_change_settles_returned_native_fallback_without_acceptance(self):
+        from local_model_delegation.validation import verify_candidate
+        from local_model_delegation.profiles import _quiescent
+        self.write_config(); store=Store(self.state)
+        for brief in (self.generic('file_summary'), self.brief('python-source-change')):
+            with self.subTest(capability=brief['capability']):
+                job=store.enqueue(brief,brief['fallback'])
+                store.decide_wait(job['job_id'],{'action':'fallback','reason':'no_qualified_model'})
+                claim=store.claim_fallback(job['job_id']); native='/root/'+claim['task_name']
+                self.assertTrue(store.attach_fallback(job['job_id'],claim['dispatch_token'],native))
+                proposal=(self.proposal(brief) if brief['capability']=='file_summary' else
+                          {'files':{'helper.py':FIXED,'test_helper.py':SUPPLIED+ADDED},'summary':'Trim both ends'})
+                candidate=self.root/'native.json'; candidate.write_text(json.dumps(proposal))
+                store.record_fallback_candidate(job['job_id'],native,candidate)
+                source=self.project/next(iter(brief['files'])); source.write_text(source.read_text()+'\n')
+                if brief['capability']=='file_summary':
+                    with self.assertRaisesRegex(ValueError,'source_changed'): verify_candidate(self.state,job['job_id'])
+                else: verify_candidate(self.state,job['job_id'])
+                self.assertEqual(store.job(job['job_id'])['status'],'failed')
+                self.assertEqual(store.job(job['job_id'])['reason'],'source_changed')
+                with store.db() as db:
+                    self.assertEqual(db.execute('SELECT state FROM fallback_dispatches WHERE job_id=?',(job['job_id'],)).fetchone()[0],'failed')
+                    _quiescent(db,allow_pending_admission=True)
+
+    def test_source_change_after_preparation_settles_native_fallback(self):
+        from local_model_delegation.validation import prepare_verification, record_verification
+        from local_model_delegation.profiles import _quiescent
+        brief=self.generic('file_summary'); self.write_config(); store=Store(self.state)
+        job=store.enqueue(brief,brief['fallback'])
+        store.decide_wait(job['job_id'],{'action':'fallback','reason':'no_qualified_model'})
+        claim=store.claim_fallback(job['job_id']); native='/root/'+claim['task_name']
+        store.attach_fallback(job['job_id'],claim['dispatch_token'],native)
+        candidate=self.root/'native.json'; candidate.write_text(json.dumps(self.proposal(brief)))
+        store.record_fallback_candidate(job['job_id'],native,candidate)
+        session=prepare_verification(self.state,job['job_id'])
+        receipt=self.receipt(session); receipt.update(checks={},claims=[True])
+        (self.project/'helper.js').write_text('changed')
+        with self.assertRaisesRegex(ValueError,'source_changed'):
+            record_verification(self.state,job['job_id'],receipt)
+        self.assertEqual(store.job(job['job_id'])['status'],'failed')
+        self.assertEqual(store.job(job['job_id'])['reason'],'source_changed')
+        with store.db() as db:
+            self.assertEqual(db.execute('SELECT state FROM fallback_dispatches WHERE job_id=?',(job['job_id'],)).fetchone()[0],'failed')
+            _quiescent(db,allow_pending_admission=True)
 
     def test_invalid_generic_candidate_selects_fallback_automatically(self):
         from local_model_delegation.validation import prepare_verification

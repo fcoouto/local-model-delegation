@@ -22,6 +22,8 @@ plugin's dispatch/reconciliation protocol. If a required contract is unavailable
 retain work with the coordinator rather than guessing or bypassing it. Local
 approval and routing remain governed by this plugin's contracts below.
 
+For a new native fallback, give `fallback claim --job JOB_ID --task-name habblaud_verification` a short task description using lowercase ASCII letters, digits and underscores, starting with a letter, at most 64 characters. Omission uses the capability name. The helper appends an eight-character job suffix so recovery cannot mistake an ordinary native task with the same description for this fallback, then adds a numeric suffix on database collision. The complete name stays within 64 characters and is stored separately from the full job ID. Always dispatch and reconcile with the returned name. Repeated claims preserve the saved name/token, including older names containing job IDs. Do not rename a running or historical task to improve its banner. The native tool's task-name field cannot express parentheses, `·`, or a separate display-model field. If the name includes `via`, use the actual native model, for example `habblaud_verification_via_gpt6_1_sol` only for that selected native model. The richer `Task (via Model)` title and separate task/model values belong in chat progress; they do not create or configure the native Subagents panel.
+
 Keep native authentication, provider, defaults, permissions and hooks unchanged. No copied skill catalog, parallel policy file or Vibe installation is needed. Read the active project's current policy at dispatch; this mapping does not pin or replace it.
 
 ## Brief and verification schema

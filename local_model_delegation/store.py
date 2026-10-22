@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import os
 from pathlib import Path
+import re
 import sqlite3
 import stat
 import time
@@ -275,7 +276,9 @@ class Store:
                 db.execute("UPDATE jobs SET status='fallback_required',reason='output_budget_exhausted',route_data=? WHERE job_id=?", (canonical(route),row['job_id']))
             return True
 
-    def claim_fallback(self, job_id):
+    def claim_fallback(self, job_id, task_name=None):
+        if task_name is not None and (not isinstance(task_name, str) or not re.fullmatch('[a-z][a-z0-9_]{0,63}', task_name)):
+            raise ValueError('invalid_task_name')
         with self.db(write=True) as db:
             job = self._job(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone())
             if job.get("route_data", {}).get("assessment"): raise ValueError("assessment_has_no_native_fallback")
@@ -283,7 +286,14 @@ class Store:
             first = row is None
             if first:
                 if job["status"] != "fallback_required": raise ValueError("fallback_not_required")
-                token, task_name = uuid.uuid4().hex, "local_delegation_" + job_id
+                token = uuid.uuid4().hex
+                prefix = task_name or job['brief']['capability']
+                suffix, number = '_' + job_id[:8], 1
+                task_name = prefix[:64-len(suffix)] + suffix
+                while db.execute('SELECT 1 FROM fallback_dispatches WHERE task_name=?', (task_name,)).fetchone():
+                    number += 1
+                    suffix = '_' + job_id[:8] + '_' + str(number)
+                    task_name = prefix[:64-len(suffix)] + suffix
                 db.execute("INSERT INTO fallback_dispatches VALUES (?,?,?,NULL,'dispatching')", (job_id, token, task_name))
                 db.execute("UPDATE jobs SET status='fallback_dispatching' WHERE job_id=?", (job_id,))
                 row = db.execute("SELECT * FROM fallback_dispatches WHERE job_id=?", (job_id,)).fetchone()

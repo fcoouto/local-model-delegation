@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.9
 
 - Correct the guided update workflow to record routing and Habblaud preferences before pausing, restore previously enabled preferences after successful verification, and read back the final state.
 - Preserve disabled preferences and explicit pause requests; failed updates remain paused. Runtime verification gates and model approvals are unchanged.
+- Give new native fallbacks readable, collision-safe task names, with an optional coordinator-supplied name and preserved recovery identity. Use task and actual model labels in local progress; Habblaud badges are unchanged.
+- Settle returned native fallbacks rejected for changed source as failed, preserving the rejection reason and preventing completed work from remaining active during update checks.
 
 ## 0.3.8
 

@@ -55,6 +55,53 @@ class CLI(Fixture):
         self.assertTrue(store.attach_fallback(job["job_id"], first["dispatch_token"], native_id))
         self.assertFalse(store.attach_fallback(job["job_id"], "wrong-token", native_id))
 
+    def test_readable_dispatch_names_are_unique_and_survive_resume(self):
+        store=Store(self.state)
+        first=store.reserve(self.brief('one'),self.profile(),None)
+        second=store.reserve(self.brief('two'),self.profile(),None)
+        a=self.invoke('fallback','claim','--job',first['job_id'],'--task-name','habblaud_verification')
+        b=self.invoke('fallback','claim','--job',second['job_id'],'--task-name','habblaud_verification')
+        self.assertEqual(a['task_name'],'habblaud_verification_'+first['job_id'][:8])
+        self.assertEqual(b['task_name'],'habblaud_verification_'+second['job_id'][:8])
+        resumed=self.invoke('fallback','claim','--job',first['job_id'],'--task-name','different_label')
+        self.assertEqual(resumed['task_name'],a['task_name'])
+        self.assertFalse(resumed['may_dispatch'])
+        self.assertEqual(resumed['dispatch_token'],a['dispatch_token'])
+        native='/root/'+a['task_name']
+        self.assertEqual(reconcile_native(store,first['job_id'],[{'task_name':native}])['native_task_id'],native)
+
+    def test_dispatch_name_rejects_invalid_names_before_claiming(self):
+        store=Store(self.state); job=store.reserve(self.brief(),self.profile(),None)
+        for name in ('', '../escape', 'Title · Model', 'a'*65):
+            with self.subTest(name=name):
+                result=self.invoke('fallback','claim','--job',job['job_id'],'--task-name',name)
+                self.assertEqual(result['reason'],'invalid_task_name')
+                self.assertEqual(store.job(job['job_id'])['status'],'fallback_required')
+
+    def test_default_dispatch_name_describes_work_without_exposing_job_id(self):
+        store=Store(self.state); job=store.reserve(self.brief(),self.profile(),None)
+        claim=store.claim_fallback(job['job_id'])
+        self.assertEqual(claim['task_name'],'python_code_change_'+job['job_id'][:8])
+        self.assertNotIn(job['job_id'],claim['task_name'])
+
+    def test_colliding_maximum_length_dispatch_names_stay_within_limit(self):
+        store=Store(self.state)
+        first=store.reserve(self.brief('one'),self.profile(),None)
+        second=store.reserve(self.brief('two'),self.profile(),None)
+        self.assertEqual(store.claim_fallback(first['job_id'],'a'*64)['task_name'],'a'*55+'_'+first['job_id'][:8])
+        with store.db(write=True) as db:
+            db.execute('UPDATE fallback_dispatches SET task_name=? WHERE job_id=?',
+                       ('a'*55+'_'+second['job_id'][:8],first['job_id']))
+        name=store.claim_fallback(second['job_id'],'a'*64)['task_name']
+        self.assertEqual(name,'a'*53+'_'+second['job_id'][:8]+'_2')
+
+    def test_foreign_readable_task_is_not_attached_during_recovery(self):
+        store=Store(self.state); job=store.reserve(self.brief(),self.profile(),None)
+        claim=store.claim_fallback(job['job_id'],'habblaud_verification')
+        result=reconcile_native(store,job['job_id'],[{'task_name':'/root/habblaud_verification'}])
+        self.assertIsNone(result['native_task_id'])
+        self.assertFalse(store.attach_fallback(job['job_id'],claim['dispatch_token'],'/root/habblaud_verification'))
+
     def test_spawn_ack_lost_does_not_respawn(self):
         store = Store(self.state)
         job = store.reserve(self.brief(), self.profile(), None)
