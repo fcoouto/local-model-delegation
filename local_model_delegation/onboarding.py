@@ -165,13 +165,14 @@ def assessment_report(state_dir, assessment_id):
         bucket['passed'] += assessment['receipts'].get(trial['trial_id'], {}).get('passed') is True
     qualified = [b['scope'] for b in buckets.values() if current and b['trials'] >= 6 and b['passed']==b['trials'] and len(b['cases'])>=3]
     capacity = profile.get('capacity_evidence', {})
-    benefit = profile.get('benefit_evidence', {})
-    ready = bool(qualified and capacity.get('qualified') is True and benefit.get('credible') is True)
+    benefit = profile.get('benefit_evidence') or {}
+    ready = bool(qualified and capacity.get('qualified') is True)
     return {'assessment_id':assessment_id, 'profile_id':profile['profile_id'], 'completed_trials':len(assessment['receipts']),
             'total_trials':len(assessment['trials']), 'tested_scope':qualified, 'capacity_status':'qualified' if capacity.get('qualified') is True else 'unknown',
             'expected_savings':'usage_proxy' if benefit.get('credible') is True else 'unknown',
             'recommendation':'approve_provisional_scope' if ready else 'do_not_approve_yet',
             'limitations':['Six passing trials are provisional evidence, not a statistical reliability guarantee.',
+                           'Unknown savings do not block approval; normal authorized work supplies measurement evidence.',
                            'Runtime binding trusts the local index and discovery metadata; it does not attest weights in memory.',
                            'Actual account savings and live host continuity remain unqualified.']}
 

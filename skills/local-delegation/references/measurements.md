@@ -2,6 +2,8 @@
 
 Measurements are private observations, not approval or routing input. They never run models, change native settings, release slots, or apply candidates. Use the existing shared state directory.
 
+Model approval depends on demonstrated capability and capacity, not measured savings. Approved normal work may run while savings are unknown, under the coordinator's task policy. This avoids requiring usage evidence before any eligible work can generate it. Keep unknown values explicit; never create a positive `benefit_evidence` record merely to enable routing. Additional comparison calls still require their own bounded consent.
+
 ## Commands
 
 Invoke with `python3.11 -B <plugin>/delegate.py [--state-dir PATH]`.

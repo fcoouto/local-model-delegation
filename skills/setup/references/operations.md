@@ -18,6 +18,8 @@ For updates, follow the [guided update procedure](../../../docs/updating.md). St
 
 ## Connection and activation details
 
+Savings are not an approval prerequisite. With verified capability and capacity, the owner can approve the exact tested scope while `expected_savings` remains `unknown`. Ordinary authorized work then supplies project measurements; comparisons still require separate bounded consent. Approval and activation do not create benefit evidence. Scheduling prefers credible benefit only within its measured scope, permits unknown benefit within approved scope, and retains existing negative-benefit and suspension blocks.
+
 `discover --endpoint URL` does not accept a token environment-variable argument. When the server requires authentication, retain that requirement: configure the owner-selected `endpoint` and `token_env` in private shared configuration, then use `doctor --inspect-runtime`. Each model profile needs its own authoritative connection fields. Ask for the environment-variable name, never the token value.
 
 There is no routing-enable CLI command. After separate owner authorization, the coordinator sets `routing_enabled` in the selected private `config.json`, preserving all other fields, and reads it back with `doctor`. The `route decide` command concerns an individual waiting job, not global activation. Activation does not prove a successful local task.

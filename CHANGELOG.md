@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 (unreleased)
+
+- Remove the circular savings prerequisite from exact-model approval and scheduling. Verified capability, capacity, owner approval and scope remain required; unknown savings stay unknown while ordinary authorized work supplies evidence.
+- Prefer matching measured benefit when available and retain the existing block on known negative benefit and suspended scopes.
+- Fall back before POST when every eligible runtime is unavailable or unloaded; healthy occupied runtimes still wait without disrupting peers.
+- Clarify how local proposals inherit the coordinator's project and skill constraints, including Vibe Setup, without impersonating native subagents or bypassing native fallback policy.
+
 ## 0.3.0
 
 - Add numbered release archives, immutable version/tag checks and package fingerprints.

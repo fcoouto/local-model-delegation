@@ -98,6 +98,45 @@ class Onboarding(Fixture):
         with self.assertRaisesRegex(ValueError, 'assessment_consent_required'):
             module.begin_assessment(self.state, 'fictional', 'unrelated-consent')
 
+    def test_verified_scope_can_be_approved_before_savings_are_known(self):
+        module = self.module(); profile = self.setup_policy()
+        assessment = module.begin_assessment(self.state, 'fictional', 'fixture-standing-consent')
+        assessment['receipts'] = {t['trial_id']: {'passed': True} for t in assessment['trials']}
+        atomic_json(self.state/'assessments'/assessment['assessment_id']/'assessment.json', assessment)
+        profile['capacity_evidence'] = {'qualified': True}
+        atomic_json(self.state/'profiles/fictional.json', profile)
+        report = module.assessment_report(self.state, assessment['assessment_id'])
+        self.assertEqual(report['recommendation'], 'approve_provisional_scope')
+        self.assertEqual(report['expected_savings'], 'unknown')
+        self.assertIsNone(module._profile(self.state, 'fictional')['approval'])
+        with self.assertRaisesRegex(ValueError, 'owner_confirmation_required'):
+            module.approve_assessment(self.state, assessment['assessment_id'], '', report['tested_scope'])
+        result = module.approve_assessment(self.state, assessment['assessment_id'],
+                                           'fictional-owner-approval', report['tested_scope'])
+        self.assertEqual(result, {'status': 'approval_recorded', 'routing_enabled': False})
+        approved = module._profile(self.state, 'fictional')
+        self.assertEqual(approved['approval']['scope'], report['tested_scope'])
+        self.assertNotIn('benefit_evidence', approved)
+
+    def test_unknown_savings_does_not_bypass_quality_capacity_or_identity(self):
+        module = self.module(); profile = self.setup_policy()
+        assessment = module.begin_assessment(self.state, 'fictional', 'fixture-standing-consent')
+        assessment['receipts'] = {t['trial_id']: {'passed': True} for t in assessment['trials']}
+        path = self.state/'assessments'/assessment['assessment_id']/'assessment.json'
+        atomic_json(path, assessment)
+        self.assertEqual(module.assessment_report(self.state, assessment['assessment_id'])['recommendation'], 'do_not_approve_yet')
+        profile['capacity_evidence'] = {'qualified': True}
+        atomic_json(self.state/'profiles/fictional.json', profile)
+        for receipt in assessment['receipts'].values(): receipt['passed'] = False
+        atomic_json(path, assessment)
+        with self.assertRaisesRegex(ValueError, 'assessment_incomplete'):
+            module.approve_assessment(self.state, assessment['assessment_id'], 'fictional-owner-approval', [])
+        for receipt in assessment['receipts'].values(): receipt['passed'] = True
+        atomic_json(path, assessment)
+        (self.artifact/'weights.bin').write_bytes(b'replaced fixture')
+        self.assertEqual(module.assessment_report(self.state, assessment['assessment_id'])['tested_scope'], [])
+        self.assertIsNone(module._profile(self.state, 'fictional')['approval'])
+
     def test_trial_receipt_requires_durable_verified_job(self):
         module = self.module(); profile = self.setup_policy()
         assessment = module.begin_assessment(self.state, 'fictional', 'fixture-standing-consent')
@@ -182,7 +221,7 @@ class Onboarding(Fixture):
     def test_failed_outcomes_reduce_routing_scope(self):
         module=self.module();self.assertTrue(hasattr(module,'record_outcome'),'record_outcome must exist')
         from tests import test_scheduler
-        fixture=test_scheduler.Scheduler(methodName='test_unknown_benefit_keeps_native');fixture.setUp();self.addCleanup(fixture.doCleanups)
+        fixture=test_scheduler.Scheduler(methodName='test_unknown_benefit_allows_approved_scope');fixture.setUp();self.addCleanup(fixture.doCleanups)
         store,brief,p=fixture.setup_queue();job=store.reserve(brief,p,None)
         with store.db(write=True) as db:db.execute("UPDATE jobs SET status='failed'")
         receipt={'native_usage':{'kind':'unknown','value':None},'coordination_tokens':None,'checking_tokens':None,'fallback_tokens':None,

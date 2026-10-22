@@ -91,6 +91,10 @@ The root [plugin manifest](plugin.json) packages the [setup skill](skills/setup/
 
 After authorized installation, `setup` initializes disabled private state. Installation, standing assessment consent, exact-model approval and routing activation remain separate decisions. Current builds/tests do none of those on the developer's real machine.
 
+Approval requires verified capability and capacity, not prior proof of savings. Once the owner approves the exact tested scope and enables routing, ordinary authorized tasks can provide measurement evidence. Missing telemetry or comparable baselines keeps savings unknown. Known negative benefit and suspended scopes remain ineligible; measured benefit for the matching scope takes priority over unknown benefit.
+
+Delegation follows the coordinator's active project instructions, skills and permission policy, including Vibe Setup where installed. The coordinator supplies relevant constraints, runs required tools and verifies proposals. Local HTTP calls are not native subagents and do not receive native hook enforcement. See [coordinator policy](skills/local-delegation/references/contracts.md#coordinator-policy-and-native-subagents).
+
 ## Shared state and updates
 
 All projects use `~/.local/state/local-model-delegation` by default. Override `--state-dir` deliberately, such as for disposable fixtures or an existing installation. All participating projects must select the same state directory. Schema 2 separates `config.json` from `profiles/<profile_id>.json`. Profiles, approvals, database, model results and receipts stay private; weights remain where the runtime manages them.

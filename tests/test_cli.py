@@ -19,6 +19,7 @@ class CLI(Fixture):
         self.addCleanup(server.close)
         p = self.profile()
         p["endpoint"] = server.endpoint
+        p['qualification_status'] = 'needs_assessment'
         if fallback: p["fallback"] = fallback
         self.write_config(p)
         store = Store(self.state)
@@ -110,5 +111,10 @@ class CLI(Fixture):
     def test_invalid_model_list_is_unavailable(self):
         from local_model_delegation.cli import submit_task
         server, store, path = self.busy()
+        profile = self.profile(); profile['endpoint'] = server.endpoint
+        self.write_config(profile)
         with patch("local_model_delegation.cli.Runtime.list_models", return_value={"models": [None]}):
-            self.assertEqual(submit_task(self.state, path)["status"], "fallback_required")
+            result = submit_task(self.state, path)
+        self.assertEqual(result['status'], 'fallback_required')
+        self.assertEqual(result['reason'], 'model_unavailable')
+        self.assertFalse(any(method == 'POST' for method, _ in server.calls))

@@ -1,6 +1,6 @@
 # Project measurements: offline validation
 
-Date: 2026-10-22. Status: source implementation complete; not installed or live-qualified.
+Date: 2026-10-22. Status: source implementation complete. The initial implementation record below predates installation; live savings and project reliability remain unqualified.
 
 Implementation started at `63cc02ba6ef9eb7b3dd372fa726a7e479be65b2c` on the isolated `feat/project-model-measurements` branch. See the [design](superpowers/specs/2026-10-22-project-model-measurements-design.md), [implementation plan](superpowers/plans/2026-10-22-project-model-measurements.md), and [receipt contracts](../skills/local-delegation/references/measurements.md). This record is versioned with the implementation it describes.
 
@@ -50,6 +50,14 @@ Real configuration and model-profile hashes matched their pre-implementation val
 
 The initial run could not execute the bundled skill validator because PyYAML was unavailable. On 2026-10-22, the owner authorized installing PyYAML. Version 6.0.3 was installed in the user's Python 3.11 package directory, preserving the managed interpreter files. A parsing smoke check and the bundled `quick_validate.py` checks for both `skills/local-delegation` and `skills/setup` passed. This closes the structural-validation gap; it does not establish live skill behavior or add a plugin runtime dependency.
 
-Before deployment or a project pilot, qualify a supported native usage source, real project reliability, collection continuity, and total native overhead/net benefit. Extra comparison calls require separate bounded authorization and an executor that enforces it. Counts and fictional arithmetic do not establish real savings or statistical reliability.
+Before claiming project reliability or savings, qualify a supported native usage source, real project outcomes, collection continuity, and total native overhead/net benefit. Exact model approval and routing can precede savings qualification so ordinary authorized work can produce evidence. Extra comparison calls require separate bounded authorization and an executor that enforces it. Counts and fictional arithmetic do not establish real savings or statistical reliability.
 
 Project-aware adaptive routing, arbitrary project comparison execution, automatic loading, parallel capacity, and desktop compaction continuity remain separate work. Runtime identity still trusts the local index and discovery metadata; it does not attest weights in memory.
+
+## Approval bootstrap correction
+
+Version 0.3.1 separates capability/capacity approval from savings evidence. Four failing regressions reproduced rejection of approval and ordinary scheduling solely because benefit was unknown. They pass after the correction; missing evidence stays unknown and the helper does not write a positive benefit record. Known negative benefit, suspended scope, exact identity, owner confirmation, memory and verification gates remain in force.
+
+The full suite exposed runtime-discovery failures that had been hidden by the old benefit gate. A second failing regression confirmed an unloaded model waited without useful work. Both now fall back before POST; a healthy occupied runtime still retains its peer and waiter. Test fixtures now mark unqualified profiles explicitly instead of using absent savings as a substitute.
+
+The updated offline suite passes 226 tests. Both skills pass the installed structural validator. The coordinator-policy mapping was checked against Vibe Setup's native declaration contract and capability-selection policy: local responses remain proposals; active instructions, tools, acceptance, ownership and native fallback requirements stay with the coordinator. This is not proof of native hook interception, automatic skill adoption, semantic policy enforcement or real-model execution. No additional independent reviewer or live model trial was run for this correction.
