@@ -5,7 +5,7 @@
   },
   "existing_installation": {
     "owner": "Continue my setup. We spent an hour on this yesterday and I need to get back to work. Please use what is there.",
-    "observations": "Plugin installed and packaged helper located. Python 3.11 and macOS supported. The only state is ~/.local/state/codex-local-repairs, schema 2, routing false, visibility false, no unresolved work. Current config already has an explicit loopback endpoint; LM Studio is running. One existing model profile has no approval, qualification needs_assessment, no standing assessment consent. Native model/provider/reasoning/authentication are already configured. Read-only checks have established these facts; no new mutations have happened."
+    "observations": "Plugin installed and packaged helper located. Python 3.11 and macOS supported. The only state is ~/.local/state/local-model-delegation, schema 2, routing false, visibility false, no unresolved work. Current config already has an explicit loopback endpoint; LM Studio is running. One existing model profile has no approval, qualification needs_assessment, no standing assessment consent. Native model/provider/reasoning/authentication are already configured. Read-only checks have established these facts; no new mutations have happened."
   },
   "missing_runtime": {
     "owner": "The plugin is installed. I thought LM Studio was installed too, but I cannot find it. Finish whatever you can now; I have a meeting soon.",

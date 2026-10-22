@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import fcntl
 import os
+import re
 from pathlib import Path
 import sqlite3
 import time
@@ -52,7 +53,7 @@ def build_visibility_snapshot(rows,generated_at):
         if native:
             fallback=row.get('fallback')
             if isinstance(fallback,str):fallback=load_json(fallback)
-            model=clean((fallback or profile.get('fallback') or {}).get('model',''))
+            model=clean((fallback or {}).get('model',''))
         value={'job_id':row['job_id'],'origin_chat_id':brief['origin_chat_id'],'project_id':digest(brief['source_root']),
                'capability':brief['capability'],'model_name':model,'execution_kind':kind,'state':state,
                'label':model if state=='running' else LABELS.get(state,'Unknown'),
@@ -111,9 +112,48 @@ def set_visibility(state_dir,enabled):
     root=private_dir(Path(state_dir))
     with _lock(root):
         config=read_config(root);config['visibility_enabled']=enabled
-        path=root/('config.json' if config['schema_version']==2 else 'profiles.json')
+        path=root/'config.json'
         atomic_json(path,config)
         if not enabled:
-            try:_path(root).unlink(missing_ok=True)
+            try:
+                _path(root).unlink(missing_ok=True)
+                measurement_path(root).unlink(missing_ok=True)
             except (OSError,ValueError):return {'enabled':False,'export_state':'error','reason_code':'visibility_unavailable'}
+    if enabled: publish_measurements(root)
     return publish_visibility(root) if enabled else visibility_status(root)
+
+
+def measurement_path(root):
+    path=_path(root).with_name('measurements.json')
+    if path.is_symlink(): raise ValueError('unsafe_visibility')
+    return path
+
+
+def build_measurements_snapshot(report, generated_at):
+    cohorts=[]
+    for c in report['cohorts']:
+        profile=c['model_binding'].get('profile_id','')
+        model=profile if re.fullmatch(r'[A-Za-z0-9_-]{1,64}',profile) else 'Unassigned model'
+        cohorts.append({'cohort_id':c['cohort_id'],'model_name':model,
+            'quality':{k:c['quality'][k] for k in ('first_candidate','local_delivery','fallback','deliveries','confirmed_incidents')},
+            'coverage':c['coverage'],'latency':c['latency'],
+            'native_token_proxy':c['savings']['net_native_token_proxy'],'recommendation':c['recommendation']})
+    return {'project_id':report['project_id'],'generated_at':generated_at,'cohorts':cohorts}
+
+
+def publish_measurements(state_dir):
+    from .measurements import connection, read_measurement_rows, build_report
+    root=Path(state_dir)
+    if not root.exists(): return {'export_state':'absent'}
+    try:
+        with _lock(root):
+            if read_config(root).get('visibility_enabled',True) is not True:
+                return {'export_state':'disabled'}
+            with connection(root) as db: rows=read_measurement_rows(db)
+            now=time.time()
+            projects=[build_measurements_snapshot(build_report(rows,project_id=p['project_id'],profile_id=None,now=now),now)
+                      for p in rows['projects']]
+            atomic_json(measurement_path(root),{'schema_version':1,'generated_at':now,'projects':projects})
+        return {'export_state':'ready'}
+    except (OSError,ValueError,sqlite3.Error,KeyError,TypeError):
+        return {'export_state':'unavailable'}

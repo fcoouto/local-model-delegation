@@ -86,11 +86,12 @@ class Worker(Fixture):
         close_instance(store, key)
         self.recovery_patch.stop()
         deadline = time.monotonic() + 3
-        while time.monotonic() < deadline and store.instance(key)["state"] != "ready":
+        while time.monotonic() < deadline and not store.instance(key)["data"].get("recovery_blocked"):
             wait_job(self.state, job["job_id"], 0)
             time.sleep(.05)
-        self.assertEqual(store.instance(key)["state"], "ready")
-        self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 1)
+        self.assertEqual(store.instance(key)["state"], "closed")
+        self.assertEqual(store.instance(key)["data"]["recovery_error"], "instance_not_owned")
+        self.assertEqual(server.calls.count(("POST", "/api/v1/models/unload")), 0)
 
     def test_cache_refresh_keeps_detached_worker_alive(self):
         import shutil

@@ -13,10 +13,12 @@ from .store import Store,atomic_json,private_dir
 def initialize_state(state_dir):
     root=private_dir(Path(state_dir))
     config=read_config(root)
-    if config['schema_version']!=2:raise ValueError('explicit_migration_required')
+    if config['schema_version']!=2:raise ValueError('unsupported_configuration')
     config.setdefault('routing_enabled',False);config.setdefault('visibility_enabled',True)
     atomic_json(root/'config.json',config)
     Store(root)
+    from .measurements import initialize_measurements
+    initialize_measurements(root)
     return config
 
 
@@ -39,18 +41,16 @@ def doctor(state_dir,inspect_runtime=False):
     return result
 
 
-def prepare_update(state_dir):
-    store=Store(state_dir)
-    with store.db(write=True) as db:_quiescent(db)
-    return {'status':'ready','state_preserved':True,'runtime_bundle':str(pin_runtime_bundle(state_dir))}
+def prepare_update(state_dir, target_root=None, installed_root=None):
+    from .updates import prepare_update as prepare, PACKAGE_ROOT
+    return prepare(state_dir, target_root or PACKAGE_ROOT, installed_root or PACKAGE_ROOT)
 
 
-def pin_runtime_bundle(state_dir):
+def pin_runtime_bundle(state_dir, source_root=None):
     from .worker import ownership
-    from .onboarding import fixtures_path
     store=Store(state_dir)
-    source=Path(__file__).resolve().parents[1]
-    files={'delegate.py':source/'delegate.py','assessment-cases.json':fixtures_path()}
+    source=Path(source_root) if source_root is not None else Path(__file__).resolve().parents[1]
+    files={'delegate.py':source/'delegate.py','assessment-cases.json':source/'skills/setup/fixtures/assessment-cases.json'}
     files.update({'local_model_delegation/'+p.name:p for p in (source/'local_model_delegation').glob('*.py')})
     if any(p.is_symlink() for p in files.values()):raise ValueError('unsafe_runtime_source')
     contents={name:path.read_bytes() for name,path in files.items()}
@@ -89,18 +89,19 @@ def validate_bundle(path,identifier):
 def runtime_entrypoint(bundle):
     validate_bundle(bundle, bundle.name)
     manifest = load_json((bundle/'manifest.json').read_text())
-    for name in ('delegate.py', 'repair.py'):
-        if name in manifest: return bundle/name
-    raise ValueError('runtime_bundle_mismatch')
+    if "delegate.py" in manifest: return bundle/"delegate.py"
+    raise ValueError('runtime_entrypoint_missing')
 
 
 def prepare_uninstall(state_dir):
-    from .visibility import _lock,_path
+    from .visibility import _lock,_path,measurement_path
     root=Path(state_dir)
     if not root.exists():return {'status':'ready','state_preserved':True}
     config=read_config(root);config['routing_enabled']=False
-    atomic_json(root/('config.json' if config['schema_version']==2 else 'profiles.json'),config)
+    atomic_json(root/'config.json',config)
     store=Store(root)
     with store.db(write=True) as db:_quiescent(db)
-    with _lock(root):_path(root).unlink(missing_ok=True)
+    with _lock(root):
+        _path(root).unlink(missing_ok=True)
+        measurement_path(root).unlink(missing_ok=True)
     return {'status':'ready','state_preserved':True,'models_preserved':True}

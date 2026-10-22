@@ -24,14 +24,15 @@ class CLI(Fixture):
         store = Store(self.state)
         store.reserve(self.brief("occupier"), p, {**self.loaded(), "endpoint": server.endpoint})
         path = self.root / "brief.json"
-        path.write_text(json.dumps(self.brief("request")))
+        brief=self.brief("request"); brief["fallback"]=p["fallback"]
+        path.write_text(json.dumps(brief))
         return server, store, path
 
-    def test_busy_emits_fallback_without_local_post(self):
+    def test_unqualified_model_emits_fallback_without_local_post(self):
         server, store, path = self.busy()
         result = self.invoke("submit", "--brief", str(path))
         self.assertEqual(result["status"], "fallback_required")
-        self.assertEqual(result["reason"], "model_busy")
+        self.assertEqual(result["reason"], "no_qualified_model")
         self.assertEqual(result["fallback"], {"model": "gpt-6.1-sol", "reasoning_effort": "medium"})
         self.assertFalse(any(method == "POST" for method, _ in server.calls))
 

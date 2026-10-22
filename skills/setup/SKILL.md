@@ -16,7 +16,7 @@ Example after detecting a missing runtime: “The plugin is installed; delegatio
 ## Follow the current stage
 
 1. **Inspect.** Check macOS, Codex access, Python 3.11+, installed plugin location and existing state before changes. Use the packaged `../../delegate.py`; run read-only `doctor` first. Reuse verified observations. Preserve native model, provider, reasoning and authentication settings. If the plugin is absent, follow the [public onboarding guide](../../docs/onboarding.md) before invoking packaged commands.
-2. **Resume or initialize.** Reuse the selected state, endpoint, profiles and visibility preference. Existing `~/.local/state/codex-local-repairs` requires explicit `--state-dir`; schema 2 needs no migration. After authorized installation/setup, initialize missing private state with routing disabled. Read [Setup operations](references/operations.md) before executing this or later stages; it is the required technical procedure.
+2. **Resume or initialize.** Reuse the selected state, endpoint, profiles and visibility preference. Only schema-2 state is supported; reject unsupported state without rewriting it. After authorized installation/setup, initialize missing private state with routing disabled. Read [Setup operations](references/operations.md) before executing this or later stages; it is the required technical procedure.
 3. **Connect.** If LM Studio is missing, offer help with that installation as the next decision. If present but stopped, guide one start-server action. Use the recorded endpoint; otherwise ask for the loopback URL shown by LM Studio. Discover read-only and prepare an unapproved profile. Resolve one missing prerequisite at a time.
 4. **Assess.** Explain synthetic assessments and revocable standing consent in plain language. Use valid existing consent or ask once. After consent, follow the required operations procedure, including identity, verification and capacity checks. Report demonstrated scope, failures and unknowns.
 5. **Approve, then activate.** Ask the owner to approve the exact tested model/scope. Only after that decision, ask separately about routing activation. Verify the resulting configuration; a local task is verified only when its execution and native acceptance were observed.
@@ -32,4 +32,6 @@ Example after detecting a missing runtime: “The plugin is installed; delegatio
 
 At completion or a pause, report **verified**, **pending/blocked**, **routing state**, and **resume step**. A saved setup is not operational delegation. “Resume Local Model Delegation setup” resumes from the saved checkpoint.
 
-For updates or removal, follow the corresponding preparation in [Setup operations](references/operations.md) before native plugin controls.
+For updates, follow the [guided update procedure](../../docs/updating.md), including release staging, private backup, native installation and verification. For removal, follow [Setup operations](references/operations.md) before native plugin controls.
+
+Fresh authorized setup also initializes private measurement tables. Existing installations use `metrics init` after authorized update; see [measurements](../local-delegation/references/measurements.md). Reports and comparison registrations do not approve models, authorize extra inference, or enable routing. Missing native telemetry means savings remain unknown.

@@ -52,51 +52,45 @@ class Store:
             except FileNotFoundError: continue
             if stamp.st_uid != os.getuid() or stamp.st_mode & 0o077 or not stat.S_ISREG(stamp.st_mode):
                 raise ValueError("unsafe_database")
-        created = False
         try:
             fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         except FileExistsError:
             pass
         else:
             os.close(fd)
-            created = True
         with self.db() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2): raise ValueError("unsupported_state_version")
+            if version not in (0, 2): raise ValueError("unsupported_state_version")
+            if version == 0 and db.execute("SELECT 1 FROM sqlite_master WHERE type='table'").fetchone():
+                raise ValueError("unsupported_state_version")
             db.execute("PRAGMA journal_mode=WAL")
-            db.executescript('''
-                CREATE TABLE IF NOT EXISTS profiles (digest TEXT PRIMARY KEY, data TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS jobs (
-                  job_id TEXT PRIMARY KEY, chat TEXT NOT NULL, task_key TEXT NOT NULL, brief_hash TEXT NOT NULL,
-                  brief TEXT NOT NULL, profile TEXT NOT NULL, status TEXT NOT NULL, reason TEXT,
-                  attempt_id TEXT, result_path TEXT, native_task_id TEXT, UNIQUE(chat, task_key));
-                CREATE TABLE IF NOT EXISTS instances (
-                  instance_key TEXT PRIMARY KEY, generation INTEGER NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS attempts (
-                  attempt_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(job_id),
-                  instance_key TEXT NOT NULL REFERENCES instances(instance_key), generation INTEGER NOT NULL,
-                  state TEXT NOT NULL, data TEXT NOT NULL);
-                CREATE INDEX IF NOT EXISTS occupied ON attempts(instance_key,state);
-                CREATE TABLE IF NOT EXISTS fallback_dispatches (
-                  job_id TEXT PRIMARY KEY REFERENCES jobs(job_id), token TEXT NOT NULL, task_name TEXT NOT NULL,
-                  native_task_id TEXT, state TEXT NOT NULL);
-                CREATE TRIGGER IF NOT EXISTS finish_native_dispatch AFTER UPDATE OF status ON jobs
-                  WHEN NEW.status IN ('accepted','failed')
-                  BEGIN UPDATE fallback_dispatches SET state=CASE WHEN NEW.status='accepted' THEN 'complete' ELSE 'failed' END
-                  WHERE job_id=NEW.job_id; END;
-            ''')
             if version == 0:
-                db.execute("PRAGMA user_version=1")
-            if created and (self.root / "config.json").exists():
-                config = load_json((self.root / "config.json").read_text())
-                if config.get("schema_version") == 2:
-                    self.upgrade_schema(db)
+                db.executescript('''
+                    CREATE TABLE IF NOT EXISTS profiles (digest TEXT PRIMARY KEY, data TEXT NOT NULL);
+                    CREATE TABLE IF NOT EXISTS jobs (
+                      job_id TEXT PRIMARY KEY, chat TEXT NOT NULL, task_key TEXT NOT NULL, brief_hash TEXT NOT NULL,
+                      brief TEXT NOT NULL, profile TEXT NOT NULL, status TEXT NOT NULL, reason TEXT,
+                      attempt_id TEXT, result_path TEXT, native_task_id TEXT,
+                      fallback TEXT, queued_at REAL, route_data TEXT NOT NULL DEFAULT '{}', UNIQUE(chat, task_key));
+                    CREATE TABLE IF NOT EXISTS instances (
+                      instance_key TEXT PRIMARY KEY, generation INTEGER NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL);
+                    CREATE TABLE IF NOT EXISTS attempts (
+                      attempt_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(job_id),
+                      instance_key TEXT NOT NULL REFERENCES instances(instance_key), generation INTEGER NOT NULL,
+                      state TEXT NOT NULL, data TEXT NOT NULL);
+                    CREATE INDEX IF NOT EXISTS occupied ON attempts(instance_key,state);
+                    CREATE TABLE IF NOT EXISTS fallback_dispatches (
+                      job_id TEXT PRIMARY KEY REFERENCES jobs(job_id), token TEXT NOT NULL, task_name TEXT NOT NULL,
+                      native_task_id TEXT, state TEXT NOT NULL);
+                    CREATE TRIGGER IF NOT EXISTS finish_native_dispatch AFTER UPDATE OF status ON jobs
+                      WHEN NEW.status IN ('accepted','failed')
+                      BEGIN UPDATE fallback_dispatches SET state=CASE WHEN NEW.status='accepted' THEN 'complete' ELSE 'failed' END
+                      WHERE job_id=NEW.job_id; END;
+                ''')
+                self.initialize_schema(db)
 
     @staticmethod
-    def upgrade_schema(db):
-        columns = {r[1] for r in db.execute("PRAGMA table_info(jobs)")}
-        for name, declaration in (("fallback", "TEXT"), ("queued_at", "REAL"), ("route_data", "TEXT NOT NULL DEFAULT '{}'")):
-            if name not in columns: db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {declaration}")
+    def initialize_schema(db):
         db.execute("CREATE TABLE IF NOT EXISTS model_operations (operation_id TEXT PRIMARY KEY, model_key TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL)")
         db.execute("PRAGMA user_version=2")
         db.execute("""CREATE TRIGGER IF NOT EXISTS job_observation AFTER UPDATE OF status,reason,result_path,native_task_id ON jobs
@@ -127,7 +121,7 @@ class Store:
         if row is None: raise ValueError("unknown_job")
         result = dict(row)
         for key in ("brief", "profile"): result[key] = load_json(result[key])
-        result["fallback"] = load_json(result["fallback"]) if result.get("fallback") else result["profile"].get("fallback")
+        result["fallback"] = load_json(result["fallback"]) if result["fallback"] else None
         if "route_data" in result: result["route_data"] = load_json(result["route_data"])
         return result
 
@@ -153,7 +147,7 @@ class Store:
             status, reason = "fallback_required", "model_unavailable"
             attempt_id, status, reason, key, generation = self._slot(db, profile, loaded)
             db.execute("INSERT OR IGNORE INTO profiles VALUES (?,?)", (digest(profile), canonical(profile)))
-            db.execute("INSERT INTO jobs (job_id,chat,task_key,brief_hash,brief,profile,status,reason,attempt_id,result_path,native_task_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (job_id, brief["origin_chat_id"], brief["task_key"], digest(brief), canonical(brief), canonical(profile), status, reason, attempt_id, None, None))
+            db.execute("INSERT INTO jobs (job_id,chat,task_key,brief_hash,brief,profile,status,reason,attempt_id,result_path,native_task_id,fallback) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (job_id, brief["origin_chat_id"], brief["task_key"], digest(brief), canonical(brief), canonical(profile), status, reason, attempt_id, None, None, canonical(brief['fallback'])))
             if attempt_id:
                 db.execute("INSERT INTO attempts VALUES (?,?,?,?,?,?)", (attempt_id, job_id, key, generation, "reserved", canonical({"created": time.time()})))
             return envelope(self._job(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()))
@@ -292,9 +286,11 @@ class Store:
             db.execute("UPDATE jobs SET status='candidate_ready',result_path=? WHERE job_id=? AND native_task_id=? AND status='fallback_running'", (str(path), job_id, native_task_id))
         return envelope(self.job(job_id))
 
-    def enqueue(self, brief, fallback, assessment=None):
+    def enqueue(self, brief, fallback, assessment=None, measurement=None):
         from .contracts import validate_fallback
         from .profiles import read_config
+        from .measurements import bind_enqueued, validate_context
+        if measurement is not None: validate_context(measurement)
         validate_brief(brief); validate_fallback(fallback)
         if brief['schema_version'] != 2 or brief['fallback'] != fallback: raise ValueError('invalid_brief')
         if assessment:
@@ -306,12 +302,14 @@ class Store:
             row=db.execute('SELECT * FROM jobs WHERE chat=? AND task_key=?',(brief['origin_chat_id'],brief['task_key'])).fetchone()
             if row:
                 if row['brief_hash'] != digest(brief): raise ValueError('job_conflict')
+                bind_enqueued(db,row['job_id'],measurement)
                 return envelope(self._job(row))
             identifier, now=uuid.uuid4().hex,time.time()
             route={'wait_until':now+brief['task_requirements']['wait_budget_seconds'],'observed_at':now}
             if assessment: route['assessment']=assessment
             db.execute("INSERT INTO jobs (job_id,chat,task_key,brief_hash,brief,profile,status,reason,fallback,queued_at,route_data) VALUES (?,?,?,?,?,'{}','waiting','waiting_for_slot',?,?,?)",
                        (identifier,brief['origin_chat_id'],brief['task_key'],digest(brief),canonical(brief),canonical(fallback),now,canonical(route)))
+            bind_enqueued(db,identifier,measurement)
             return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(identifier,)).fetchone()))
 
     def waiting_jobs(self, now=None):
@@ -344,6 +342,10 @@ class Store:
                 resources=dict(resource_snapshot)
                 if type(resources.get('available_bytes')) is int: resources['available_bytes']=max(0,resources['available_bytes']-held)
                 limit=admission_limit(current,loaded,resources)
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='measurement_tasks'").fetchone():
+                    if db.execute('SELECT 1 FROM measurement_tasks WHERE job_id=?',(job_id,)).fetchone():
+                        route['measurement_resource_sample'] = {k:resource_snapshot.get(k) for k in ('observed_at','pressure','swapout_delta_bytes','available_bytes')}
+                        db.execute('UPDATE jobs SET route_data=? WHERE job_id=?',(canonical(route),job_id))
                 request_bytes=current.get('capacity_evidence',{}).get('request_bytes',0)
                 if route.get('assessment'):
                     from .capacity import available_budget,assessment_request_bytes
@@ -356,6 +358,10 @@ class Store:
                     attempt,status,reason,key,generation=self._slot(db,current,{**loaded,'capacity':limit})
                     if attempt:
                         route.update(observed_at=time.time(),approval_digest=digest(current['approval']),evidence_revision=digest(current.get('assessment',{})),request_bytes=request_bytes)
+                        if db.execute("SELECT 1 FROM sqlite_master WHERE name='measurement_tasks'").fetchone():
+                            if db.execute('SELECT 1 FROM measurement_tasks WHERE job_id=?',(job_id,)).fetchone():
+                                from .measurements import model_binding
+                                route['measurement_binding'] = model_binding(current,executed=True)
                         db.execute('UPDATE jobs SET profile=?,status=?,reason=NULL,attempt_id=?,route_data=? WHERE job_id=?',
                                    (canonical(current),status,attempt,canonical(route),job_id))
                         db.execute('INSERT INTO attempts VALUES (?,?,?,?,?,?)',(attempt,job_id,key,generation,'reserved',canonical({'created':time.time()})))
