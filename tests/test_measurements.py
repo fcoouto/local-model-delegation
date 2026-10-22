@@ -8,6 +8,8 @@ from local_model_delegation.store import Store
 
 
 NATIVE = {'host':'fixture', 'provider':'fixture', 'model':'native', 'reasoning':'medium', 'boundary':'whole_task'}
+BINDING = {'profile_id':'fictional','artifact_digest':'a'*64,'runtime_digest':'b'*64,
+           'settings_digest':'c'*64,'helper_digest':'d'*64}
 
 
 class Measurements(Fixture):
@@ -165,3 +167,102 @@ class Measurements(Fixture):
         with store.db() as db: db.execute('DELETE FROM measurement_tasks WHERE task_id=?',(job,))
         with self.assertRaisesRegex(ValueError,'measurement_project_mismatch'):
             m.begin_measurement(self.state,'forged',self.context(project_id=other),job)
+
+    def usage(self, amount=300, **changes):
+        return {'native_binding':NATIVE,'source_run_id':'run','span_id':'span','start':1,'end':10,
+                'phase':'whole_task','usage_schema':'input_output_v1','tokens':{'input':amount,'output':0,'cached_input':0,'reasoning_output':0},
+                'complete':True,'attribution':'exclusive','evidence_hash':'e'*64,'group_id':'whole',
+                'role':'total','expected_spans':1,'overhead_complete':True,'allocations':None, **changes}
+
+    def report_rows(self, outcome='unchanged_local', usage=300):
+        self.project_id = 'project'
+        tasks=[];events=[]
+        for name, result, amount in [('local',outcome,usage),('native','native_only',1000)]:
+            observation={'status':'accepted','reason':None,'binding':BINDING if name=='local' else {},
+                'attempts':[{'attempt_id':'attempt','state':'complete','submitted_at':10,'finished_at':20,'inference_seconds':10}] if name=='local' else [],
+                'native_task_id':None,'fallback':result=='native_fallback','queued_at':9,'request_bytes':1024}
+            tasks.append({'task_id':name,'context':self.context(),'job_id':name if name=='local' else None,'observation':observation})
+            def add(kind,payload,key):
+                events.append({'event_id':name+key,'task_id':name,**self.receipt(kind,payload,key=name+key)})
+            if name=='local': add('local_verdict',{'attempt_id':'attempt','candidate_hash':'a'*64,'checks_hash':'b'*64,
+                                                  'accepted':result=='unchanged_local','category':'semantic'},'verdict')
+            add('delivery',{'outcome':result,'artifact_hash':'a'*64,'checks_hash':'b'*64,'native_task_id':None,'durations':{'overall':20}},'delivery')
+            add('usage',self.usage(amount,source_run_id=name),'usage')
+        events.append({'event_id':'overhead','task_id':'local',**self.receipt('usage',self.usage(100,phase='onboarding',
+            source_run_id='setup',allocations={'local':1.0}),key='overhead')})
+        return {'projects':[],'tasks':tasks,'events':events,'pairs':[{'local_task':'local','native_task':'native','method':'paired_usage_proxy'}]}
+
+    def test_report_savings_include_overhead_and_negative_failed_routes(self):
+        m=self.api();self.assertTrue(hasattr(m,'build_report'),'report calculation is missing')
+        for usage, outcome, expected in [(300,'unchanged_local',600),(1100,'native_fallback',-200)]:
+            report=m.build_report(self.report_rows(outcome,usage),project_id='project',profile_id='fictional',now=200)
+            cohort=report['cohorts'][0]
+            self.assertEqual(cohort['savings']['net_native_token_proxy'],expected)
+            self.assertEqual(cohort['quality']['local_delivery']['passed'],int(outcome=='unchanged_local'))
+            self.assertEqual(cohort['quality']['local_delivery']['evaluated'],1)
+            self.assertEqual(cohort['savings']['subscription_savings'],'unknown')
+
+    def test_unknown_and_incompatible_usage_never_means_zero(self):
+        m=self.api();self.assertTrue(hasattr(m,'build_report'),'report calculation is missing')
+        for changes in [{'complete':False},{'attribution':'shared'},{'usage_schema':'unknown'},
+                        {'tokens':{'input':None,'output':0,'cached_input':None,'reasoning_output':0}},
+                        {'native_binding':{**NATIVE,'model':'other'}},{'overhead_complete':False}]:
+            rows=self.report_rows()
+            next(e for e in rows['events'] if e['event_id']=='localusage')['payload'].update(changes)
+            cohort=m.build_report(rows,project_id='project',profile_id='fictional',now=200)['cohorts'][0]
+            self.assertIsNone(cohort['savings']['net_native_token_proxy'])
+            self.assertTrue(cohort['savings']['unknown_reasons'])
+
+    def test_counts_separate_cohorts_pending_and_repeated_cases(self):
+        m=self.api();self.assertTrue(hasattr(m,'build_report'),'report calculation is missing')
+        rows=self.report_rows();original=rows['tasks'][0]
+        for i in range(35):
+            task=copy.deepcopy(original);task['task_id']='task'+str(i);rows['tasks'].append(task)
+        other=copy.deepcopy(original);other['task_id']='changed';other['context']['environment_digest']='f'*64;rows['tasks'].append(other)
+        report=m.build_report(rows,project_id='project',profile_id='fictional',now=200)
+        self.assertEqual(len(report['cohorts']),2)
+        cohort=next(c for c in report['cohorts'] if c['coverage']['tasks']==36)
+        self.assertEqual(cohort['coverage']['distinct_cases'],1)
+        self.assertEqual(cohort['quality']['first_candidate']['evaluated'],1)
+        self.assertEqual(cohort['coverage']['missing_verdicts'],35)
+        self.assertIsNone(cohort['latency']['overall']['p95'])
+
+    def test_usage_span_alias_cannot_double_count_across_projects(self):
+        m=self.setup_metrics();m.begin_measurement(self.state,'task',self.context());m.begin_measurement(self.state,'other',self.context())
+        self.assertTrue(hasattr(m,'record_usage'),'usage ingestion is missing')
+        receipt=self.receipt('usage',self.usage())
+        first=m.record_usage(self.state,'task',receipt)
+        self.assertEqual(first,m.record_usage(self.state,'task',receipt))
+        with self.assertRaisesRegex(ValueError,'usage_span_conflict'):
+            m.record_usage(self.state,'other',{**receipt,'source_key':'alias'})
+        with self.assertRaises(ValueError):
+            m.record_usage(self.state,'task',self.receipt('usage',self.usage(span_id='overhead',allocations={'task':.7,'other':.7}),key='bad'))
+
+    def test_totals_do_not_double_count_components_or_token_subsets(self):
+        m=self.api();rows=self.report_rows()
+        total=next(e for e in rows['events'] if e['event_id']=='localusage')
+        total['payload']['tokens']={'input':200,'output':100,'cached_input':150,'reasoning_output':80}
+        component=copy.deepcopy(total);component.update(event_id='component',source_key='component')
+        component['payload'].update(role='component',span_id='component',phase='verification')
+        rows['events'].append(component)
+        report=m.build_report(rows,project_id='project',profile_id='fictional',now=200)
+        self.assertEqual(report['cohorts'][0]['savings']['net_native_token_proxy'],600)
+
+    def test_recent_window_and_p95_require_enough_observations(self):
+        m=self.api();rows=self.report_rows();template=rows['tasks'][0]
+        for i in range(34):
+            task=copy.deepcopy(template);task['task_id']='local'+str(i);task['context']['case_hash']=format(i+100,'064x');rows['tasks'].append(task)
+            rows['events'].append({'event_id':'delivery'+str(i),'task_id':task['task_id'],**self.receipt('delivery',
+                {'outcome':'not_integrated','artifact_hash':'a'*64,'checks_hash':'b'*64,'native_task_id':None,'durations':{'overall':i+1}},
+                key='delivery'+str(i),observed_at=101+i)})
+        cohort=m.build_report(rows,project_id='project',profile_id='fictional',now=200)['cohorts'][0]
+        self.assertEqual(cohort['last_30_closed']['fallback']['closed_decisions'],30)
+        self.assertEqual(cohort['latency']['overall']['samples'],35)
+        self.assertEqual(cohort['latency']['overall']['p95'],33)
+
+    def test_delivery_requires_correction_instead_of_two_terminal_outcomes(self):
+        m=self.setup_metrics();m.begin_measurement(self.state,'task',self.context())
+        payload={'outcome':'not_integrated','artifact_hash':'a'*64,'checks_hash':'b'*64,'native_task_id':None,'durations':{}}
+        m.append_event(self.state,'task',self.receipt('delivery',payload))
+        with self.assertRaisesRegex(ValueError,'delivery_already_recorded'):
+            m.append_event(self.state,'task',self.receipt('delivery',{**payload,'outcome':'native_edited'},key='other'))

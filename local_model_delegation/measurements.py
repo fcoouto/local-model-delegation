@@ -161,7 +161,9 @@ def begin_measurement(state_dir: Path, task_id: str, context: dict, job_id=None)
 
 
 def _validate_payload(kind, payload):
-    if kind == 'local_verdict':
+    if kind == 'usage':
+        validate_usage(payload)
+    elif kind == 'local_verdict':
         fields(payload, {'attempt_id','candidate_hash','checks_hash','accepted','category'})
         require(identifier(payload['attempt_id']) and sha(payload['candidate_hash']) and sha(payload['checks_hash']))
         require(type(payload['accepted']) is bool and payload['category'] in ('accepted','semantic','format','framework','source_changed','verification'))
@@ -202,9 +204,20 @@ def _append(db, task_id, receipt, *, internal=False):
         prior = db.execute('SELECT * FROM measurement_events WHERE event_id=?', (supersedes,)).fetchone()
         require(prior and prior['task_id'] == task_id and prior['kind'] == receipt['kind'], 'invalid_measurement_correction')
         require(not db.execute('SELECT 1 FROM measurement_events WHERE supersedes=?', (supersedes,)).fetchone(), 'measurement_conflict')
+    if receipt['kind'] == 'delivery' and not supersedes:
+        require(not db.execute("SELECT 1 FROM measurement_events WHERE task_id=? AND kind='delivery'",(task_id,)).fetchone(), 'delivery_already_recorded')
     if receipt['kind'] == 'incident':
         require(db.execute("SELECT 1 FROM measurement_events WHERE event_id=? AND task_id=? AND kind='delivery'",
                            (receipt['payload']['delivery_event'],task_id)).fetchone(), 'invalid_incident')
+    if receipt['kind'] == 'usage':
+        payload = receipt['payload']
+        require(load_json(task['context'])['native_binding'] == payload['native_binding'], 'usage_binding_mismatch')
+        for row in db.execute("SELECT event_id,task_id,receipt FROM measurement_events WHERE kind='usage'"):
+            other = load_json(row['receipt'])
+            if (other['producer'],other['payload']['source_run_id'],other['payload']['span_id']) == (receipt['producer'],payload['source_run_id'],payload['span_id']):
+                require(supersedes == row['event_id'] and row['task_id'] == task_id, 'usage_span_conflict')
+        for target in payload['allocations'] or {}:
+            require(db.execute('SELECT 1 FROM measurement_tasks WHERE task_id=?',(target,)).fetchone(), 'unknown_allocation_task')
     event_id = uuid.uuid4().hex
     db.execute('INSERT INTO measurement_events VALUES (?,?,?,?,?,?,?,?)',
                (event_id,task_id,receipt['producer'],receipt['source_key'],receipt['kind'],receipt['observed_at'],canonical(receipt),supersedes))
@@ -214,6 +227,57 @@ def _append(db, task_id, receipt, *, internal=False):
 def append_event(state_dir: Path, task_id: str, receipt: dict) -> dict:
     with connection(state_dir, write=True) as db:
         return _append(db, task_id, receipt)
+
+
+def validate_usage(payload):
+    fields(payload, {'native_binding','source_run_id','span_id','start','end','phase','usage_schema','tokens',
+                     'complete','attribution','evidence_hash','group_id','role','expected_spans','overhead_complete','allocations'})
+    validate_native(payload['native_binding'])
+    require(all(identifier(payload[k]) for k in ('source_run_id','span_id','group_id','usage_schema')))
+    require(payload['start'] is None or number(payload['start']))
+    require(payload['end'] is None or number(payload['end']))
+    require(payload['phase'] in ('whole_task','briefing','coordination','verification','rewriting','integration','fallback','measurement','onboarding','assessment','comparison'))
+    require(payload['attribution'] in ('exclusive','shared','unknown') and sha(payload['evidence_hash']))
+    require(type(payload['complete']) is bool and type(payload['overhead_complete']) is bool)
+    require(payload['role'] in ('total','component') and type(payload['expected_spans']) is int and 1 <= payload['expected_spans'] <= 10000)
+    fields(payload['tokens'], {'input','output','cached_input','reasoning_output'})
+    require(all(v is None or type(v) is int and v >= 0 for v in payload['tokens'].values()))
+    for subset,parent in (('cached_input','input'),('reasoning_output','output')):
+        a,b=payload['tokens'][subset],payload['tokens'][parent]
+        require(a is None or b is None or a <= b)
+    allocations=payload['allocations']
+    if allocations is not None:
+        require(payload['phase'] in ('onboarding','assessment','comparison') and payload['role']=='total')
+        require(isinstance(allocations,dict) and all(identifier(k) and number(v) and v <= 1 for k,v in allocations.items()))
+        require(sum(allocations.values()) <= 1)
+
+
+def record_usage(state_dir: Path, task_id: str, receipt: dict) -> dict:
+    require(receipt.get('kind') == 'usage')
+    return append_event(state_dir,task_id,receipt)
+
+
+def read_report(state_dir: Path, *, project_id: str, profile_id=None) -> dict:
+    with connection(state_dir) as db:
+        rows = read_measurement_rows(db)
+    return build_report(rows,project_id=project_id,profile_id=profile_id,now=time.time())
+
+
+def read_measurement_rows(db):
+    rows={'projects':[dict(r) for r in db.execute('SELECT project_id,label FROM measurement_projects')],
+          'tasks':[], 'events':[], 'pairs':[]}
+    for r in db.execute('SELECT * FROM measurement_tasks'):
+        task=dict(r);task['context']=load_json(task['context'])
+        task['observation']=job_observation(db,task['job_id']) if task['job_id'] else {}
+        rows['tasks'].append(task)
+    for r in db.execute('SELECT * FROM measurement_events ORDER BY rowid'):
+        rows['events'].append({**load_json(r['receipt']),'event_id':r['event_id'],'task_id':r['task_id']})
+    return rows
+
+
+def build_report(rows: dict, *, project_id: str, profile_id=None, now: float) -> dict:
+    from .measurement_reports import build_report as build
+    return build(rows,project_id=project_id,profile_id=profile_id,now=now)
 
 
 def bind_enqueued(db, job_id, context):
