@@ -160,6 +160,7 @@ class Store:
         if valid:
             key = digest([loaded["endpoint"], loaded["model_id"], loaded["instance_id"]])
             row = db.execute("SELECT * FROM instances WHERE instance_key=?", (key,)).fetchone()
+            occupied = db.execute("SELECT count(*) FROM attempts WHERE instance_key=? AND state IN ('reserved','submitting','streaming','uncertain')", (key,)).fetchone()[0]
             if row is None:
                 data = {**loaded, "profile": profile, "artifact_digest": profile["artifact"]["digest"]}
                 state = "ready" if loaded.get("binding_verified") else "closed"
@@ -170,9 +171,21 @@ class Store:
                 data = load_json(row["data"])
                 if (data["artifact_digest"] != profile["artifact"]["digest"]
                         or data["profile"]["approval"] != profile["approval"]):
-                    state = "closed"
-                    db.execute("UPDATE instances SET state='closed' WHERE instance_key=?", (key,))
-            occupied = db.execute("SELECT count(*) FROM attempts WHERE instance_key=? AND state IN ('reserved','submitting','streaming','uncertain')", (key,)).fetchone()[0]
+                    same_runtime = all(data['profile'].get(field) == profile.get(field) for field in
+                                       ('endpoint','adapter','model_id','runtime_catalog','artifact','request_settings'))
+                    if same_runtime and occupied:
+                        return None, 'fallback_required', 'model_busy', key, generation
+                    if (same_runtime and loaded.get('binding_verified') is True
+                            and data.get('config') == loaded.get('config')
+                            and state in ('ready','closed') and not any(k.startswith('recovery_') for k in data)
+                            and not db.execute("SELECT 1 FROM model_operations WHERE model_key=? AND state NOT IN ('complete','failed') LIMIT 1", (digest([loaded['endpoint'],loaded['model_id']]),)).fetchone()):
+                        # Approval metadata can change after assessment; this is not a runtime reset.
+                        data.update(profile=profile)
+                        state = 'ready'
+                        db.execute("UPDATE instances SET state='ready',data=? WHERE instance_key=?", (canonical(data),key))
+                    else:
+                        state = "closed"
+                        db.execute("UPDATE instances SET state='closed' WHERE instance_key=?", (key,))
             if state == "ready" and occupied < loaded["capacity"]:
                 attempt_id, status, reason = uuid.uuid4().hex, "reserved", None
             else:

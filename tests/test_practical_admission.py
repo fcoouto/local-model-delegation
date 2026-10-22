@@ -11,6 +11,59 @@ class PracticalAdmission(Fixture):
     generic = test_scheduler.Scheduler.generic
     resources = test_scheduler.Scheduler.resources
 
+    def test_idle_assessment_instance_accepts_fresh_project_approval(self):
+        from local_model_delegation.store import Store
+        profile = self.profile(); previous = copy.deepcopy(profile); previous['approval'] = None
+        store = Store(self.state)
+        old = store.reserve(self.brief(), previous, self.loaded())
+        with store.db(write=True) as db:
+            db.execute("UPDATE attempts SET state='complete'")
+            db.execute("UPDATE jobs SET status='accepted'")
+            # Older helpers closed policy-only changes without a recovery marker.
+            db.execute("UPDATE instances SET state='closed'")
+        result = store.reserve(self.brief('new-approval'), profile, self.loaded())
+        self.assertEqual(result['status'], 'reserved')
+        self.assertEqual(store.instance(store.attempt(old['attempt_id'])['instance_key'])['data']['profile']['approval'], profile['approval'])
+
+    def test_approval_refresh_never_closes_or_reuses_an_occupied_slot(self):
+        from local_model_delegation.store import Store
+        profile = self.profile(); store = Store(self.state)
+        old = store.reserve(self.brief(), profile, self.loaded())
+        changed = copy.deepcopy(profile); changed['approval']['owner_reference'] = 'renewed-consent'
+        for state in ('reserved','submitting','streaming','uncertain'):
+            with store.db(write=True) as db: db.execute('UPDATE attempts SET state=?',(state,))
+            result = store.reserve(self.brief('approval-'+state), changed, self.loaded())
+            self.assertIsNone(result['attempt_id'])
+            self.assertEqual(store.instance(store.attempt(old['attempt_id'])['instance_key'])['state'], 'ready')
+
+    def test_approval_refresh_does_not_clear_recovery_or_changed_identity(self):
+        from local_model_delegation.store import Store
+        from local_model_delegation.recovery import close_instance
+        profile = self.profile(); store = Store(self.state)
+        old = store.reserve(self.brief(), profile, self.loaded())
+        key = store.attempt(old['attempt_id'])['instance_key']
+        with store.db(write=True) as db: db.execute("UPDATE attempts SET state='complete'")
+        close_instance(store, key)
+        changed = copy.deepcopy(profile); changed['approval']['owner_reference'] = 'renewed-consent'
+        self.assertIsNone(store.reserve(self.brief('recovery'),changed,self.loaded())['attempt_id'])
+        self.assertEqual(store.instance(key)['data']['recovery_phase'], 'unload')
+
+    def test_approval_refresh_requires_identical_runtime_binding_and_no_lifecycle_work(self):
+        from local_model_delegation.store import Store
+        from local_model_delegation.contracts import digest
+        profile = self.profile(); store = Store(self.state)
+        old = store.reserve(self.brief(), profile, self.loaded())
+        with store.db(write=True) as db: db.execute("UPDATE attempts SET state='complete'")
+        changed = copy.deepcopy(profile); changed['approval']['owner_reference'] = 'renewed-consent'
+        changed['request_settings']['max_output_tokens'] += 1
+        self.assertIsNone(store.reserve(self.brief('settings'),changed,self.loaded())['attempt_id'])
+        changed = copy.deepcopy(profile); changed['approval']['owner_reference'] = 'renewed-consent'
+        loaded = self.loaded(); loaded['config']['context_length'] *= 2
+        self.assertIsNone(store.reserve(self.brief('context'),changed,loaded)['attempt_id'])
+        with store.db(write=True) as db:
+            db.execute("INSERT INTO model_operations VALUES ('uncertain-op',?,'uncertain','{}')",(digest([profile['endpoint'],profile['model_id']]),))
+        self.assertIsNone(store.reserve(self.brief('operation'),changed,self.loaded())['attempt_id'])
+
     def test_loaded_single_slot_needs_no_memory_calibration(self):
         from local_model_delegation.capacity import qualified_limit
         store, brief, profile = self.setup_queue()

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3 (unreleased)
+
+- Refresh an idle instance's approval metadata after assessment or an authorized scope change when fresh discovery confirms identical runtime/artifact/settings/configuration. Preserve occupied and uncertain slots, recovery markers and lifecycle reservations.
+- Preserve never-submitted queued jobs during a disabled, idle plugin update. Uninstall remains stricter; active, uncertain and recovery work still blocks updates.
+
 ## 0.3.2 (unreleased)
 
 - Separate explicit provisional operating budgets from observed fixture sizes. Add `profile approve` for owner-authorized practical scopes without inventing qualification or savings evidence.

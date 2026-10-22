@@ -117,7 +117,7 @@ def prepare_update(state_dir, target_root=PACKAGE_ROOT, installed_root=PACKAGE_R
         _disabled(store.root)
         with store.db() as db:
             settled = _settled_assessments(store, db)
-            _quiescent(db, settled)
+            _quiescent(db, settled, allow_pending_admission=True)
         bundle = pin_runtime_bundle(store.root, Path(installed_root))
         directory = private_dir(store.root / 'updates' / uuid.uuid4().hex)
         backup = private_dir(directory / 'backup')
@@ -131,7 +131,7 @@ def prepare_update(state_dir, target_root=PACKAGE_ROOT, installed_root=PACKAGE_R
         database = backup / 'state.sqlite3'
         fd = os.open(database, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600); os.close(fd)
         with store.db() as db, sqlite3.connect(database) as destination:
-            _quiescent(db, _settled_assessments(store, db))
+            _quiescent(db, _settled_assessments(store, db), allow_pending_admission=True)
             db.backup(destination)
             snapshot = _database(destination)
         receipt = {'schema_version': 1, 'state_root': str(store.root), 'installed': installed, 'target': target,
@@ -178,7 +178,7 @@ def verify_update(state_dir, receipt_path, installed_root=PACKAGE_ROOT):
     with ownership(store, 'plugin-update') as owned:
         if not owned: raise ValueError('update_busy')
         _preserved(store, receipt)
-        with store.db() as db: _quiescent(db, _settled_assessments(store, db))
+        with store.db() as db: _quiescent(db, _settled_assessments(store, db), allow_pending_admission=True)
         if receipt['verified_at'] is None:
             receipt['verified_at'] = time.time(); atomic_json(path, receipt)
     return {'status': 'verified', 'installed': installed, 'state_preserved': True, 'routing_enabled': False,
