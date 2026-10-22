@@ -100,8 +100,10 @@ acceptance or reservations. The observer exits on settled/unknown local work or
 disable. `visibility disable` also suppresses hooks; enabling Habblaud does not
 override that global preference. Re-enable the relevant preferences and explicitly
 resume current work when needed. Update/uninstall preparation disables Habblaud
-publishing and waits for owned observers before taking state snapshots; re-enable
-explicitly after an update if wanted. No model process is stopped by this adapter.
+publishing and waits for owned observers before taking state snapshots. The
+[update procedure](../../../docs/updating.md) records preferences before that pause
+and restores previously enabled publishing after successful verification, unless
+the owner requests it remain off. No model process is stopped by this adapter.
 
 ### Presentation limits and data exposure
 

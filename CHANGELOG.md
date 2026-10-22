@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Correct the guided update workflow to record routing and Habblaud preferences before pausing, restore previously enabled preferences after successful verification, and read back the final state.
+- Preserve disabled preferences and explicit pause requests; failed updates remain paused. Runtime verification gates and model approvals are unchanged.
+
 ## 0.3.8
 
 - Fix automatic Habblaud observer startup from detached workers by reusing the validated immutable runtime bundle.

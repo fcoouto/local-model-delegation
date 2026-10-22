@@ -32,7 +32,7 @@ Example after detecting a missing runtime: “The plugin is installed; delegatio
 
 At completion or a pause, report **verified**, **pending/blocked**, **routing state**, and **resume step**. A saved setup is not operational delegation. “Resume Local Model Delegation setup” resumes from the saved checkpoint.
 
-For updates, follow the [guided update procedure](../../docs/updating.md), including release staging, private backup, native installation and verification. For removal, follow [Setup operations](references/operations.md) before native plugin controls.
+For updates, follow the [guided update procedure](../../docs/updating.md), including release staging, private backup, native installation, verification and restoration of saved routing/publishing preferences. An update request includes restoring previously enabled preferences after successful verification; disabled preferences and explicit requests to remain paused stay off. For removal, follow [Setup operations](references/operations.md) before native plugin controls.
 
 Fresh authorized setup also initializes private measurement tables. Existing installations use `metrics init` after authorized update; see [measurements](../local-delegation/references/measurements.md). Reports and comparison registrations do not approve models, authorize extra inference, or enable routing. Missing native telemetry means savings remain unknown.
 

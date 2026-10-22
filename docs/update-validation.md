@@ -1,5 +1,13 @@
 # Update validation
 
+## Preference-restoration workflow
+
+The update reference previously directed a consuming agent to leave previously enabled routing and Habblaud publishing off and ask for activation again. A fresh-context application test reproduced that behavior before correction. With the revised reference, an independent agent restored both preferences after successful verification without asking again, preserved initially disabled preferences and routing-only pause requests, reused original evidence after interruption, and kept failed verification paused. It also identified missing preference evidence as a reconciliation requirement and an unavailable receiver as pending publishing restoration without revoking restored routing.
+
+These were read-only instruction-application scenarios, not native installation or inference tests. The unchanged runtime suite passed all 306 tests; both packaged skills passed structural validation. The correction is in the agent workflow: `verify-update` still verifies a paused checkpoint, and the coordinator performs restoration afterward.
+
+## Original numbered-update qualification
+
 Version 0.3.0 was checked with Python 3.11 on macOS. The full offline suite passed 218 tests. Both packaged skills passed the bundled structural validator using PyYAML 6.0.3. All 42 local Markdown links and anchors resolved, and `git diff --check 950c12dd763f2ecbc905ab9c034a1b3376503edb` passed before this record was added.
 
 ## Regression coverage
