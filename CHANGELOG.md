@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4 (unreleased)
+
+- Link Vibe Setup's delegation policy and native contract from agent and user documentation. Use installed-version instructions and preserve local approval, verification and fallback controls.
+- Documentation-only local update on top of 0.3.3; runtime code and private state are unchanged.
+
 ## 0.3.3 (unreleased)
 
 - Refresh an idle instance's approval metadata after assessment or an authorized scope change when fresh discovery confirms identical runtime/artifact/settings/configuration. Preserve occupied and uncertain slots, recovery markers and lifecycle reservations.
