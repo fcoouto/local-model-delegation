@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.6 (unreleased)
+## 0.3.6
 
 - Let the coordinator select a positive per-task generation allowance within the model's approved ceiling. Admission and the HTTP request use that allowance, including reasoning tokens, with runtime context checks before POST.
 - Add explicit `profile approve --max-output-tokens` support. Ceiling changes preserve assessment history and wait for occupied instances before refreshing idle approval metadata; loading permission remains bound to the approval.
