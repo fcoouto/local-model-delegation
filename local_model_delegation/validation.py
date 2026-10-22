@@ -271,11 +271,15 @@ def _verify_python_candidate(store, job_id):
                 raise ValueError("attempt_fenced")
         receipt["accepted"] = True
         atomic_json(path.parent / "checks.json", receipt)
+        from .measurements import collect_verdict
+        collect_verdict(store.root,job_id,receipt,True)
         with store.db(write=True) as db:
             db.execute("UPDATE jobs SET status='accepted',reason=NULL WHERE job_id=? AND status='checking'", (job_id,))
     except (OSError, SyntaxError, ValueError, KeyError, TypeError) as error:
         receipt.update(accepted=False, reason=str(error) if isinstance(error, ValueError) else type(error).__name__)
         atomic_json(store.root / "jobs" / job_id / "check-failure.json", receipt)
+        from .measurements import collect_verdict
+        collect_verdict(store.root,job_id,receipt,False,'source_changed' if str(error)=='source_changed' else 'verification')
         if str(error) == "source_changed":
             with store.db(write=True) as db: db.execute("UPDATE jobs SET status='needs_reassessment',reason='source_changed' WHERE job_id=? AND status='checking'", (job_id,))
         elif job["native_task_id"]:
@@ -413,6 +417,8 @@ def record_verification(state_dir, job_id, receipt):
             raise ValueError('incomplete_verification')
         passed = all(v is True for v in [*receipt['criteria'], *receipt['checks'].values(), *receipt['claims']])
         atomic_json(store.root / 'jobs' / job_id / 'native-checks.json', receipt)
+        from .measurements import collect_verdict
+        collect_verdict(store.root,job_id,receipt,passed,'semantic')
         if not passed and not job['native_task_id']:
             return store.select_fallback(job_id, 'native_verification_failed')
         with store.db(write=True) as db:

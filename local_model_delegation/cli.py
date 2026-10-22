@@ -38,7 +38,7 @@ def read_input(path):
     return load_json(path.read_text())
 
 
-def submit_task(state_dir, path):
+def submit_task(state_dir, path, measurement_path=None):
     brief = read_input(path)
     # Disabled/missing configuration causes no database, process or HTTP side effects.
     config = read_config(state_dir)
@@ -46,7 +46,7 @@ def submit_task(state_dir, path):
     if config["schema_version"] == 2:
         validate_brief(brief)
         store = Store(state_dir)
-        result = store.enqueue(brief, brief["fallback"])
+        result = store.enqueue(brief, brief["fallback"], measurement=read_input(measurement_path) if measurement_path else None)
         from .scheduler import schedule_once
         schedule_once(state_dir)
         result = envelope(store.job(result["job_id"]))
@@ -90,6 +90,7 @@ def main(argv=None):
         p.add_argument("identifier")
     p = commands.add_parser("submit")
     p.add_argument("--brief", type=Path, required=True)
+    p.add_argument('--measurement-context', type=Path)
     p = commands.add_parser("lookup")
     p.add_argument("--chat", required=True)
     p.add_argument("--task-key", required=True)
@@ -135,6 +136,7 @@ def main(argv=None):
     p = commands.add_parser('metrics')
     metrics = p.add_subparsers(dest='action', required=True)
     metrics.add_parser('init')
+    metrics.add_parser('reconcile')
     p = metrics.add_parser('register')
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--label', required=True)
@@ -158,6 +160,7 @@ def main(argv=None):
         if args.command == 'metrics':
             from . import measurements
             if args.action == 'init': result = measurements.initialize_measurements(args.state_dir)
+            elif args.action == 'reconcile': result = measurements.reconcile_measurements(args.state_dir)
             elif args.action == 'register': result = measurements.register_project(args.state_dir, args.root, args.label)
             elif args.action == 'begin': result = measurements.begin_measurement(args.state_dir, args.task, read_input(args.context), args.job)
             else: result = measurements.append_event(args.state_dir, args.task, read_input(args.receipt))
@@ -185,7 +188,7 @@ def main(argv=None):
         elif args.command == "migrate":
             from .profiles import migrate_profile_schema
             result = migrate_profile_schema(args.state_dir)
-        elif args.command == "submit": result = submit_task(args.state_dir, args.brief)
+        elif args.command == "submit": result = submit_task(args.state_dir, args.brief, args.measurement_context)
         elif args.command == "profile":
             profile = read_input(args.file)
             identity = fingerprint_artifact(Path(profile["artifact"]["root"]), profile["artifact"]["files"])

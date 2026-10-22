@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import fcntl
 import os
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
@@ -135,6 +136,7 @@ def run_local_attempt(state_dir, attempt_id):
         thread = threading.Thread(target=monitor, daemon=True)
         thread.start()
         answer, total, complete = [], 0, False
+        inference_started = time.monotonic()
         try:
             body = build_model_request(job["brief"], job["profile"], store.instance(attempt["instance_key"])["data"]["instance_id"])
             for event, data in runtime.stream(body):
@@ -182,6 +184,11 @@ def run_local_attempt(state_dir, attempt_id):
             stopped.set()
             runtime.abort()
             thread.join(2)
+            try:
+                store.observe(attempt_id, {'inference_seconds':time.monotonic()-inference_started})
+                from .measurements import capture_job_observation
+                capture_job_observation(state_dir,job['job_id'])
+            except (OSError,ValueError,sqlite3.Error): pass
 
 
 def reconcile_attempts(state_dir):

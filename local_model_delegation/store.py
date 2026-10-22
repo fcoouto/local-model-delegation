@@ -292,9 +292,11 @@ class Store:
             db.execute("UPDATE jobs SET status='candidate_ready',result_path=? WHERE job_id=? AND native_task_id=? AND status='fallback_running'", (str(path), job_id, native_task_id))
         return envelope(self.job(job_id))
 
-    def enqueue(self, brief, fallback, assessment=None):
+    def enqueue(self, brief, fallback, assessment=None, measurement=None):
         from .contracts import validate_fallback
         from .profiles import read_config
+        from .measurements import bind_enqueued, validate_context
+        if measurement is not None: validate_context(measurement)
         validate_brief(brief); validate_fallback(fallback)
         if brief['schema_version'] != 2 or brief['fallback'] != fallback: raise ValueError('invalid_brief')
         if assessment:
@@ -306,12 +308,14 @@ class Store:
             row=db.execute('SELECT * FROM jobs WHERE chat=? AND task_key=?',(brief['origin_chat_id'],brief['task_key'])).fetchone()
             if row:
                 if row['brief_hash'] != digest(brief): raise ValueError('job_conflict')
+                bind_enqueued(db,row['job_id'],measurement)
                 return envelope(self._job(row))
             identifier, now=uuid.uuid4().hex,time.time()
             route={'wait_until':now+brief['task_requirements']['wait_budget_seconds'],'observed_at':now}
             if assessment: route['assessment']=assessment
             db.execute("INSERT INTO jobs (job_id,chat,task_key,brief_hash,brief,profile,status,reason,fallback,queued_at,route_data) VALUES (?,?,?,?,?,'{}','waiting','waiting_for_slot',?,?,?)",
                        (identifier,brief['origin_chat_id'],brief['task_key'],digest(brief),canonical(brief),canonical(fallback),now,canonical(route)))
+            bind_enqueued(db,identifier,measurement)
             return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(identifier,)).fetchone()))
 
     def waiting_jobs(self, now=None):
@@ -356,6 +360,10 @@ class Store:
                     attempt,status,reason,key,generation=self._slot(db,current,{**loaded,'capacity':limit})
                     if attempt:
                         route.update(observed_at=time.time(),approval_digest=digest(current['approval']),evidence_revision=digest(current.get('assessment',{})),request_bytes=request_bytes)
+                        if db.execute("SELECT 1 FROM sqlite_master WHERE name='measurement_tasks'").fetchone():
+                            if db.execute('SELECT 1 FROM measurement_tasks WHERE job_id=?',(job_id,)).fetchone():
+                                from .measurements import model_binding
+                                route['measurement_binding'] = model_binding(current,executed=True)
                         db.execute('UPDATE jobs SET profile=?,status=?,reason=NULL,attempt_id=?,route_data=? WHERE job_id=?',
                                    (canonical(current),status,attempt,canonical(route),job_id))
                         db.execute('INSERT INTO attempts VALUES (?,?,?,?,?,?)',(attempt,job_id,key,generation,'reserved',canonical({'created':time.time()})))

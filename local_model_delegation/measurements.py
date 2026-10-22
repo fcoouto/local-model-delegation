@@ -131,7 +131,21 @@ def validate_native(binding):
 def _begin(db, task_id, context, job_id=None):
     require(identifier(task_id), 'invalid_measurement_task')
     validate_context(context)
-    require(db.execute('SELECT 1 FROM measurement_projects WHERE project_id=?', (context['project_id'],)).fetchone(), 'unknown_project')
+    project = db.execute('SELECT * FROM measurement_projects WHERE project_id=?', (context['project_id'],)).fetchone()
+    require(project is not None, 'unknown_project')
+    if job_id:
+        from .projects import resolve_project_identity
+        job = db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()
+        require(job is not None,'unknown_job')
+        brief = load_json(job['brief'])
+        require(resolve_project_identity(Path(brief['source_root']))['identity'] == project['identity'], 'measurement_project_mismatch')
+        if brief['schema_version'] == 2:
+            scope = {'capability':brief['capability'], **{k:brief['task_requirements'][k] for k in ('language','complexity','context_bucket')},
+                     'input_bytes':len(canonical({'contract':brief['behavior_contract'],'files':brief['files'],'editable_paths':brief['editable_paths']}).encode()),
+                     'file_count':len(brief['files'])}
+            require(context['scope'] == scope, 'measurement_scope_mismatch')
+        route = load_json(dict(job).get('route_data') or '{}')
+        require(not route.get('assessment') or context['origin'] == 'synthetic_assessment','measurement_origin_mismatch')
     previous = db.execute('SELECT * FROM measurement_tasks WHERE task_id=? OR job_id=?', (task_id, job_id)).fetchone()
     if previous:
         require(previous['task_id'] == task_id and previous['job_id'] == job_id and previous['context'] == canonical(context), 'measurement_conflict')
@@ -147,7 +161,14 @@ def begin_measurement(state_dir: Path, task_id: str, context: dict, job_id=None)
 
 
 def _validate_payload(kind, payload):
-    if kind == 'delivery':
+    if kind == 'local_verdict':
+        fields(payload, {'attempt_id','candidate_hash','checks_hash','accepted','category'})
+        require(identifier(payload['attempt_id']) and sha(payload['candidate_hash']) and sha(payload['checks_hash']))
+        require(type(payload['accepted']) is bool and payload['category'] in ('accepted','semantic','format','framework','source_changed','verification'))
+    elif kind == 'job_observation':
+        fields(payload, {'status','reason','binding','attempts','native_task_id','fallback','queued_at','request_bytes'})
+        require(isinstance(payload['attempts'],list) and isinstance(payload['binding'],dict))
+    elif kind == 'delivery':
         fields(payload, {'outcome','artifact_hash','checks_hash','native_task_id','durations'})
         require(payload['outcome'] in ('unchanged_local','native_edited','native_fallback','not_integrated','native_only'))
         require(sha(payload['artifact_hash']) and sha(payload['checks_hash']))
@@ -162,12 +183,13 @@ def _validate_payload(kind, payload):
         raise ValueError('unsupported_measurement_kind')
 
 
-def _append(db, task_id, receipt):
+def _append(db, task_id, receipt, *, internal=False):
     fields(receipt, {'schema_version','producer','source_key','kind','observed_at','payload'}, {'supersedes'})
     require(type(receipt['schema_version']) is int and receipt['schema_version'] == 1)
     require(identifier(receipt['producer']) and identifier(receipt['source_key']) and number(receipt['observed_at']))
     require(len(canonical(receipt).encode()) <= MAX_ANSWER_BYTES)
     _validate_payload(receipt['kind'], receipt['payload'])
+    require(internal or receipt['kind'] not in ('local_verdict','job_observation'), 'helper_observation_required')
     task = db.execute('SELECT * FROM measurement_tasks WHERE task_id=?', (task_id,)).fetchone()
     require(task is not None, 'unknown_measurement_task')
     previous = db.execute('SELECT * FROM measurement_events WHERE producer=? AND source_key=?',
@@ -192,3 +214,112 @@ def _append(db, task_id, receipt):
 def append_event(state_dir: Path, task_id: str, receipt: dict) -> dict:
     with connection(state_dir, write=True) as db:
         return _append(db, task_id, receipt)
+
+
+def bind_enqueued(db, job_id, context):
+    if context is None: return
+    # Missing optional collection cannot block existing authorization. Reports show the gap.
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE name='measurement_meta'").fetchone(): return
+    require([r[0] for r in db.execute('SELECT version FROM measurement_meta')] == [1], 'unsupported_measurement_version')
+    _begin(db, job_id, context, job_id)
+
+
+def model_binding(profile, *, executed=False):
+    if not profile: return {}
+    return {'profile_id':profile['profile_id'], 'artifact_digest':profile['artifact']['digest'],
+            'runtime_digest':digest((profile.get('approval') or {}).get('model_identity')) if profile.get('approval') else None,
+            'settings_digest':digest(profile['request_settings']), 'helper_digest':helper_digest() if executed else None}
+
+
+def helper_digest():
+    from .contracts import text_hash
+    root = Path(__file__).parent
+    return digest({p.name:text_hash(p.read_text()) for p in sorted(root.glob('*.py'))})
+
+
+def job_observation(db, job_id):
+    row = db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()
+    require(row is not None,'unknown_job')
+    job = dict(row); profile = load_json(job['profile']); route = load_json(job.get('route_data') or '{}')
+    attempts = []
+    for a in db.execute('SELECT * FROM attempts WHERE job_id=? ORDER BY rowid',(job_id,)):
+        data = load_json(a['data'])
+        attempts.append({'attempt_id':a['attempt_id'],'state':a['state'],
+                         **{k:data.get(k) for k in ('submitted_at','finished_at','inference_seconds')}})
+    return {'status':job['status'],'reason':job['reason'],'binding':route.get('measurement_binding',model_binding(profile)),
+            'attempts':attempts,'native_task_id':job['native_task_id'],
+            'fallback': bool(route.get('local_failure') or job['native_task_id'] or job['status'].startswith(('fallback','dispatch'))),
+            'queued_at':job.get('queued_at'),'request_bytes':route.get('request_bytes')}
+
+
+def capture_job_observation(state_dir: Path, job_id: str) -> dict:
+    with connection(state_dir, write=True) as db:
+        task = db.execute('SELECT task_id FROM measurement_tasks WHERE job_id=?',(job_id,)).fetchone()
+        if not task: return {'status':'unscoped'}
+        payload = job_observation(db,job_id)
+        key = job_id+':'+digest(payload)
+        previous = db.execute("SELECT event_id FROM measurement_events WHERE producer='helper' AND source_key=?",(key,)).fetchone()
+        if previous: return {'event_id':previous['event_id']}
+        return _append(db, task['task_id'], {'schema_version':1,'producer':'helper','source_key':key,
+                       'kind':'job_observation','observed_at':time.time(),'payload':payload}, internal=True)
+
+
+def record_local_verdict(state_dir: Path, job_id: str, evidence: dict) -> dict:
+    from .store import atomic_json
+    from .contracts import text_hash
+    with connection(state_dir) as db:
+        task = db.execute('SELECT task_id FROM measurement_tasks WHERE job_id=?',(job_id,)).fetchone()
+        if not task: return {'status':'unscoped'}
+        job = dict(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone())
+        if job['native_task_id'] or not job['attempt_id']: return {'status':'not_local'}
+        require(job['status'] in ('checking','candidate_ready'), 'verdict_not_current')
+        path = Path(job['result_path'])
+        require(not path.is_symlink() and path.resolve().is_relative_to(Path(state_dir).resolve()/'jobs'/job_id), 'unsafe_result')
+        candidate = load_json(path.read_text())
+        require(text_hash(candidate['text']) == candidate['sha256'], 'candidate_hash_mismatch')
+        if evidence['accepted']:
+            attempt = db.execute('SELECT state FROM attempts WHERE attempt_id=?',(job['attempt_id'],)).fetchone()
+            require(attempt['state'] == 'complete','attempt_not_complete')
+    payload = {'attempt_id':job['attempt_id'],'candidate_hash':candidate['sha256'], 'checks_hash':digest(evidence['checks']),
+               'accepted':evidence['accepted'],'category':evidence['category']}
+    receipt = {'schema_version':1,'producer':'helper','source_key':job_id+':verdict:'+digest(payload),
+               'kind':'local_verdict','observed_at':time.time(),'payload':payload}
+    archive = Path(state_dir)/'jobs'/job_id/'measurement-checks'/(digest(payload)+'.json')
+    if archive.exists():
+        saved = load_json(archive.read_text()); require(saved['checks'] == evidence['checks'],'measurement_conflict')
+        receipt = saved['receipt']
+    else:
+        atomic_json(archive, {'receipt':receipt, 'checks':evidence['checks'], 'brief_hash':job['brief_hash']})
+    with connection(state_dir,write=True) as db:
+        return _append(db,task['task_id'],receipt,internal=True)
+
+
+def collect_verdict(state_dir, job_id, checks, accepted, category='verification'):
+    try:
+        record_local_verdict(state_dir,job_id,{'checks':checks,'accepted':accepted,'category':'accepted' if accepted else category})
+    except (OSError,ValueError,sqlite3.Error,KeyError,TypeError):
+        pass  # Missing bound verdict is reported as a coverage gap, never a success.
+
+
+def reconcile_measurements(state_dir: Path) -> dict:
+    with connection(state_dir) as db:
+        tasks = [dict(r) for r in db.execute('SELECT * FROM measurement_tasks WHERE job_id IS NOT NULL')]
+    conflicts = []
+    for task in tasks:
+        try:
+            capture_job_observation(state_dir,task['job_id'])
+            root = Path(state_dir)/'jobs'/task['job_id']/'measurement-checks'
+            require(not root.is_symlink(),'unsafe_measurement_archive')
+            for path in sorted(root.glob('*.json')):
+                require(not path.is_symlink(),'unsafe_measurement_archive')
+                saved = load_json(path.read_text()); receipt = saved['receipt']; payload = receipt['payload']
+                require(path.stem == digest(payload) and payload['checks_hash'] == digest(saved['checks']), 'invalid_measurement_archive')
+                with connection(state_dir,write=True) as db:
+                    job = db.execute('SELECT brief_hash FROM jobs WHERE job_id=?',(task['job_id'],)).fetchone()
+                    require(job['brief_hash'] == saved['brief_hash'], 'invalid_measurement_archive')
+                    require(db.execute('SELECT 1 FROM attempts WHERE job_id=? AND attempt_id=?',
+                                       (task['job_id'],payload['attempt_id'])).fetchone(), 'invalid_measurement_archive')
+                    _append(db,task['task_id'],receipt,internal=True)
+        except (OSError,ValueError,sqlite3.Error,KeyError,TypeError) as error:
+            conflicts.append({'task_id':task['task_id'],'reason':type(error).__name__})
+    return {'tasks':len(tasks),'conflicts':conflicts}
