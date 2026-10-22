@@ -1,6 +1,8 @@
 """Optional presentation through unchanged Habblaud hooks; never execution authority."""
 import http.client
 import re
+import socket
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -11,7 +13,7 @@ from .store import Store, atomic_json, private_dir
 
 ROLES = {'Coordinator', 'Scout', 'Builder', 'Tester', 'Reviewer', 'Scribe', 'Investigator'}
 LIMITATIONS = ['inherited_codex_provider', 'completion_is_not_verification',
-               'labels_may_be_clipped', 'unmeasured_tokens', 'native_statistics_and_world']
+               'labels_may_be_clipped', 'model_stats_unavailable', 'unmeasured_tokens', 'native_statistics_and_world']
 
 
 def thread_id(value):
@@ -76,7 +78,18 @@ class Client:
         body = None if value is None else canonical(value).encode()
         if body is not None and len(body) > 65536: raise ValueError('habblaud_event_too_large')
         deadline = time.monotonic() + 2
+        expired = threading.Event(); timer = response = None
         try:
+            connection.connect()
+            wire = connection.sock
+            def expire():
+                expired.set()
+                try: wire.shutdown(socket.SHUT_RDWR)
+                except OSError: pass
+            remaining = deadline - time.monotonic()
+            if remaining <= 0: raise ValueError('habblaud_timeout')
+            # Capture the socket: HTTP/1.0 responses detach it from the connection.
+            timer = threading.Timer(remaining, expire); timer.daemon = True; timer.start()
             connection.request('GET' if body is None else 'POST', path, body=body,
                                headers={'Content-Type': 'application/json'})
             response = connection.getresponse()
@@ -91,10 +104,14 @@ class Client:
                 if not chunk: break
                 chunks.append(chunk); size += len(chunk)
                 if size > limit: raise ValueError('habblaud_response_too_large')
+            if expired.is_set() or time.monotonic() >= deadline: raise ValueError('habblaud_timeout')
             return load_json(b''.join(chunks).decode('utf-8'))
         except (OSError, http.client.HTTPException, UnicodeError):
-            raise ValueError('habblaud_unavailable') from None
-        finally: connection.close()
+            raise ValueError('habblaud_timeout' if expired.is_set() else 'habblaud_unavailable') from None
+        finally:
+            if timer: timer.cancel()
+            if response: response.close()
+            connection.close()
 
     def snapshot(self, account):
         value = self.request('/api/snapshot')
@@ -149,6 +166,8 @@ def status(state_dir, job_id=None):
         receipt = _read_receipt(state_dir, job_id)
         result['job_id'] = job_id
         result['observation'] = {k: receipt[k] for k in ('state', 'phase', 'error', 'agent_id', 'last_sent_at') if k in receipt}
+        if receipt.get('binding', {}).get('model'):
+            result['observation']['model'] = receipt['binding']['model']
     return result
 
 
@@ -185,8 +204,13 @@ def _binding(store, job_id, target):
         if not isinstance(model, str) or not model.strip() or len(model) > 4096:
             raise ValueError('unsupported_habblaud_label')
         clean = lambda text: ' '.join(''.join(c if c.isprintable() else ' ' for c in text).split())
-        label = ' · '.join(['LOCAL', *([context['role']] if 'role' in context else []), clean(model),
-                            *([clean(context['specialty'])[:48]] if 'specialty' in context else [])])
+        display = job['profile'].get('display_name')
+        if not display:
+            parts = re.split(r'[-_\s]+', model.strip())
+            display = ' '.join(re.sub(r'(\d)b$', r'\1B', part[:1].upper()+part[1:]) for part in parts)
+        if not isinstance(display, str) or not display.strip() or len(display) > 4096:
+            raise ValueError('unsupported_habblaud_label')
+        label = context.get('role', 'Unspecified role')+' · '+clean(display)
         if 'guardian' in label.lower(): raise ValueError('unsupported_habblaud_label')
         if not saved.get('labels_locked'):
             route['habblaud'] = {'context': context, 'labels_locked': True}
@@ -194,14 +218,14 @@ def _binding(store, job_id, target):
     identity = [str(store.root), job_id, job['attempt_id'], target['endpoint'], target['account'], context['coordinator_chat_id']]
     return {'endpoint': target['endpoint'], 'account': target['account'], 'parent': context['coordinator_chat_id'],
             'agent_id': str(uuid.uuid5(uuid.NAMESPACE_URL, canonical(identity))), 'label': label,
-            'cwd': job['brief']['source_root']}
+            'cwd': job['brief']['source_root'], 'model': model}
 
 
 def _event(binding, name, phase=None):
     value = {'hook_event_name': name, 'session_id': binding['parent'], 'agent_id': binding['agent_id'],
              'agent_type': binding['label'], 'cwd': binding['cwd']}
     if phase is not None:
-        value.update(tool_name='LOCAL: '+phase, tool_use_id=binding['agent_id']+':'+phase, tool_input={})
+        value.update(tool_name=phase, tool_use_id=binding['agent_id']+':'+phase, tool_input={})
     return value
 
 

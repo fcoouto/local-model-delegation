@@ -35,3 +35,14 @@ At completion or a pause, report **verified**, **pending/blocked**, **routing st
 For updates, follow the [guided update procedure](../../docs/updating.md), including release staging, private backup, native installation and verification. For removal, follow [Setup operations](references/operations.md) before native plugin controls.
 
 Fresh authorized setup also initializes private measurement tables. Existing installations use `metrics init` after authorized update; see [measurements](../local-delegation/references/measurements.md). Reports and comparison registrations do not approve models, authorize extra inference, or enable routing. Missing native telemetry means savings remain unknown.
+
+
+## Optional Habblaud appearance
+
+When the owner requests this integration, read
+[the visibility guide](../local-delegation/references/visibility.md) for the exact
+commands, metadata handoff and limitations. Reuse `habblaud status` and saved
+settings; do not enable hooks merely because Habblaud or Vibe Setup is installed.
+Habblaud stays unchanged. Vibe Setup owns assignment role/specialty policy; this
+plugin owns context storage, transport and observation. Setup for appearance never
+approves a model, activates routing or changes native authentication/settings.

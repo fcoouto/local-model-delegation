@@ -13,7 +13,7 @@ class Receiver:
     def __init__(self):
         self.events, self.agents = [], {}
         self.accounts = [{'id': '.codex', 'provider': 'codex'}]
-        self.reject = self.drop_ack = False
+        self.reject = self.drop_ack = self.drip_headers = False
         self.get_status, self.raw, self.delay = 200, None, 0
         owner = self
 
@@ -22,7 +22,14 @@ class Receiver:
 
             def send(self, status, value):
                 data = json.dumps(value).encode() if owner.raw is None else owner.raw
-                self.send_response(status)
+                if owner.drip_headers:
+                    try:
+                        self.wfile.write(b'HTTP/1.0 200 OK\r\nX-Drip: ')
+                        for _ in range(7):
+                            self.wfile.write(b'x'); self.wfile.flush(); time.sleep(.5)
+                        self.wfile.write(b'\r\n')
+                    except (BrokenPipeError, ConnectionResetError): return
+                else: self.send_response(status)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(data)))
                 self.send_header('Location', '/redirected')
@@ -42,7 +49,7 @@ class Receiver:
                 if not owner.reject:
                     if e['hook_event_name'] == 'SubagentStart':
                         owner.agents[key] = {'id': key, 'sessionId': e['agent_id'], 'status': 'working',
-                                             'role': e['agent_type'], 'parentId': body['account'] + ':' + e['session_id']}
+                                             'role': e.get('agent_type', 'Subagente'), 'parentId': body['account'] + ':' + e['session_id']}
                     elif e['hook_event_name'] == 'SubagentStop' and key in owner.agents:
                         owner.agents[key]['status'] = 'done'
                 if owner.drop_ack:

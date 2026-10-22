@@ -63,6 +63,7 @@ Read the [onboarding guide](docs/onboarding.md) for the agent's workflow and [on
 - Stages proposals for protected Python checks or trusted native verification. The helper never applies project files.
 - Keeps exact native fallback settings and durable dispatch claims. Ambiguous dispatch is reconciled, never blindly repeated.
 - Exports optional read-only task visibility, enabled by default independently of routing. No viewer is required.
+- Optionally shows actual local attempts under their coordinator in unchanged Habblaud through existing hooks. Supports local npm/Docker endpoints with Role · Model Display Name badges for local attempts. Existing hooks cannot populate local Stats → Model. [Enablement, metadata and limitations](skills/local-delegation/references/visibility.md#habblaud-through-existing-hooks).
 
 The objective is lower native usage without lower quality. **No net subscription saving is qualified yet.** Token differences are labelled proxies and include coordination, verification and fallback overhead.
 
@@ -107,7 +108,7 @@ The plugin does not scan ports or automatically locate the server. Select its lo
 
 Only the `lmstudio_v1` adapter is implemented. It uses the native `/api/v1/models` and `/api/v1/chat` APIs plus the owner-trusted local model index. GGUF, MLX and Splash text models can be assessment candidates; discovery does not qualify or approve them. Other inference platforms are unsupported, even when they offer OpenAI-compatible chat endpoints. They need adapters with verified discovery, identity, progress, capacity and lifecycle behavior. Current endpoints accept only `http` on literal `127.0.0.1` or `::1`; remote servers, non-text tasks and unrestricted model tools are outside this version.
 
-Numbered updates follow the [guided update procedure](docs/updating.md). `prepare-update --target PATH` backs up settings, approvals and history, binds the target package digest, and refuses unsettled work. `verify-update --receipt FILE` checks the installed bytes and preserved state. Detached workers use content-addressed helper bundles outside mutable plugin caches; retain those bundles while jobs depend on them. No database rollback command can erase newer history. `prepare-uninstall` disables admission and removes the current visibility export only after work settles; models, history and visibility preference remain. Native package removal follows that preparation.
+Numbered updates follow the [guided update procedure](docs/updating.md). `prepare-update --target PATH` backs up settings, approvals and history, binds the target package digest, and refuses unsettled work. `verify-update --receipt FILE` checks the installed bytes and preserved state. Detached workers use content-addressed helper bundles outside mutable plugin caches; retain those bundles while jobs depend on them. No database rollback command can erase newer history. `prepare-uninstall` disables admission and removes the current visibility export only after work settles; models, history and visibility preference remain. Native package removal follows that preparation. Update/uninstall preparation also disables Habblaud publishing and waits for its owned observers; explicitly re-enable it after an update if wanted.
 
 ## Contracts and trust
 

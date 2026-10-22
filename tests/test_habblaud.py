@@ -114,15 +114,15 @@ class Habblaud(Fixture):
             db.execute('UPDATE attempts SET state=? WHERE attempt_id=?', (attempt, job['attempt_id']))
             db.execute('UPDATE jobs SET status=?,native_task_id=? WHERE job_id=?', (status, native, job['job_id']))
 
-    def test_observer_labels_actual_model_and_sends_only_changed_activity(self):
+    def test_observer_labels_assignment_and_sends_only_changed_activity(self):
         from local_model_delegation.habblaud import Observer
         receiver, store, job, now = self.active(); observer = Observer(self.state, job['job_id'])
         self.assertTrue(observer.step(now))
         events = [e['event'] for e in receiver.events]
         self.assertEqual([e['hook_event_name'] for e in events], ['SubagentStart', 'PreToolUse'])
-        self.assertEqual(events[0]['agent_type'], 'LOCAL · Reviewer · fictional-model · Security')
+        self.assertEqual(events[0]['agent_type'], 'Reviewer · Fictional Model')
         self.assertEqual(events[0]['session_id'], PARENT)
-        self.assertEqual(events[1]['tool_name'], 'LOCAL: Starting')
+        self.assertEqual(events[1]['tool_name'], 'Starting')
         observer.step(now+1); self.assertEqual(len(receiver.events), 2)
         observer.step(now+21)
         self.assertEqual(receiver.events[-1]['event']['hook_event_name'], 'SessionStart')
@@ -136,9 +136,9 @@ class Habblaud(Fixture):
         receiver, store, job, now = self.active(); observer = Observer(self.state, job['job_id'])
         observer.step(now)
         self.job_phase(store, job, 'candidate_ready'); observer.step(now+1)
-        self.assertEqual(receiver.events[-1]['event']['tool_name'], 'LOCAL: Awaiting verification')
+        self.assertEqual(receiver.events[-1]['event']['tool_name'], 'Awaiting verification')
         self.job_phase(store, job, 'accepted'); self.assertFalse(observer.step(now+2))
-        self.assertEqual(receiver.events[-2]['event']['tool_name'], 'LOCAL: Verified')
+        self.assertEqual(receiver.events[-2]['event']['tool_name'], 'Verified')
         self.assertEqual(receiver.events[-1]['event']['hook_event_name'], 'SubagentStop')
         self.assertNotIn('SessionEnd', [e['event']['hook_event_name'] for e in receiver.events])
         count = len(receiver.events); self.assertFalse(Observer(self.state, job['job_id']).step(now+3))
@@ -150,8 +150,9 @@ class Habblaud(Fixture):
         observer.step(now)
         self.job_phase(store, job, 'accepted', 'uncertain', '/root/native')
         self.assertFalse(observer.step(now+1))
-        self.assertEqual(receiver.events[-2]['event']['tool_name'], 'LOCAL: Execution status unknown')
-        self.assertIn('fictional-model', receiver.events[-1]['event']['agent_type'])
+        self.assertEqual(receiver.events[-2]['event']['tool_name'], 'Execution status unknown')
+        self.assertEqual(receiver.events[-1]['event']['agent_type'], 'Reviewer · Fictional Model')
+        self.assertEqual(observer.receipt['binding']['model'], 'fictional-model')
         self.assertNotIn('Verified', json.dumps(receiver.events))
         self.assertEqual(store.attempt(job['attempt_id'])['state'], 'uncertain')
 
@@ -181,7 +182,7 @@ class Habblaud(Fixture):
         self.assertEqual(sum(e['event']['hook_event_name']=='SubagentStart' for e in receiver.events), 1)
         receiver.agents.clear(); observer.step(now+42)
         self.assertEqual(list(receiver.agents), [identity])
-        self.assertEqual(receiver.events[-1]['event']['tool_name'], 'LOCAL: Starting')
+        self.assertEqual(receiver.events[-1]['event']['tool_name'], 'Starting')
 
     def test_rebind_retires_old_child_and_label_freeze_rejects_conflict(self):
         from local_model_delegation.habblaud import Observer, bind_context
@@ -222,7 +223,8 @@ class Habblaud(Fixture):
         from local_model_delegation.habblaud import Observer, bind_context, status
         receiver, store, job, now = self.active()
         with store.db(write=True) as db:
-            bind_context(db, job['job_id'], {**CONTEXT, 'specialty':'Guardian'}, rebind=True)
+            profile = store.job(job['job_id'])['profile']; profile['display_name'] = 'Guardian'
+            db.execute('UPDATE jobs SET profile=? WHERE job_id=?', (json.dumps(profile), job['job_id']))
         self.assertFalse(Observer(self.state, job['job_id']).step(now))
         self.assertEqual(receiver.events, [])
         self.assertEqual(status(self.state, job['job_id'])['observation']['error'], 'unsupported_habblaud_label')
@@ -318,13 +320,15 @@ class Habblaud(Fixture):
             Client(receiver.endpoint).event('.codex', {'hook_event_name':'SubagentStart',
                 'session_id':PARENT,'agent_id':OTHER_PARENT,'agent_type':'LOCAL'})
 
-    def test_actual_model_stays_full_while_specialty_is_shortened(self):
+    def test_badge_uses_saved_model_display_name_and_keeps_specialty_separate(self):
         from local_model_delegation.habblaud import Observer, bind_context
         receiver, store, job, now = self.active()
         with store.db(write=True) as db:
             bind_context(db,job['job_id'],{'coordinator_chat_id':PARENT,'specialty':'x'*100},rebind=True)
+            profile = store.job(job['job_id'])['profile']; profile['display_name'] = 'Qwen3.8 27B Splash'
+            db.execute('UPDATE jobs SET profile=? WHERE job_id=?', (json.dumps(profile), job['job_id']))
         Observer(self.state,job['job_id']).step(now)
-        self.assertEqual(receiver.events[0]['event']['agent_type'], 'LOCAL · fictional-model · '+'x'*48)
+        self.assertEqual(receiver.events[0]['event']['agent_type'], 'Unspecified role · Qwen3.8 27B Splash')
         self.assertEqual(store.job(job['job_id'])['route_data']['habblaud']['context']['specialty'], 'x'*100)
 
     def test_update_quiesces_observer_before_preservation_snapshot(self):
@@ -354,3 +358,49 @@ class Habblaud(Fixture):
             if start.get('pid'):
                 try: os.waitpid(start['pid'],0)
                 except ChildProcessError: pass
+
+
+    def test_missing_assignment_uses_habblaud_default_without_invented_labels(self):
+        from local_model_delegation.habblaud import Observer, bind_context, status
+        receiver,store,job,now = self.active()
+        with store.db(write=True) as db: bind_context(db,job['job_id'],{'coordinator_chat_id':PARENT},rebind=True)
+        observer = Observer(self.state,job['job_id']); observer.step(now)
+        self.assertEqual(receiver.events[0]['event']['agent_type'], 'Unspecified role · Fictional Model')
+        self.assertNotIn('model',receiver.events[0]['event'])
+        observer.step(now+21)
+        self.assertEqual(status(self.state,job['job_id'])['observation']['model'],'fictional-model')
+        self.assertEqual(status(self.state,job['job_id'])['observation']['state'],'active')
+
+    def test_display_name_fallback_formats_actual_identifier_without_changing_it(self):
+        from local_model_delegation.habblaud import Observer
+        receiver, store, job, now = self.active()
+        profile = store.job(job['job_id'])['profile']; profile['model_id'] = 'qwen3.8-27b-splash'
+        with store.db(write=True) as db:
+            db.execute('UPDATE jobs SET profile=? WHERE job_id=?', (json.dumps(profile), job['job_id']))
+        observer = Observer(self.state, job['job_id']); observer.step(now)
+        self.assertEqual(receiver.events[0]['event']['agent_type'], 'Reviewer · Qwen3.8 27B Splash')
+        self.assertEqual(observer.receipt['binding']['model'], 'qwen3.8-27b-splash')
+        self.assertEqual(store.job(job['job_id'])['profile'], profile)
+
+    def test_drip_fed_headers_respect_total_transport_deadline(self):
+        from local_model_delegation.habblaud import Client
+        receiver = self.receiver(); receiver.drip_headers = True
+        start = time.monotonic()
+        with self.assertRaises(ValueError): Client(receiver.endpoint).snapshot('.codex')
+        self.assertLess(time.monotonic()-start, 2.8)
+
+    def test_duplicate_context_conflict_returns_real_job_and_visibility_diagnostic(self):
+        from local_model_delegation.cli import submit_task
+        receiver, store, job, now = self.active()
+        before = store.job(job['job_id']); attempt = store.attempt(job['attempt_id'])
+        brief_path, context_path = self.root/'brief.json', self.root/'context.json'
+        atomic_json(brief_path, before['brief'])
+        atomic_json(context_path, {**CONTEXT, 'coordinator_chat_id':OTHER_PARENT})
+        result = submit_task(self.state, brief_path, visibility_path=context_path)
+        self.assertEqual(result['job_id'], job['job_id'])
+        self.assertEqual(result['attempt_id'], job['attempt_id'])
+        self.assertEqual(result['status'], before['status'])
+        self.assertEqual(result['visibility']['error'], 'visibility_context_conflict')
+        self.assertEqual(store.job(job['job_id']), before)
+        self.assertEqual(store.attempt(job['attempt_id']), attempt)
+        self.assertEqual(receiver.events, [])

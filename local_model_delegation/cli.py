@@ -45,7 +45,7 @@ def submit_task(state_dir, path, measurement_path=None, visibility_path=None):
                            visibility=read_input(visibility_path) if visibility_path else None)
     from .scheduler import schedule_once
     schedule_once(state_dir)
-    result = envelope(store.job(result["job_id"]))
+    result = {**result, **envelope(store.job(result["job_id"]))}
     if result["status"] == "waiting" and result["reason"] != "route_decision_required":
         from .worker import launch
         launch(state_dir, "scheduler", "queue")

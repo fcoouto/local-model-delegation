@@ -2,13 +2,13 @@
 
 Date: 2026-10-22
 
-Status: **Design revised; isolated Docker and npm feasibility tests passed. The production adapter is not implemented or enabled.**
+Status: **Adapter implemented and verified: 286 plugin tests passed, including 31 adapter tests; final Role · Model Display Name badges passed isolated Docker/npm browser checks. Both Important review findings fixed with regression tests. Not installed or enabled in the live setup.**
 
-Owner decision: show local work as a character under its coordinator, use Habblaud's existing hooks, and leave Habblaud unchanged. This replaces the earlier file-reader and UI-change proposal.
+Owner decision: show local work as a character under its coordinator, use Habblaud's existing hooks, and leave Habblaud unchanged. The later owner instruction in the coordinated Vibe chat supersedes the original composite label: the local badge uses exactly Role · Model Display Name, without LOCAL. Specialty stays separate assignment metadata, and missing local Stats → Model is accepted. This replaces the earlier file-reader and UI-change proposal.
 
 ## Outcome and ownership
 
-Local Model Delegation will translate real local attempt observations into Habblaud's existing Codex hook events. A child carries an explicit `LOCAL` label, assignment role, actual model and optional short specialty. The plugin remains authoritative for execution, uncertainty, verification and acceptance.
+Local Model Delegation translates real local attempt observations into Habblaud's existing Codex hook events. A child badge carries the assignment role and saved local model display name. Specialty stays in assignment metadata and actual local model identity remains in plugin status; unchanged Habblaud hooks cannot populate Stats → Model. The plugin remains authoritative for execution, uncertainty, verification and acceptance.
 
 This chat owns `local-model-delegation`. The **Assess Habblaud agent roles** chat (`01a16391-ad85-72c0-a50c-ade0215b32df`) owns Vibe Setup's role policy, declaration guard and setup instructions. Its proposed contract has been read and coordinated; no Vibe Setup files are changed here. Habblaud source, native hooks, accounts and deployment configuration remain unchanged.
 
@@ -55,17 +55,31 @@ Canonical case-sensitive roles: `Coordinator`, `Scout`, `Builder`, `Tester`, `Re
 
 Carry the same declared pair through local execution and native fallback. Metadata never changes model, provider, reasoning, routing, permissions or acceptance. Native fallback appears through Habblaud's native ingestion; the adapter creates no synthetic native replacement.
 
-Proposed label:
+Final label:
 
 ```text
-LOCAL · Reviewer · qwen3.8-27b-splash · Security-sensitive work
+Reviewer · Qwen3.8 27B Splash
 ```
 
-`LOCAL` comes first because the sidebar ellipsizes from the right. Preserve role and actual model before specialty. Keep full specialty in private metadata; shorten only its displayed suffix, to at most 48 printable characters. Collapse display whitespace and strip control characters. Reject malformed role metadata; omit missing values without guessing. Retain the full model identifier in hook/hover/accessibility text. Visibility without hover depends on Habblaud's existing layout.
+The local badge uses exactly `Role · Model Display Name`, without LOCAL. Use the saved
+local profile's `display_name` when present; otherwise split the actual `model_id` on
+hyphens/underscores/whitespace, capitalize each token's first character and uppercase
+a trailing numeric `b`. Preserve all other identifier content. Thus
+`qwen3.8-27b-splash` becomes `Qwen3.8 27B Splash`. Clean display whitespace/control
+characters only. This does not change the saved model ID or permit caller-selected
+model claims. Specialty remains stored separately. Missing role uses display-only
+`Unspecified role`, never inferred or stored as canonical metadata. The first
+observer binding freezes assignment labels before any network attempt. Habblaud may
+visually ellipsize the badge; full text remains accessible.
 
-Derive the model from the original local attempt, retaining it after fallback. Never replace it with the native fallback model or treat a display alias as identity evidence. The model above is illustrative; tests used `fixture-qwen` without inference.
+Retain the saved local profile after fallback and expose its actual model ID through
+plugin status. Habblaud's existing Stats → Model reads `AgentInfo.model`, populated
+for Codex by parsed native rollout context. Hook events ignore `model`, and no
+supported Codex model-update HTTP route was found. Do not fabricate rollouts or
+promise Stats model delivery. The owner accepted this gap while Habblaud remains
+unchanged. Vibe Setup owns native declaration formatting and role/specialty policy.
 
-Habblaud rejects `agent_type` containing `guardian`, case-insensitively. Report an incompatible composite label as unsupported rather than silently claiming delivery or mislabeling the model. Include receiver constraints in the compatibility check.
+Habblaud rejects `agent_type` containing `guardian`, case-insensitively. Report an incompatible composite label as unsupported rather than silently claiming delivery or claiming unsupported label delivery. Include receiver constraints in the compatibility check.
 
 Vibe Setup explicitly configures role/specialty when preparing assignments. For current strict schema-2 briefs, its documented fallback places labels in `behavior_contract` before submission. These are task instructions, not structured presentation metadata. The adapter consumes a separate explicit pair through its supported interface; it never guesses by parsing prose.
 
@@ -83,7 +97,7 @@ Proposed operations, with exact command spelling left to implementation:
 
 Context contains `coordinator_chat_id` and optional `role`/`specialty`. Validate UUID, exact vocabulary, and nonblank specialty of at most 4,096 characters. Reject unknown keys. Derive actual model/provider from the attempt rather than accepting caller claims. Apply existing bounded file-read discipline and private permissions.
 
-Persist context outside the brief hash/idempotency key. Preserve `origin_chat_id`, `task_key`, brief contents and acceptance evidence. Resuming in another chat changes only presentation binding. Freeze assignment labels at first appearance; conflicting later metadata produces a diagnostic rather than a claimed relabel. Visibility failure after submission returns the real job result with a diagnostic, never a false submission failure that encourages duplicates.
+Persist context outside the brief hash/idempotency key. Preserve `origin_chat_id`, `task_key`, brief contents and acceptance evidence. Resuming in another chat changes only presentation binding. Freeze assignment labels at the first observer binding; conflicting later metadata produces a diagnostic rather than a claimed relabel. Visibility failure after submission returns the real job result with a diagnostic, never a false submission failure that encourages duplicates.
 
 Persist a synthetic UUID per attempt and coordinator/account binding. It is a display identity, not a genuine spawned Codex thread. Repeated events use that ID. Habblaud cannot reliably reparent an existing tracker: retire the old display entry and allocate a new binding ID on explicit rebind. The old entry may remain during its normal departure grace. Preserve the underlying attempt identity separately.
 
@@ -98,25 +112,25 @@ Start when a real attempt reaches `submitting`, after execution preconditions pa
 | Plugin evidence | Hook behavior | Meaning and limit |
 | --- | --- | --- |
 | No started local attempt | No child | No fabricated worker |
-| Submitting/streaming with valid execution observation | `SubagentStart`, descriptive `PreToolUse` | Starting/generating; actual model in fixed label |
-| Candidate ready or checking that candidate | Descriptive `PreToolUse` | `LOCAL: Awaiting verification`; generic Habblaud working state remains |
+| Submitting/streaming with valid execution observation | `SubagentStart`, descriptive `PreToolUse` | Starting/generating; fixed role/model display badge |
+| Candidate ready or checking that candidate | Descriptive `PreToolUse` | `Awaiting verification`; generic Habblaud working state remains |
 | Same observed phase | `SessionStart` with parent and child UUIDs | Refresh without repeated activity |
 | Local candidate accepted | Verified activity, then `SubagentStop` | Acceptance evidence comes from the plugin |
 | Failure, uncertainty, stale execution evidence, reassessment or fallback | Best-effort outcome activity, then `SubagentStop`; exit observer | Habblaud still uses completion appearance; plugin retains true outcome |
 | Disable or observer loss | Stop on controlled exit; otherwise expiry | May look completed without confirmed task completion |
 
-Use descriptive synthetic tool names such as `LOCAL: Generating` and `LOCAL: Awaiting verification`, with no command/tool payload. The tested UI renders `Using LOCAL: Generating`. This is presentation translation, not an executed Codex tool. Never send fake permission requests or claim native tool counts. Use child `SubagentStop`, never `SessionEnd`, which can close the parent.
+Use descriptive synthetic tool names such as `Generating` and `Awaiting verification`, with no command/tool payload. The tested UI renders `Using Generating`. This is presentation translation, not an executed Codex tool. Never send fake permission requests or claim native tool counts. Use child `SubagentStop`, never `SessionEnd`, which can close the parent.
 
 Generation freshness follows existing attempt progress/stale tolerance, not publisher heartbeat. Candidate-ready/checking means verification is pending, not inference running; retain that explicit phase until the job advances or visibility is disabled. Unknown local attempt state overrides overall native success. Read the saved local profile even after fallback changes the effective route and the existing export's displayed model.
 
 Terminal observations end the observer. Status/bind/resume may restart a missing observer for relevant local work without replaying historical terminal work. Reuse the display ID across receiver restarts. Do not repeatedly send `SubagentStart` after successful registration: resend only when the snapshot lacks the live entry or after confirmed receiver restart, then restore the observed phase.
 
-Failed/slow requests record a compact diagnostic and leave work unchanged. Proposed bounds: two seconds per request, no redirects, bounded responses, retries with backoff capped at 20 seconds. Accept only loopback HTTP in this first version. Remote hosts, proxies, credentials and TLS deployment are outside scope. Forward no prompts, code, candidate text, raw errors, tokens, transcripts or secrets. Role/specialty must be non-sensitive labels. Document the project path used for room association as metadata shared with Habblaud.
+Failed/slow requests record a compact diagnostic and leave work unchanged. Bounds: two seconds total per request, including slow headers and body, no redirects, bounded responses, retries with backoff capped at 20 seconds. Accept only loopback HTTP in this first version. Remote hosts, proxies, credentials and TLS deployment are outside scope. Forward no prompts, code, candidate text, raw errors, tokens, transcripts or secrets. Role/model display names must be non-sensitive labels. The model display name is sent in the hook badge; its original ID remains in private plugin diagnostics. Specialty is retained locally. Document the project path used for room association as metadata shared with Habblaud.
 
 ## Limits of unchanged Habblaud
 
-1. Codex provider/account icons and ordinary controls remain. `LOCAL` is textual identification, not a separate provider type.
-2. The event's `model` is ignored. Model text lives in the role label and may be clipped visually. Zero token counters are unmeasured, not proof of zero usage.
+1. Codex provider/account icons and ordinary controls remain. There is no local provider marker in the requested badge format.
+2. The event's `model` is ignored. Local Stats → Model remains unavailable; the badge shows its display name and plugin status retains the actual local model ID. Zero token counters are unmeasured, not proof of zero usage.
 3. Stop, interrupt, parent closure and expiry lead to `done`/delivery behavior. No neutral removal or accurate failed/unknown terminal state exists. Completion can immediately replace the final descriptive activity; do not depend on that text persisting.
 4. Entries can affect agent counts, daily statistics and World projection. Hooks cannot selectively exclude them. Respect the existing World setting; enabling this integration does not change it. Private-only local visibility while World remains on is unsupported by this approach.
 5. First roles/parents are sticky. Rebinding creates a new display entry, not a seamless move.
@@ -132,7 +146,7 @@ Tests used disposable fixture accounts, project/state directories, World/update 
 | --- | --- | --- |
 | Start unmodified 1.0.3 and ingest HTTP hooks | Passed | Passed |
 | Fixture child attached to explicit coordinator | Passed | Passed |
-| Full LOCAL/role/model/specialty in snapshot, Chromium DOM and accessible label | Passed | Passed |
+| Requested badge in snapshot, Chromium DOM and accessible label | Passed | Passed |
 | Character visible; sidebar clipping inspected | Passed | Passed |
 | Duplicate start creates one child | Passed | Passed |
 | Generating/awaiting-verification activity | Passed | Passed |
@@ -148,6 +162,25 @@ npm used `npm run start` against an isolated copy of the installed image's `/app
 - Runtime build metadata: commit `unknown`, built 2026-10-17. Do not claim it was compiled from the inspected source revision.
 - Separately: checkout Codex source/HTTP suites passed 34 tests; plugin visibility/acceptance suites passed 12 tests. The Vibe chat separately tested all seven canonical roles and first-label behavior.
 
+The final adapter run used the public enable/bind/resume/status/disable commands and
+its actual detached runtime. Both modes showed `Reviewer · Fictional Model` beneath
+the fixture coordinator, exposed the full badge in DOM/accessibility text, avoided
+duplicates after repeated resume, showed `Awaiting verification`, stayed present for
+66 seconds, and stopped the child after accepted fixture state. Plugin status kept
+`fictional-model`; Habblaud's model field remained absent as expected. Browser
+screenshots confirmed the existing sidebar clipping. The exact Qwen formatting
+example and saved display-name precedence passed unit tests.
+
+Final adapter module SHA-256:
+`bff8b7d95d090549d45eb47530d5a4c6ce026189cdb25e4fe07c698ac5cd5d40`.
+The full plugin suite passed 286 tests (31 adapter tests). One independent
+whole-branch review found two Important defects: slow headers could exceed the
+request deadline, and a duplicate context conflict hid a running job's IDs. Both
+were reproduced before fixes and passed afterward. Requests now have an absolute
+two-second socket deadline; duplicate conflicts preserve the real job envelope and
+return `visibility.error: "visibility_context_conflict"`. Documentation scenario
+checks verified context, account lookup, display-name source and recovery guidance.
+
 Raw probe scripts, reports, screenshots and logs remain private evaluation evidence outside Git. They contain fixture names and ephemeral ports, not a shipped test framework. Disposable services were stopped after testing.
 
 ## Implementation work and gates
@@ -159,4 +192,4 @@ Raw probe scripts, reports, screenshots and logs remain private evaluation evide
 
 Stop once these gates pass. Do not add Habblaud patches, an always-on daemon, new provider types, token estimates, custom art, a roster or routing/fallback control. Rollback disables publishing and removes only plugin-owned presentation configuration/processes; jobs/inference remain intact. Existing entries may remain until Habblaud's departure/expiry grace completes.
 
-The spike proves transport and appearance only. Production integration, packaging, restart/failure tests, real local inference and fresh-install npm compatibility remain implementation work.
+The adapter now has production integration, detached-runtime packaging, restart/failure tests and isolated Docker/npm browser evidence. Real local inference and fresh-install npm compatibility were not tested; no live installation/settings were changed. The implementation plan records tests and review gates.

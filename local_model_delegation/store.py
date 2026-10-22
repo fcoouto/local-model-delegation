@@ -321,9 +321,13 @@ class Store:
             if row:
                 if row['brief_hash'] != digest(brief): raise ValueError('job_conflict')
                 bind_enqueued(db,row['job_id'],measurement)
-                bind_context(db,row['job_id'],visibility)
+                diagnostic = {}
+                try: bind_context(db,row['job_id'],visibility)
+                except ValueError as exc:
+                    if str(exc) != 'visibility_context_conflict': raise
+                    diagnostic = {'visibility': {'error': 'visibility_context_conflict'}}
                 row=db.execute('SELECT * FROM jobs WHERE job_id=?',(row['job_id'],)).fetchone()
-                return envelope(self._job(row))
+                return {**envelope(self._job(row)), **diagnostic}
             identifier, now=uuid.uuid4().hex,time.time()
             route={'wait_until':now+brief['task_requirements']['wait_budget_seconds'],'observed_at':now}
             if assessment: route['assessment']=assessment
