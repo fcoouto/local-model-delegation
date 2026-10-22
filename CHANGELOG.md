@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 (unreleased)
+
+- Separate explicit provisional operating budgets from observed fixture sizes. Add `profile approve` for owner-authorized practical scopes without inventing qualification or savings evidence.
+- Default loaded-model admission to one shared slot. Replace free-memory and zero-swap vetoes with fresh pressure checks; warning is advisory and critical/unknown readings defer admission.
+- Check full supplied prompt, output allowance and conservative template headroom against runtime context before reserving and before POST.
+- Simplify onboarding around a few representative project tasks with native verification and fallback; retain optional synthetic experiments and historical evidence.
+
 ## 0.3.1 (unreleased)
 
 - Remove the circular savings prerequisite from exact-model approval and scheduling. Verified capability, capacity, owner approval and scope remain required; unknown savings stay unknown while ordinary authorized work supplies evidence.

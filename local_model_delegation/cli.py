@@ -89,8 +89,11 @@ def main(argv=None):
     p.add_argument("--candidate", type=Path)
     p.add_argument("--listing", type=Path)
     p = commands.add_parser("profile")
-    p.add_argument("action", choices=["inspect"])
-    p.add_argument("--file", type=Path, required=True)
+    p.add_argument("action", choices=["inspect", "approve"])
+    p.add_argument("--file", type=Path)
+    p.add_argument("--profile-id")
+    p.add_argument("--owner-reference")
+    p.add_argument("--scope", type=Path)
     p = commands.add_parser("verify")
     p.add_argument("action", choices=["prepare", "checks", "record"])
     p.add_argument("--job", required=True)
@@ -193,6 +196,9 @@ def main(argv=None):
             elif args.action == "trial": result = record_trial(args.state_dir, args.assessment_id, read_input(args.receipt))
             else: result = approve_assessment(args.state_dir, args.assessment_id, args.owner_reference, read_input(args.scope))
         elif args.command == "submit": result = submit_task(args.state_dir, args.brief, args.measurement_context)
+        elif args.command == "profile" and args.action == 'approve':
+            from .onboarding import approve_scope
+            result = approve_scope(args.state_dir, args.profile_id, args.owner_reference, read_input(args.scope))
         elif args.command == "profile":
             profile = read_input(args.file)
             if profile.get("schema_version") != 2: raise ValueError("invalid_profile")

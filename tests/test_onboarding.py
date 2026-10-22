@@ -118,13 +118,13 @@ class Onboarding(Fixture):
         self.assertEqual(approved['approval']['scope'], report['tested_scope'])
         self.assertNotIn('benefit_evidence', approved)
 
-    def test_unknown_savings_does_not_bypass_quality_capacity_or_identity(self):
+    def test_single_slot_does_not_require_calibration_but_fixture_quality_and_identity_still_matter(self):
         module = self.module(); profile = self.setup_policy()
         assessment = module.begin_assessment(self.state, 'fictional', 'fixture-standing-consent')
         assessment['receipts'] = {t['trial_id']: {'passed': True} for t in assessment['trials']}
         path = self.state/'assessments'/assessment['assessment_id']/'assessment.json'
         atomic_json(path, assessment)
-        self.assertEqual(module.assessment_report(self.state, assessment['assessment_id'])['recommendation'], 'do_not_approve_yet')
+        self.assertEqual(module.assessment_report(self.state, assessment['assessment_id'])['recommendation'], 'approve_provisional_scope')
         profile['capacity_evidence'] = {'qualified': True}
         atomic_json(self.state/'profiles/fictional.json', profile)
         for receipt in assessment['receipts'].values(): receipt['passed'] = False

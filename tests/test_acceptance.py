@@ -44,7 +44,7 @@ class BroadAcceptance(Fixture):
                         threads=[]
                         def start(state,attempt):
                             thread=threading.Thread(target=run_local_attempt,args=(state,attempt));threads.append(thread);thread.start()
-                        with patch('local_model_delegation.capacity.machine_snapshot',side_effect=fixture.resources), \
+                        with patch('local_model_delegation.capacity.pressure_snapshot',side_effect=fixture.resources), \
                              patch('local_model_delegation.worker.start_worker',side_effect=start), \
                              patch('local_model_delegation.visibility.atomic_json',side_effect=OSError('fixture')) if mode=='failed' else nullcontext():
                             schedule_once(fixture.state,fixture.resources())

@@ -91,6 +91,15 @@ def build_model_request(brief, profile, instance_id):
             **profile["request_settings"], "stream": True, "store": False}
 
 
+def context_fits(brief, profile, loaded):
+    body = build_model_request(brief, profile, loaded['instance_id'])
+    context = loaded.get('config', {}).get('context_length')
+    # shortcut: HTTP has no qualified tokenizer; UTF-8 bytes plus template headroom
+    # conservatively screen these text models. Qualify exact tokenization before relaxing this bound.
+    input_bound = len((body['system_prompt'] + body['input']).encode('utf-8')) + 2048
+    return type(context) is int and input_bound + body['max_output_tokens'] <= context
+
+
 def run_local_attempt(state_dir, attempt_id):
     store = Store(state_dir)
     with ownership(store, "attempt-" + attempt_id) as owned:
@@ -106,6 +115,10 @@ def run_local_attempt(state_dir, attempt_id):
         except (ValueError, OSError):
             store.transition(attempt_id, generation, "reserved", "released", {})
             store.select_fallback(job["job_id"], "approval_changed")
+            return 1
+        if not context_fits(job['brief'], current, store.instance(attempt['instance_key'])['data']):
+            store.transition(attempt_id, generation, "reserved", "released", {})
+            store.select_fallback(job['job_id'], "context_budget_exceeded")
             return 1
         if not store.submission_resources_available(job):
             store.transition(attempt_id, generation, "reserved", "released", {})

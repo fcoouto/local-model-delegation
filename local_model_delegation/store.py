@@ -330,17 +330,18 @@ class Store:
                 db.execute("UPDATE jobs SET reason='route_decision_required' WHERE job_id=?",(job_id,))
             else:
                 current=authorize_job(self,{**job,'profile':profile})
-                from .capacity import machine_snapshot
-                # Artifact hashing can outlast the five-second resource observation window.
-                if resource_snapshot is None: resource_snapshot=machine_snapshot()
+                from .worker import context_fits
+                if loaded and not context_fits(job['brief'],current,loaded):
+                    db.execute("UPDATE jobs SET status='fallback_required',reason='context_budget_exceeded' WHERE job_id=?",(job_id,))
+                    return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()))
+                from .capacity import pressure_snapshot
+                # Hashing can outlast an observation; sample after authorization.
+                if resource_snapshot is None: resource_snapshot=pressure_snapshot()
                 if time.time()>=route['wait_until']:
                     db.execute("UPDATE jobs SET reason='route_decision_required' WHERE job_id=?",(job_id,))
                     return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()))
                 from .scheduler import admission_limit
-                held=sum(load_json(r['data']).get('reserved_bytes',0) for r in db.execute("SELECT data FROM model_operations WHERE state IN ('reserved','submitting','uncertain')"))
-                held+=sum(load_json(r['route_data']).get('request_bytes',load_json(r['profile']).get('capacity_evidence',{}).get('request_bytes',0)) for r in db.execute("SELECT j.profile,j.route_data FROM jobs j JOIN attempts a USING(job_id) WHERE a.state IN ('reserved','submitting','streaming','uncertain')"))
                 resources=dict(resource_snapshot)
-                if type(resources.get('available_bytes')) is int: resources['available_bytes']=max(0,resources['available_bytes']-held)
                 limit=admission_limit(current,loaded,resources)
                 if db.execute("SELECT 1 FROM sqlite_master WHERE name='measurement_tasks'").fetchone():
                     if db.execute('SELECT 1 FROM measurement_tasks WHERE job_id=?',(job_id,)).fetchone():
@@ -348,12 +349,12 @@ class Store:
                         db.execute('UPDATE jobs SET route_data=? WHERE job_id=?',(canonical(route),job_id))
                 request_bytes=current.get('capacity_evidence',{}).get('request_bytes',0)
                 if route.get('assessment'):
-                    from .capacity import available_budget,assessment_request_bytes
+                    from .capacity import inference_available,assessment_request_bytes
                     from .onboarding import _assessment
                     assessment=_assessment(self.root,route['assessment']['assessment_id'])
                     target=assessment.get('capacity_target',1)
                     request_bytes=assessment_request_bytes(assessment)
-                    limit=min(target,loaded['capacity'],int(available_budget(resources,loaded=True)//request_bytes)) if loaded and type(loaded.get('capacity')) is int and loaded['capacity']>0 else 0
+                    limit=min(target,loaded['capacity']) if loaded and type(loaded.get('capacity')) is int and loaded['capacity']>0 and inference_available(resources) else 0
                 if limit:
                     attempt,status,reason,key,generation=self._slot(db,current,{**loaded,'capacity':limit})
                     if attempt:
@@ -370,13 +371,8 @@ class Store:
             return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()))
 
     def submission_resources_available(self, job):
-        from .capacity import machine_snapshot, available_budget
-        # Older pinned jobs have no recorded reservation; keep their original contract.
-        if 'request_bytes' not in job.get('route_data',{}): return True
-        with self.db() as db:
-            held=sum(load_json(r['data']).get('reserved_bytes',0) for r in db.execute("SELECT data FROM model_operations WHERE state IN ('reserved','submitting','uncertain')"))
-            held+=sum(load_json(r['route_data']).get('request_bytes',load_json(r['profile']).get('capacity_evidence',{}).get('request_bytes',0)) for r in db.execute("SELECT j.profile,j.route_data FROM jobs j JOIN attempts a USING(job_id) WHERE a.state IN ('reserved','submitting','streaming','uncertain')"))
-            return held<=available_budget(machine_snapshot(),loaded=True)
+        from .capacity import pressure_snapshot, inference_available
+        return inference_available(pressure_snapshot())
 
     def decide_wait(self, job_id, decision):
         from .contracts import positive

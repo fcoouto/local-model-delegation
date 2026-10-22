@@ -58,9 +58,7 @@ def begin_assessment(state_dir, profile_id, owner_reference):
     manifest = load_json(fixtures_path().read_text())
     identifier = uuid.uuid4().hex
     root = private_dir(Path(state_dir) / 'assessments' / identifier)
-    prior=profile.get('capacity_evidence',{})
-    target=prior.get('limit',0)+1 if prior.get('qualified') is True and prior.get('settings_digest')==digest(profile['request_settings']) and prior.get('artifact_digest')==profile['artifact']['digest'] else 1
-    target=min(target,32)
+    target=1
     trials = []
     for case in manifest['cases']:
         if case['capability'] in PYTHON_CHANGE_CAPABILITIES and case['capability'] not in profile['capabilities']:
@@ -166,12 +164,13 @@ def assessment_report(state_dir, assessment_id):
     qualified = [b['scope'] for b in buckets.values() if current and b['trials'] >= 6 and b['passed']==b['trials'] and len(b['cases'])>=3]
     capacity = profile.get('capacity_evidence', {})
     benefit = profile.get('benefit_evidence') or {}
-    ready = bool(qualified and capacity.get('qualified') is True)
+    ready = bool(qualified)
     return {'assessment_id':assessment_id, 'profile_id':profile['profile_id'], 'completed_trials':len(assessment['receipts']),
-            'total_trials':len(assessment['trials']), 'tested_scope':qualified, 'capacity_status':'qualified' if capacity.get('qualified') is True else 'unknown',
+            'total_trials':len(assessment['trials']), 'tested_scope':qualified, 'capacity_status':'qualified' if capacity.get('qualified') is True else 'single_slot_default',
             'expected_savings':'usage_proxy' if benefit.get('credible') is True else 'unknown',
             'recommendation':'approve_provisional_scope' if ready else 'do_not_approve_yet',
-            'limitations':['Six passing trials are provisional evidence, not a statistical reliability guarantee.',
+            'limitations':['Tested byte sizes describe observations, not model limits or required operating budgets.',
+                           'Six passing trials are provisional evidence, not a statistical reliability guarantee.',
                            'Unknown savings do not block approval; normal authorized work supplies measurement evidence.',
                            'Runtime binding trusts the local index and discovery metadata; it does not attest weights in memory.',
                            'Actual account savings and live host continuity remain unqualified.']}
@@ -181,7 +180,22 @@ def approve_assessment(state_dir, assessment_id, owner_reference, scope):
     if not isinstance(owner_reference, str) or not owner_reference.strip(): raise ValueError('owner_confirmation_required')
     report = assessment_report(state_dir, assessment_id)
     if report['recommendation'] != 'approve_provisional_scope' or scope != report['tested_scope']: raise ValueError('assessment_incomplete')
-    profile = _profile(state_dir, report['profile_id'])
+    return approve_scope(state_dir, report['profile_id'], owner_reference, scope)
+
+
+def approve_scope(state_dir, profile_id, owner_reference, scope):
+    """Record explicit provisional operating permission, never fabricated assessment evidence."""
+    if not isinstance(owner_reference, str) or not owner_reference.strip(): raise ValueError('owner_confirmation_required')
+    profile = _profile(state_dir, profile_id)
+    if not isinstance(scope, list) or not scope: raise ValueError('invalid_scope')
+    for item in scope:
+        if (not isinstance(item, dict)
+                or set(item) != {'capability','language','complexity','context_bucket','max_input_bytes'}
+                or item['capability'] not in profile['capabilities']
+                or item['complexity'] not in ('simple','moderate','complex')
+                or any(not isinstance(item[k], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', item[k]) for k in ('language','context_bucket'))
+                or type(item['max_input_bytes']) is not int or not 0 < item['max_input_bytes'] <= 800000):
+            raise ValueError('invalid_scope')
     binding = _binding(profile)
     profile['artifact'].update(binding['artifact'])
     profile.update(scope=scope, qualification_status='qualified')

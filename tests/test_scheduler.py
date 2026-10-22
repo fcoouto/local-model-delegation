@@ -183,7 +183,7 @@ class Scheduler(Fixture):
             return result
         with patch('time.time', side_effect=lambda: now[0]), \
              patch('local_model_delegation.profiles.authorize_job', side_effect=slow_authorization), \
-             patch('local_model_delegation.capacity.machine_snapshot', side_effect=self.resources) as sample, \
+             patch('local_model_delegation.capacity.pressure_snapshot', side_effect=self.resources) as sample, \
              patch('local_model_delegation.worker.start_worker') as start:
             job = store.enqueue(brief, brief['fallback'])
             schedule_once(self.state)
@@ -195,7 +195,7 @@ class Scheduler(Fixture):
     def test_explicit_stale_resource_snapshot_stays_ineligible(self):
         store, brief, p = self.setup_queue(); job = store.enqueue(brief, brief['fallback'])
         resources = self.resources(); resources['observed_at'] -= 6
-        with patch('local_model_delegation.capacity.machine_snapshot') as sample:
+        with patch('local_model_delegation.capacity.pressure_snapshot') as sample:
             self.assertEqual(store.admit(job['job_id'], p, self.loaded(), resources)['status'], 'waiting')
             sample.assert_not_called()
 

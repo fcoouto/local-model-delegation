@@ -52,7 +52,7 @@ class Fixture(unittest.TestCase):
     def profile(self):
         from local_model_delegation.profiles import fingerprint_artifact
         identity = fingerprint_artifact(self.artifact, ["weights.bin"])
-        settings = {"reasoning": "on", "temperature": 0, "max_output_tokens": 8192}
+        settings = {"reasoning": "on", "temperature": 0, "max_output_tokens": 1024}
         catalog = self.root / "runtime-catalog.json"
         catalog.write_text(json.dumps({"models": [{"defaultIdentifier": "fictional-model",
             "indexedModelIdentifier": "test/fictional-model", "autoIdentifiers": [],

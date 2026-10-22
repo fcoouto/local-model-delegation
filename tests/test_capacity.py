@@ -25,22 +25,22 @@ class Capacity(Fixture):
 
     def test_unknown_resource_data_closes_admission(self):
         module=self.module(); store,brief,p=self.setup_queue();p=self.measured(p)
-        for key in ('available_bytes','physical_bytes','observed_at','swapout_delta_bytes','machine_fingerprint'):
+        for key in ('pressure','observed_at'):
             r=self.resources();r[key]=None
             with self.subTest(key=key):self.assertEqual(module.qualified_limit(p,self.loaded(2),r),0)
 
     def test_disk_size_is_not_parallel_capacity(self):
         module=self.module();store,brief,p=self.setup_queue()
         p.pop('capacity_evidence')
-        self.assertEqual(module.qualified_limit(p,self.loaded(20),self.resources()),0)
+        self.assertEqual(module.qualified_limit(p,self.loaded(20),self.resources()),1)
         self.assertEqual(module.qualified_limit(self.measured(p),self.loaded(20),self.resources()),2)
 
-    def test_changed_machine_or_settings_invalidates_capacity(self):
+    def test_changed_machine_or_settings_reverts_to_one_slot(self):
         module=self.module();store,brief,p=self.setup_queue();p=self.measured(p)
         changed=copy.deepcopy(p);changed['request_settings']['max_output_tokens']+=1
-        self.assertEqual(module.qualified_limit(changed,self.loaded(2),self.resources()),0)
+        self.assertEqual(module.qualified_limit(changed,self.loaded(2),self.resources()),1)
         r=self.resources();r['machine_fingerprint']='changed'
-        self.assertEqual(module.qualified_limit(p,self.loaded(2),r),0)
+        self.assertEqual(module.qualified_limit(p,self.loaded(2),r),1)
 
     def test_two_models_cannot_reserve_same_free_memory(self):
         self.module();store,brief,p=self.setup_queue();r=self.resources();estimate={'bytes':10*1024**3,'non_evicting':True}
@@ -108,14 +108,14 @@ class Capacity(Fixture):
         self.assertEqual(module.release_idle(self.state,key)['status'],'released')
         self.assertEqual(server.calls.count(('POST','/api/v1/models/unload')),1)
 
-    def test_loaded_request_uses_incremental_budget_without_weakening_load_gate(self):
+    def test_loaded_request_does_not_use_load_memory_gate(self):
         module=self.module(); store,brief,p=self.setup_queue()
         resources={**self.resources(),'physical_bytes':48*1024**3,'available_bytes':6*1024**3}
         self.assertEqual(module.qualified_limit(p,self.loaded(),resources),1)
         with self.assertRaisesRegex(ValueError,'insufficient_resources'):
             store.reserve_load(p,{'bytes':1024**3,'non_evicting':True},resources)
         for change in ({'available_bytes':4*1024**3},{'pressure':'warning'},{'swapout_delta_bytes':4096}):
-            self.assertEqual(module.qualified_limit(p,self.loaded(),{**resources,**change}),0)
+            self.assertEqual(module.qualified_limit(p,self.loaded(),{**resources,**change}),1)
 
     def test_calibration_counts_only_increment_and_adds_margin(self):
         module=self.module()
@@ -148,13 +148,13 @@ class Capacity(Fixture):
         store,brief,p=self.setup_queue()
         job=store.enqueue(brief,brief['fallback'])
         reserved=store.admit(job['job_id'],p,self.loaded(),self.resources())
-        with patch('local_model_delegation.capacity.machine_snapshot',return_value={**self.resources(),'pressure':'warning'}):
+        with patch('local_model_delegation.capacity.pressure_snapshot',return_value={**self.resources(),'pressure':'critical'}):
             self.assertEqual(run_local_attempt(self.state,reserved['attempt_id']),1)
         current=store.job(job['job_id'])
         self.assertEqual(current['reason'],'resources_changed_before_post')
         self.assertEqual(store.attempt(reserved['attempt_id'])['state'],'released')
 
-    def test_reserved_assessments_share_incremental_memory_across_models(self):
+    def test_distinct_loaded_instances_do_not_share_a_free_memory_estimate(self):
         from tests.test_onboarding import Onboarding
         from local_model_delegation import onboarding
         from local_model_delegation.store import atomic_json
@@ -170,7 +170,7 @@ class Capacity(Fixture):
             job=store.enqueue(brief,brief['fallback'],assessment=permit)
             resources={**self.resources(),'physical_bytes':48*1024**3,'available_bytes':5*1024**3}
             result=store.admit(job['job_id'],current,{**self.loaded(),'instance_id':identifier},resources)
-            self.assertEqual(result['status'],'reserved' if index==0 else 'waiting')
+            self.assertEqual(result['status'],'reserved')
 
     def test_capacity_record_refreshes_resources_after_slow_artifact_checks(self):
         from unittest.mock import patch
