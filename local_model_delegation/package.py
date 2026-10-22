@@ -50,6 +50,7 @@ def pin_runtime_bundle(state_dir, source_root=None):
     from .worker import ownership
     store=Store(state_dir)
     source=Path(source_root) if source_root is not None else Path(__file__).resolve().parents[1]
+    if source.parent == store.root/'runtimes': return validate_bundle(source, source.name)
     files={'delegate.py':source/'delegate.py','assessment-cases.json':source/'skills/setup/fixtures/assessment-cases.json'}
     files.update({'local_model_delegation/'+p.name:p for p in (source/'local_model_delegation').glob('*.py')})
     if any(p.is_symlink() for p in files.values()):raise ValueError('unsafe_runtime_source')

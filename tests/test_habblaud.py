@@ -404,3 +404,41 @@ class Habblaud(Fixture):
         self.assertEqual(store.job(job['job_id']), before)
         self.assertEqual(store.attempt(job['attempt_id']), attempt)
         self.assertEqual(receiver.events, [])
+
+    def test_detached_worker_starts_observer_from_its_pinned_bundle(self):
+        import os
+        from tests.support import FakeRuntime
+        from local_model_delegation.habblaud import configure, bind_context, quiesce
+        from local_model_delegation.worker import start_worker
+        receiver = self.receiver(); runtime = FakeRuntime(delay=.2); self.addCleanup(runtime.close)
+        profile = self.profile(); profile['endpoint'] = runtime.endpoint; self.write_config(profile)
+        store = Store(self.state); job = store.reserve(self.brief(), profile, {**self.loaded(), 'endpoint':runtime.endpoint})
+        with store.db(write=True) as db: bind_context(db, job['job_id'], CONTEXT)
+        configure(self.state, receiver.endpoint, '.codex')
+        import shutil
+        from tests import REPO_ROOT
+        from local_model_delegation.package import pin_runtime_bundle
+        old_source = self.root/'old-package'; old_source.mkdir()
+        shutil.copytree(REPO_ROOT/'local_model_delegation', old_source/'local_model_delegation')
+        shutil.copytree(REPO_ROOT/'skills', old_source/'skills')
+        shutil.copyfile(REPO_ROOT/'delegate.py', old_source/'delegate.py')
+        old_worker = old_source/'local_model_delegation/worker.py'
+        old_worker.write_text(old_worker.read_text().replace(
+            '        from .habblaud import ensure_observer\n        ensure_observer(state_dir, job["job_id"])\n', ''))
+        old_bundle = pin_runtime_bundle(self.state, old_source)
+        instance = store.instance(store.attempt(job['attempt_id'])['instance_key'])
+        with store.db(write=True) as db:
+            db.execute('UPDATE instances SET data=? WHERE instance_key=?',
+                       (json.dumps({**instance['data'], 'runtime_bundle':old_bundle.name}), instance['instance_key']))
+        pid = start_worker(self.state, job['attempt_id'])
+        try:
+            deadline = time.monotonic()+6
+            while not receiver.agents and time.monotonic()<deadline: time.sleep(.05)
+            self.assertEqual(len(receiver.agents), 1)
+            self.assertEqual(next(iter(receiver.agents.values()))['role'], 'Reviewer · Fictional Model')
+            self.assertNotEqual(store.job(job['job_id'])['route_data']['runtime_bundle'], old_bundle.name)
+            self.assertEqual(runtime.calls.count(('POST','/api/v1/chat')), 1)
+        finally:
+            quiesce(self.state)
+            try: os.waitpid(pid, 0)
+            except ChildProcessError: pass

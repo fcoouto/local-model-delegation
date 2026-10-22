@@ -76,3 +76,9 @@ class Plugin(Fixture):
                 self.assertFalse(any(marker in text for marker in markers),str(path.relative_to(root)))
         for path in (root/'README.md',root/'plugin.json',root/'delegate.py'):
             self.assertFalse(any(marker in path.read_text() for marker in markers),path.name)
+
+    def test_pinned_runtime_can_launch_children_without_repackaging(self):
+        module = self.module(); module.initialize_state(self.state)
+        bundle = module.pin_runtime_bundle(self.state)
+        self.assertEqual(module.pin_runtime_bundle(self.state, bundle), bundle)
+        self.assertEqual(list((self.state/'runtimes').iterdir()), [bundle])

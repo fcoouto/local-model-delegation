@@ -44,7 +44,8 @@ def launch(state_dir, command, identifier):
     if command == "worker":
         job = store.job(store.attempt(identifier)["job_id"])
         instance = store.instance(store.attempt(identifier)["instance_key"])
-        saved = job.get("route_data", {}).get("runtime_bundle") or instance["data"].get("runtime_bundle")
+        # Existing jobs keep their pin; new jobs use the currently installed helper.
+        saved = job.get("route_data", {}).get("runtime_bundle")
         if saved: bundle = validate_bundle(store.root / "runtimes" / saved, saved)
     if bundle is None: bundle = pin_runtime_bundle(state_dir)
     if instance:
