@@ -69,7 +69,7 @@ def main(argv=None):
     p.add_argument('--installed', type=Path)
     p = commands.add_parser("doctor")
     p.add_argument("--inspect-runtime", action="store_true")
-    for name in ("worker", "recover", "scheduler"):
+    for name in ("worker", "recover", "scheduler", "habblaud-observer"):
         p = commands.add_parser(name)
         p.add_argument("identifier")
     p = commands.add_parser("submit")
@@ -79,6 +79,8 @@ def main(argv=None):
     h = commands.add_parser('habblaud').add_subparsers(dest='action', required=True)
     p = h.add_parser('enable'); p.add_argument('--endpoint', required=True); p.add_argument('--account', required=True)
     p = h.add_parser('status'); p.add_argument('--job')
+    h.add_parser('disable')
+    p = h.add_parser('resume'); p.add_argument('--job', required=True)
     p = h.add_parser('bind'); p.add_argument('--job', required=True); p.add_argument('--context', type=Path, required=True)
     p = commands.add_parser("lookup")
     p.add_argument("--chat", required=True)
@@ -161,6 +163,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         args.state_dir = resolve_state_directory(args.state_dir)
+        if args.command == 'habblaud-observer':
+            from .habblaud import run_observer
+            return run_observer(args.state_dir, args.identifier)
         if args.command == "worker": return run_local_attempt(args.state_dir, args.identifier)
         if args.command == "scheduler":
             from .scheduler import run_scheduler
@@ -207,6 +212,8 @@ def main(argv=None):
             from . import habblaud
             if args.action == 'enable': result = habblaud.configure(args.state_dir, args.endpoint, args.account)
             elif args.action == 'bind': result = habblaud.bind(args.state_dir, args.job, read_input(args.context))
+            elif args.action == 'disable': result = habblaud.disable(args.state_dir)
+            elif args.action == 'resume': result = {**habblaud.status(args.state_dir, args.job), 'observer': habblaud.ensure_observer(args.state_dir, args.job)}
             else: result = habblaud.status(args.state_dir, args.job)
         elif args.command == "visibility":
             from .visibility import set_visibility, visibility_status

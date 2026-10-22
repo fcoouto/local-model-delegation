@@ -51,7 +51,9 @@ def bind_context(db, job_id, context, rebind=False):
 def bind(state_dir, job_id, context):
     store = Store(state_dir)
     with store.db(write=True) as db: bind_context(db, job_id, context, rebind=True)
-    return status(state_dir, job_id)
+    result = status(state_dir, job_id)
+    result['observer'] = ensure_observer(state_dir, job_id)
+    return result
 
 
 class Client:
@@ -106,7 +108,8 @@ class Client:
         return value
 
     def event(self, account, event):
-        if self.request('/api/codex/events', {'account': account, 'event': event}) != {'ok': True}:
+        result = self.request('/api/codex/events', {'account': account, 'event': event})
+        if not isinstance(result, dict) or set(result) != {'ok'} or result['ok'] is not True:
             raise ValueError('habblaud_event_rejected')
 
 
@@ -147,3 +150,197 @@ def status(state_dir, job_id=None):
         result['job_id'] = job_id
         result['observation'] = {k: receipt[k] for k in ('state', 'phase', 'error', 'agent_id', 'last_sent_at') if k in receipt}
     return result
+
+
+def _phase(job, attempt, now):
+    if not attempt or attempt['state'] == 'reserved': return None, False
+    state = attempt['state']
+    if state == 'uncertain': return 'Execution status unknown', False
+    if state in ('submitting', 'streaming'):
+        observed = attempt['data'].get('last_event_at', attempt['data'].get('submitted_at', attempt['data'].get('created')))
+        import math
+        if (type(observed) not in (int, float) or not math.isfinite(observed)
+                or now - observed > job['profile'].get('stale_tolerance_seconds', 120)):
+            return 'Execution status unknown', False
+    if job.get('native_task_id') or job['status'] in (
+            'fallback_required', 'fallback_dispatching', 'dispatch_uncertain', 'fallback_running'):
+        return 'Native fallback', False
+    if job['status'] == 'accepted': return 'Verified', False
+    if job['status'] in ('failed', 'needs_reassessment'): return 'Failed or scope changed', False
+    if state in ('submitting', 'streaming'):
+        return ('Starting' if state == 'submitting' else 'Generating'), True
+    if state == 'complete' and job['status'] in ('candidate_ready', 'checking'):
+        return 'Awaiting verification', True
+    return 'Execution status unknown', False
+
+
+def _binding(store, job_id, target):
+    # Freeze only presentation metadata. No execution clocks or brief fields change.
+    locked = store.job(job_id)['route_data'].get('habblaud', {}).get('labels_locked') is True
+    with store.db(write=not locked) as db:
+        job = store._job(db.execute('SELECT * FROM jobs WHERE job_id=?', (job_id,)).fetchone())
+        route = job['route_data']; saved = route.get('habblaud', {})
+        context = validate_context(saved.get('context', {'coordinator_chat_id': job['brief']['origin_chat_id']}))
+        model = job['profile'].get('model_id')
+        if not isinstance(model, str) or not model.strip() or len(model) > 4096:
+            raise ValueError('unsupported_habblaud_label')
+        clean = lambda text: ' '.join(''.join(c if c.isprintable() else ' ' for c in text).split())
+        label = ' · '.join(['LOCAL', *([context['role']] if 'role' in context else []), clean(model),
+                            *([clean(context['specialty'])[:48]] if 'specialty' in context else [])])
+        if 'guardian' in label.lower(): raise ValueError('unsupported_habblaud_label')
+        if not saved.get('labels_locked'):
+            route['habblaud'] = {'context': context, 'labels_locked': True}
+            db.execute('UPDATE jobs SET route_data=? WHERE job_id=?', (canonical(route), job_id))
+    identity = [str(store.root), job_id, job['attempt_id'], target['endpoint'], target['account'], context['coordinator_chat_id']]
+    return {'endpoint': target['endpoint'], 'account': target['account'], 'parent': context['coordinator_chat_id'],
+            'agent_id': str(uuid.uuid5(uuid.NAMESPACE_URL, canonical(identity))), 'label': label,
+            'cwd': job['brief']['source_root']}
+
+
+def _event(binding, name, phase=None):
+    value = {'hook_event_name': name, 'session_id': binding['parent'], 'agent_id': binding['agent_id'],
+             'agent_type': binding['label'], 'cwd': binding['cwd']}
+    if phase is not None:
+        value.update(tool_name='LOCAL: '+phase, tool_use_id=binding['agent_id']+':'+phase, tool_input={})
+    return value
+
+
+class Observer:
+    def __init__(self, state_dir, job_id):
+        self.store = Store(state_dir)
+        self.path = _receipt_path(self.store.root, job_id)
+        self.job_id = job_id
+        self.receipt = _read_receipt(self.store.root, job_id)
+
+    def save(self):
+        atomic_json(self.path, self.receipt)
+
+    def stop(self, phase, now):
+        binding = self.receipt.get('binding')
+        if binding and self.receipt.get('may_exist') and self.receipt.get('state') != 'stopped':
+            try:
+                client = Client(binding['endpoint']); snapshot = client.snapshot(binding['account'])
+                if any(a.get('id') == binding['account']+':'+binding['agent_id']
+                       and a.get('status') not in ('done', 'offline') for a in snapshot['agents']):
+                    if phase: client.event(binding['account'], _event(binding, 'PreToolUse', phase))
+                    client.event(binding['account'], _event(binding, 'SubagentStop'))
+                self.receipt.pop('error', None)
+                self.receipt['last_sent_at'] = now
+            except (ValueError, OSError):
+                # shortcut: an unavailable receiver expires the entry; hooks offer no neutral removal.
+                self.receipt['error'] = 'habblaud_stop_unconfirmed'
+        if self.receipt:
+            self.receipt.update(state='stopped', phase=phase)
+            self.save()
+        return False
+
+    def step(self, now=None):
+        now = time.time() if now is None else now
+        config = read_config(self.store.root); target = config.get('habblaud', {})
+        if config.get('visibility_enabled', True) is not True or target.get('enabled') is not True:
+            return self.stop('Visibility disabled', now)
+        job = self.store.job(self.job_id)
+        attempt = self.store.attempt(job['attempt_id']) if job.get('attempt_id') else None
+        phase, active = _phase(job, attempt, now)
+        if not active: return self.stop(phase, now)
+        if now < self.receipt.get('next_retry_at', 0): return True
+        try:
+            binding = _binding(self.store, self.job_id, target)
+            previous = self.receipt.get('binding')
+            if previous and previous != binding:
+                self.stop('Coordinator binding changed', now)
+                self.receipt = {}
+            if (self.receipt.get('state') == 'active' and self.receipt.get('phase') == phase
+                    and now - self.receipt.get('last_sent_at', 0) < 20): return True
+            if not self.receipt.get('binding'):
+                self.receipt = {'binding': binding, 'agent_id': binding['agent_id'], 'state': 'pending'}
+                self.save()
+            client = Client(binding['endpoint']); snapshot = client.snapshot(binding['account'])
+            existing = next((a for a in snapshot['agents'] if a.get('id') == binding['account']+':'+binding['agent_id']), None)
+            created = not existing or existing.get('status') in ('done', 'offline')
+            if created:
+                self.receipt['may_exist'] = True; self.save()
+                client.event(binding['account'], _event(binding, 'SubagentStart'))
+            else:
+                if existing.get('parentId') != binding['account']+':'+binding['parent'] or existing.get('role') != binding['label']:
+                    raise ValueError('habblaud_binding_mismatch')
+                self.receipt['may_exist'] = True
+            if created or self.receipt.get('phase') != phase:
+                client.event(binding['account'], _event(binding, 'PreToolUse', phase))
+            else: client.event(binding['account'], _event(binding, 'SessionStart'))
+            self.receipt.update(state='active', phase=phase, last_sent_at=now, next_retry_at=0, failures=0)
+            self.receipt.pop('error', None); self.save()
+            return True
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            code = str(error)
+            allowed = {'unsupported_habblaud_label', 'invalid_coordinator_chat_id', 'habblaud_account_unavailable',
+                       'habblaud_event_rejected', 'habblaud_binding_mismatch', 'unsupported_habblaud_endpoint'}
+            code = code if code in allowed else 'habblaud_unavailable'
+            failures = min(self.receipt.get('failures', 0) + 1, 5)
+            self.receipt.update(state='error', error=code, failures=failures, next_retry_at=now+min(20, 2**failures))
+            self.save()
+            return code not in ('unsupported_habblaud_label', 'invalid_coordinator_chat_id', 'unsupported_habblaud_endpoint')
+
+
+def run_observer(state_dir, job_id):
+    from .worker import ownership
+    store = Store(state_dir); _receipt_path(store.root, job_id)
+    with ownership(store, 'habblaud-'+job_id) as owned:
+        if not owned: return 0
+        from .visibility import _lock
+        with _lock(store.root):
+            if not status(state_dir)['enabled']: return 0
+            observer = Observer(state_dir, job_id)
+            observer.save()
+        try:
+            while observer.step(): time.sleep(1)
+        except (OSError, ValueError, KeyError, TypeError):
+            observer.stop('Observation unavailable', time.time())
+    return 0
+
+
+def ensure_observer(state_dir, job_id):
+    # This is called from execution paths: all observability failures are nonfatal.
+    try:
+        if not status(state_dir)['enabled']: return {'state': 'disabled'}
+        from .worker import ownership, launch
+        store = Store(state_dir); job = store.job(job_id)
+        attempt = store.attempt(job['attempt_id']) if job.get('attempt_id') else None
+        if not _phase(job, attempt, time.time())[1]: return {'state': 'inactive'}
+        from .visibility import _lock
+        with _lock(store.root):
+            if not status(state_dir)['enabled']: return {'state': 'disabled'}
+            with ownership(store, 'habblaud-'+job_id) as owned:
+                if not owned: return {'state': 'observing'}
+            pid = launch(state_dir, 'habblaud-observer', job_id)
+        return {'state': 'starting', 'pid': pid}
+    except Exception:
+        return {'state': 'unavailable', 'error': 'habblaud_observer_unavailable'}
+
+
+def disable(state_dir):
+    root = private_dir(Path(state_dir))
+    from .visibility import _lock
+    with _lock(root):
+        config = read_config(root)
+        config['habblaud'] = {**config.get('habblaud', {}), 'enabled': False}
+        atomic_json(root/'config.json', config)
+    return status(root)
+
+
+def quiesce(state_dir):
+    """Stop only owned display observers before a package-state snapshot."""
+    root = Path(state_dir)
+    if 'habblaud' not in read_config(root): return
+    disable(root)
+    from .worker import ownership
+    store = Store(root); deadline = time.monotonic()+8
+    while True:
+        busy = False
+        for path in (root/'habblaud').glob('*.json'):
+            _receipt_path(root, path.stem)
+            with ownership(store, 'habblaud-'+path.stem) as owned:
+                if not owned: busy = True
+        if not busy: return
+        if time.monotonic() >= deadline: raise ValueError('habblaud_observer_busy')
+        time.sleep(.1)

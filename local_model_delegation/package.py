@@ -101,6 +101,8 @@ def prepare_uninstall(state_dir):
     atomic_json(root/'config.json',config)
     store=Store(root)
     with store.db(write=True) as db:_quiescent(db)
+    from .habblaud import quiesce
+    quiesce(root)
     with _lock(root):
         _path(root).unlink(missing_ok=True)
         measurement_path(root).unlink(missing_ok=True)
