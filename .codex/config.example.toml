@@ -1,0 +1,5 @@
+# Merge supported settings into an existing project config; preserve user choices.
+# Model, reasoning, provider, authentication and permissions remain client-owned.
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3

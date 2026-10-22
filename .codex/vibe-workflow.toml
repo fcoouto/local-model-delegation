@@ -1,0 +1,5 @@
+schema_version = 1
+
+[task_lifecycle]
+enabled = true
+auto_cleanup = true
