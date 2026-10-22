@@ -25,7 +25,7 @@ The link reads the version published on `main`. To try an unpublished checkout, 
 Already installed? Open Codex with local computer access and paste:
 
 ```text
-Read https://raw.githubusercontent.com/fcoouto/local-model-delegation/main/docs/updating.md and guide me through updating Local Model Delegation to the latest published numbered release. Preserve my settings, approvals and history, keep routing disabled, and verify the installed version and saved state.
+Read https://raw.githubusercontent.com/fcoouto/local-model-delegation/main/docs/updating.md and guide me through updating Local Model Delegation to the latest published numbered release. Preserve my settings, approvals and history, and verify the installed version and saved state.
 ```
 
 The agent checks your installed version, stages the release, backs up private state, updates through Codex's native plugin installer, and verifies the result. It pauses for active or uncertain tasks. Updating never approves a model or enables delegation. A merged PR does not update installed plugins; a numbered release must be published first.
