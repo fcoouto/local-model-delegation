@@ -123,6 +123,7 @@ class FakeRuntime:
         self.instance_id, self.change_instance_on_load = "fixture-instance", False
         self.load_count = 0
         self.drop_load_ack = self.drop_unload_ack = False
+        self.peer_loaded = False
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -134,6 +135,9 @@ class FakeRuntime:
                     "format": "fictional", "architecture": "fictional", "publisher": "test", "params_string": "1B",
                     "quantization": {"name": "4bit", "bits_per_weight": 4}, "loaded_instances":
                     ([{"id": outer.instance_id, "config": {"parallel": outer.parallel, "context_length": 8192}}] if outer.loaded else [])}]}
+                if outer.peer_loaded:
+                    body['models'].append({'key':'peer','type':'llm','loaded_instances':[
+                        {'id':'peer-instance','config':{'context_length':8192,'parallel':1}}]})
                 encoded = json.dumps(body).encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(encoded)))
@@ -155,9 +159,12 @@ class FakeRuntime:
                         else: outer.drop_unload_ack = False
                         self.connection.close()
                         return
-                    encoded = b'{}'
+                    response = {'instance_id':outer.instance_id}
+                    if loading:
+                        response.update(type='llm', status='loaded', load_config={'context_length':8192})
+                    encoded = json.dumps(response).encode()
                     self.send_response(200)
-                    self.send_header("Content-Length", "2")
+                    self.send_header("Content-Length", str(len(encoded)))
                     self.end_headers()
                     self.wfile.write(encoded)
                     return

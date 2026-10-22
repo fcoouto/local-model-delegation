@@ -57,7 +57,7 @@ class Capacity(Fixture):
 
     def test_unknown_eviction_behavior_blocks_load(self):
         module=self.module();store,brief,p=self.setup_queue()
-        self.assertEqual(module.ensure_loaded(self.state,'fictional')['reason'],'lifecycle_unqualified')
+        self.assertEqual(module.ensure_loaded(self.state,'fictional')['reason'],'loading_consent_required')
         with store.db() as db:self.assertEqual(db.execute('SELECT count(*) FROM model_operations').fetchone()[0],0)
 
     def test_lost_load_ack_retains_reservation_without_repost(self):

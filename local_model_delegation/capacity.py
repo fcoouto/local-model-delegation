@@ -136,11 +136,9 @@ def qualify_measurements(profile, batches, resources, context_length):
 
 
 def ensure_loaded(state_dir, profile_id):
-    # shortcut: HTTP v1 has no documented estimator/non-eviction contract; qualify an adapter before implementing load POSTs.
-    from .onboarding import _profile
-    _profile(state_dir,profile_id)
-    return {'status':'not_eligible','reason':'lifecycle_unqualified',
-            'missing':['http_memory_estimate','verified_non_evicting_load_contract']}
+    from .lifecycle import ensure_loaded as load
+    try: return load(state_dir, profile_id)
+    except ValueError as error: return {'status': 'not_eligible', 'reason': str(error)}
 
 
 def owned_operation(store, instance):

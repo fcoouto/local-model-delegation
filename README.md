@@ -50,7 +50,7 @@ Reopen Codex or start a fresh chat if the host needs to reload skills. The agent
 4. **Decide:** approve the exact model and a practical provisional scope, then separately choose whether to enable delegation.
 5. **Verify:** report what was checked, what remains pending and how to resume. “Installed” does not mean “ready to delegate.”
 
-**Supported today:** Codex on macOS, Python 3.11+, and LM Studio over a loopback HTTP connection. Executable candidates require qualified macOS isolation. The shared core is host-agnostic; Claude integration, other runtimes and non-text tasks are future work. Automatic model loading remains unavailable until qualified; the agent reports a model-loading blocker instead of bypassing it.
+**Supported today:** Codex on macOS, Python 3.11+, and LM Studio over a loopback HTTP connection. Executable candidates require qualified macOS isolation. The shared core is host-agnostic; Claude integration, other runtimes and non-text tasks are future work. With separate loading permission, the plugin can load an approved model before delegation. See [model loading and recovery](docs/model-loading.md).
 
 Read the [onboarding guide](docs/onboarding.md) for the agent's workflow and [onboarding evaluation](docs/onboarding-validation.md) for what has been tested. Cloning this repository installs nothing, approves no model and changes no provider or authentication settings.
 
@@ -130,7 +130,7 @@ Already-loaded models start with one shared slot; disk size is not a thread limi
 
 Operating context budgets are explicit approval limits, separate from observed assessment sizes. A useful starting budget is 65,536 UTF-8 bytes of serialized supplied context, adjusted to the task and loaded context. This is not a token count or a guarantee of quality. The helper screens the full prompt, reserved output and 2,048 tokens of template headroom against the discovered runtime context. Without a qualified HTTP tokenizer it conservatively counts UTF-8 bytes as input token budget. Larger tasks can fall back before POST. See the [practical qualification runbook](docs/qualification.md).
 
-**Automatic loading/reloading is gated.** The documented [HTTP load API](https://lmstudio.ai/docs/developer/rest/load) does not establish a memory-estimation/non-eviction contract. The adapter returns `lifecycle_unqualified` without a load POST. No CLI workaround or global-setting change is used. Schema-2 uncertain slots stay closed without a verified reset.
+**Model loading uses durable HTTP operations.** Loading permission binds the exact approval and context setting. The plugin preserves LM Studio's loading guardrails, checks current pressure, and requires an empty endpoint before loading a new model. It verifies discovery before inference and uses one slot. Ambiguous loads are never blindly repeated. An owner-authorized reset can retire an uncertain generation after verified unload/absence, preserving the failed job and its history. Unattended reset remains disabled; other clients' activity cannot be locked by this plugin. See [the operating procedure and limits](docs/model-loading.md).
 
 Python checking retains strict import/member/mutation guards, separate protected tests and private result markers. General code checks run predeclared commands with cleared credentials in qualified macOS isolation; missing toolchains stay native. A private receipt binds the proposal, source, checks, attempt/native ID and session token. Semantic acceptance trusts native review; model output cannot certify itself.
 

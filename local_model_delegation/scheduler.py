@@ -52,6 +52,10 @@ def schedule_once(state_dir, resources=None):
                     p=authorize_assessment(store.root,job['brief'],permit) if permit else read_profile_by_id(store.root,identifier,job['brief']['capability'])
                     from .profiles import model_identity
                     loaded=select_loaded(Runtime(p['endpoint'],token_env=p.get('token_env')).list_models(),p,model_identity(p) if permit else None)
+                    if loaded is None and not permit:
+                        from .lifecycle import ensure_loaded
+                        loading = ensure_loaded(store.root, identifier)
+                        loaded = loading.get('loaded') if loading['status'] == 'loaded' else None
                     if loaded is None: continue
                     result=store.admit(job['job_id'],p,loaded,resources)
                 except (ValueError,OSError): continue

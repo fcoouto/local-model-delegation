@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.5
+
+- Add owner-authorized external reset reconciliation with one unload request, verified absence, generation fencing and preserved failed outcomes/history.
+- Add separately permitted HTTP loading for approved models, exact context/one-slot verification, endpoint reservations and read-only reconciliation after ambiguous responses.
+- Let ordinary routing load permitted models before inference; preserve LM Studio guardrails and defer when peers or unresolved operations exist.
+- Let verified retired generations pass update preparation without accepting unsupported retirement flags.
+
 ## 0.3.4 (unreleased)
 
 - Link Vibe Setup's delegation policy and native contract from agent and user documentation. Use installed-version instructions and preserve local approval, verification and fallback controls.

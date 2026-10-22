@@ -153,6 +153,9 @@ class Store:
             return envelope(self._job(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()))
 
     def _slot(self, db, profile, loaded):
+        from .lifecycle import endpoint_operation
+        if endpoint_operation(db, profile['endpoint']):
+            return None, 'fallback_required', 'lifecycle_busy', None, None
         attempt_id, status, reason, key, generation = None, "fallback_required", "model_unavailable", None, None
         valid = bool(loaded and type(loaded.get("capacity")) is int and loaded["capacity"] > 0
                      and loaded.get("model_id") == profile["model_id"] and loaded.get("endpoint") == profile["endpoint"]
