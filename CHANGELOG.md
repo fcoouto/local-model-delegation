@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.6
+
+- Let the coordinator select a positive per-task generation allowance within the model's approved ceiling. Admission and the HTTP request use that allowance, including reasoning tokens, with runtime context checks before POST.
+- Add explicit `profile approve --max-output-tokens` support. Ceiling changes preserve assessment history and wait for occupied instances before refreshing idle approval metadata; loading permission remains bound to the approval.
+- Complete budget-exhausted attempts only after validating terminal identity, token metadata, output and generation. Request native fallback without accepting truncated output or closing healthy slots. Missing or malformed terminal evidence remains uncertain.
+- Record effective request settings and terminal exhaustion evidence. Measurement cohorts distinguish the actual generation allowance; historical attempts and outcomes remain unchanged.
+
 ## 0.3.5
 
 - Add owner-authorized external reset reconciliation with one unload request, verified absence, generation fencing and preserved failed outcomes/history.

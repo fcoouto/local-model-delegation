@@ -23,6 +23,8 @@ Only exact approved identity, context, one slot and no peer can settle that oper
 
 ## Recover an uncertain inference slot
 
+Version 0.3.6 settles new budget-exhausted requests without reset when it validates a matching terminal response and generation. It releases only that attempt's slot and requests native fallback. Older uncertain attempts without that saved terminal evidence still require the procedure below; an `output_budget_exhausted` reason alone is insufficient. No outcome or history is rewritten.
+
 Get owner authorization to unload the exact affected instance. Disable routing and assessment admission, and let healthy helper work finish. Do not repeatedly submit the original task. Then invoke:
 
 ```sh

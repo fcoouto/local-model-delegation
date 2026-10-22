@@ -136,6 +136,8 @@ class Store:
 
     def reserve(self, brief, profile, loaded):
         validate_brief(brief)
+        from .profiles import generation_settings
+        generation_settings(brief, profile)
         with self.db(write=True) as db:
             if db.execute("PRAGMA user_version").fetchone()[0] != profile.get("schema_version"):
                 raise ValueError("mixed_state_version")
@@ -174,8 +176,13 @@ class Store:
                 data = load_json(row["data"])
                 if (data["artifact_digest"] != profile["artifact"]["digest"]
                         or data["profile"]["approval"] != profile["approval"]):
-                    same_runtime = all(data['profile'].get(field) == profile.get(field) for field in
-                                       ('endpoint','adapter','model_id','runtime_catalog','artifact','request_settings'))
+                    old_settings, settings = data['profile']['request_settings'], profile['request_settings']
+                    same_settings = old_settings == settings or (
+                        {k:v for k,v in old_settings.items() if k != 'max_output_tokens'} ==
+                        {k:v for k,v in settings.items() if k != 'max_output_tokens'}
+                        and (profile.get('approval') or {}).get('request_settings') == settings)
+                    same_runtime = same_settings and all(data['profile'].get(field) == profile.get(field) for field in
+                                       ('endpoint','adapter','model_id','runtime_catalog','artifact'))
                     if same_runtime and occupied:
                         return None, 'fallback_required', 'model_busy', key, generation
                     if (same_runtime and loaded.get('binding_verified') is True
@@ -251,6 +258,21 @@ class Store:
             data = {**load_json(row["data"]), "finished_at": time.time()}
             db.execute("UPDATE attempts SET state='complete',data=? WHERE attempt_id=?", (canonical(data), attempt_id))
             db.execute("UPDATE jobs SET status='candidate_ready',result_path=? WHERE job_id=?", (str(path), row["job_id"]))
+            return True
+
+    def finish_exhausted(self, attempt_id, generation, terminal):
+        """Settle a verified terminal request without accepting its truncated output."""
+        with self.db(write=True) as db:
+            row = db.execute("SELECT a.*,j.status,j.route_data,i.generation AS current_generation,i.state AS instance_state FROM attempts a JOIN jobs j USING(job_id) JOIN instances i USING(instance_key) WHERE a.attempt_id=?", (attempt_id,)).fetchone()
+            if (row is None or row['generation'] != generation or row['current_generation'] != generation
+                    or row['state'] != 'streaming' or row['instance_state'] != 'ready'):
+                return False
+            data = {**load_json(row['data']), 'finished_at':time.time(), 'terminal':terminal,
+                    'progress_reason':'output_budget_exhausted'}
+            db.execute("UPDATE attempts SET state='complete',data=? WHERE attempt_id=?", (canonical(data),attempt_id))
+            if row['status'] in ('reserved','running'):
+                route = {**load_json(row['route_data']), 'local_failure':'output_budget_exhausted'}
+                db.execute("UPDATE jobs SET status='fallback_required',reason='output_budget_exhausted',route_data=? WHERE job_id=?", (canonical(route),row['job_id']))
             return True
 
     def claim_fallback(self, job_id):
@@ -387,7 +409,8 @@ class Store:
                         if db.execute("SELECT 1 FROM sqlite_master WHERE name='measurement_tasks'").fetchone():
                             if db.execute('SELECT 1 FROM measurement_tasks WHERE job_id=?',(job_id,)).fetchone():
                                 from .measurements import model_binding
-                                route['measurement_binding'] = model_binding(current,executed=True)
+                                from .profiles import generation_settings
+                                route['measurement_binding'] = model_binding(current,executed=True,request_settings=generation_settings(job['brief'],current))
                         db.execute('UPDATE jobs SET profile=?,status=?,reason=NULL,attempt_id=?,route_data=? WHERE job_id=?',
                                    (canonical(current),status,attempt,canonical(route),job_id))
                         db.execute('INSERT INTO attempts VALUES (?,?,?,?,?,?)',(attempt,job_id,key,generation,'reserved',canonical({'created':time.time()})))

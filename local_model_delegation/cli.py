@@ -102,6 +102,7 @@ def main(argv=None):
     p.add_argument("--profile-id")
     p.add_argument("--owner-reference")
     p.add_argument("--scope", type=Path)
+    p.add_argument("--max-output-tokens", type=int)
     p = commands.add_parser("verify")
     p.add_argument("action", choices=["prepare", "checks", "record"])
     p.add_argument("--job", required=True)
@@ -232,7 +233,7 @@ def main(argv=None):
         elif args.command == "submit": result = submit_task(args.state_dir, args.brief, args.measurement_context, args.visibility_context)
         elif args.command == "profile" and args.action == 'approve':
             from .onboarding import approve_scope
-            result = approve_scope(args.state_dir, args.profile_id, args.owner_reference, read_input(args.scope))
+            result = approve_scope(args.state_dir, args.profile_id, args.owner_reference, read_input(args.scope), max_output_tokens=args.max_output_tokens)
         elif args.command == "profile":
             profile = read_input(args.file)
             if profile.get("schema_version") != 2: raise ValueError("invalid_profile")
