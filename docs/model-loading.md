@@ -1,6 +1,6 @@
 # Model loading and verified recovery
 
-The plugin can load an **approved text model** through LM Studio's [HTTP load API](https://lmstudio.ai/docs/developer/rest/load). Loading permission is separate from model approval, inference routing and assessment consent. It does not approve another model, change defaults or run a prompt. Unapproved onboarding models still require the existing explicit assessment/manual-load procedure.
+The plugin can load an **approved model** through LM Studio's [HTTP load API](https://lmstudio.ai/docs/developer/rest/load). Loading permission is separate from model approval, inference routing and assessment consent. It does not approve another model, change defaults or run a prompt. Unapproved onboarding models still require the existing explicit assessment/manual-load procedure.
 
 Use `python3.11 -B <plugin>/delegate.py` with the existing private state directory. For a model whose loading the owner has authorized:
 

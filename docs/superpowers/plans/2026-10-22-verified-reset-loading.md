@@ -23,7 +23,7 @@
 - [x] Add failing regressions for consent-bound load, changed approval, peers, pressure, ambiguous load replay, loaded configuration and scheduler admission.
 - [x] Implement HTTP loading through existing capacity/scheduler seams; run affected tests and the full offline suite.
 - [x] Update skills/runbooks and version to a fresh 0.3.5; validate skills, package and whitespace. Commit coherent source changes.
-- [ ] Back up live state. Execute the authorized Qwen reset once; verify history preservation. Stage/install through native controls and verify the update with routing off. Reload Qwen through the new supported HTTP path, verify one slot and exact identity, and report gates honestly.
+- [x] Back up live state. Execute the authorized Qwen reset once; verify history preservation. Stage/install through native controls and verify the update with routing off. Reload Qwen through the new supported HTTP path, verify one slot and exact identity, and report gates honestly. Private receipts retain the execution and preservation evidence; public release publication remains pending.
 
 ## Review focus
 
