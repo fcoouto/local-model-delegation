@@ -1,6 +1,6 @@
 # Model measurements per project
 
-Date: 2026-10-22. Status: implementation authorized by the owner on 2026-10-22; live qualification requires separate authorization.
+Date: 2026-10-22. Status: source implementation completed on 2026-10-22; see [Offline validation](../../project-measurements-validation.md). Installation and live qualification remain separate.
 
 ## Purpose and decisions
 

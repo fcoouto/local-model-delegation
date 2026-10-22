@@ -348,6 +348,10 @@ class Store:
                 resources=dict(resource_snapshot)
                 if type(resources.get('available_bytes')) is int: resources['available_bytes']=max(0,resources['available_bytes']-held)
                 limit=admission_limit(current,loaded,resources)
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='measurement_tasks'").fetchone():
+                    if db.execute('SELECT 1 FROM measurement_tasks WHERE job_id=?',(job_id,)).fetchone():
+                        route['measurement_resource_sample'] = {k:resource_snapshot.get(k) for k in ('observed_at','pressure','swapout_delta_bytes','available_bytes')}
+                        db.execute('UPDATE jobs SET route_data=? WHERE job_id=?',(canonical(route),job_id))
                 request_bytes=current.get('capacity_evidence',{}).get('request_bytes',0)
                 if route.get('assessment'):
                     from .capacity import available_budget,assessment_request_bytes

@@ -1,6 +1,6 @@
 # Model measurements per project implementation plan
 
-> **For agentic workers:** Use `superpowers:executing-plans` to implement this plan natively, task by task. Preserve the owner's restriction against another independent reviewer loop. Steps use checkbox syntax. The owner authorized native implementation on 2026-10-22.
+> **For agentic workers:** Use `superpowers:executing-plans` to implement this plan natively, task by task. Preserve the owner's restriction against another independent reviewer loop. The owner authorized native implementation on 2026-10-22.
 
 **Goal:** Produce private, auditable model/project reports for quality, native usage, time, and resource suitability without changing routing or executing extra work.
 
@@ -11,6 +11,10 @@
 **Spec:** [Model measurements per project](../specs/2026-10-22-project-model-measurements-design.md).
 
 **Source baseline:** `63cc02ba6ef9eb7b3dd372fa726a7e479be65b2c`. Recheck the branch, current source, applicable instructions, and connected callers before implementation. Preserve unrelated onboarding and deferred loading work.
+
+## Completion status
+
+All five source implementation tasks are complete. The original task recipes below remain as planning history; actual checks, self-review findings, implementation adjustments, and remaining qualification gates are recorded in [Offline validation](../../project-measurements-validation.md). The completed offline suite passed 219 tests. No installation or live qualification was performed.
 
 ## Global constraints
 
@@ -57,12 +61,12 @@ Context fields: `project_id`, `origin`, `scope`, `environment_digest`, `environm
 
 Every event contains `schema_version: 1`, `producer`, `source_key`, `kind`, `observed_at`, `payload`, and optional `supersedes`. Validate finite nonnegative counts/durations, bounded strings, strict known keys, predecessor ownership, and JSON limits. Define kind-specific fields beside their consumers in Tasks 2–4; never accept an arbitrary payload as authoritative evidence.
 
-- [ ] Write failing tests: shared Git common directory resolves one UUID; independent clones/same labels resolve two; non-Git roots remain separate; canonical aliases resolve consistently; unsafe state is rejected.
-- [ ] Add tests proving initialization preserves config/profile bytes, queue version, all jobs/attempts/fallback claims, and existing pinned bundles. Repeated initialization must be idempotent; future measurement versions must be rejected.
-- [ ] Add tests for context/event retry versus conflict, foreign-task corrections, non-finite values, and one unique job binding. Failed validation must write nothing.
-- [ ] Run `python3.11 -B -m unittest tests.test_projects tests.test_measurements tests.test_plugin tests.test_cli -q`; confirm the new assertions fail before implementation.
-- [ ] Implement the interfaces and `metrics init`, `metrics register --root --label`, `metrics begin --task --context [--job]`, and `metrics record --task --receipt`. Fresh `initialize_state` calls initialization; existing state uses explicit `metrics init`. Readers must not create state.
-- [ ] Rerun affected tests and commit only this task's changes.
+- Write failing tests: shared Git common directory resolves one UUID; independent clones/same labels resolve two; non-Git roots remain separate; canonical aliases resolve consistently; unsafe state is rejected.
+- Add tests proving initialization preserves config/profile bytes, queue version, all jobs/attempts/fallback claims, and existing pinned bundles. Repeated initialization must be idempotent; future measurement versions must be rejected.
+- Add tests for context/event retry versus conflict, foreign-task corrections, non-finite values, and one unique job binding. Failed validation must write nothing.
+- Run `python3.11 -B -m unittest tests.test_projects tests.test_measurements tests.test_plugin tests.test_cli -q`; confirm the new assertions fail before implementation.
+- Implement the interfaces and `metrics init`, `metrics register --root --label`, `metrics begin --task --context [--job]`, and `metrics record --task --receipt`. Fresh `initialize_state` calls initialization; existing state uses explicit `metrics init`. Readers must not create state.
+- Rerun affected tests and commit only this task's changes.
 
 ## Task 2: Bind real task outcomes without changing execution
 
@@ -77,13 +81,13 @@ Every event contains `schema_version: 1`, `producer`, `source_key`, `kind`, `obs
 
 Define typed `local_verdict`, `delivery`, and `incident` payloads. Local verdict contains attempt ID, candidate hash, check-receipt hash, accepted/rejected verdict, and controlled failure category. Delivery contains final artifact hash, destination-check receipt hash, `unchanged_local|native_edited|native_fallback|not_integrated`, and native task ID when applicable. Summary delivery uses a verified answer hash instead of a repository commit. Incident contains affected delivery event, evidence reference/hash, and `confirmed|withdrawn` disposition. All are coordinator/helper-authored, not model-authored.
 
-- [ ] Reproduce in fixtures: local failure followed by native success; a second candidate overwriting current verification files; duplicate enqueue with changed context; crash before receipt collection; active/uncertain attempt; accepted-but-not-integrated candidate.
-- [ ] Assert local verdict survives fallback, native success is not local success, uncertainty remains pending, old unscoped jobs stay unscoped, and replay never adds another attempt or receipt.
-- [ ] Add timing tests for queue/inference/verification/delivery boundaries, clock reversal, and unknown restart intervals. No fake zero durations.
-- [ ] Run `python3.11 -B -m unittest tests.test_store tests.test_worker tests.test_delegation tests.test_validation tests.test_measurements tests.test_cli -q`; confirm new tests fail.
-- [ ] Attach immutable metadata on enqueue, selected binding on admission, and local verdict at the common verifier/fallback seams. Preserve check evidence by candidate hash. Add only missing timestamps/durations; keep stale/admission/recovery behavior unchanged.
-- [ ] Expose `metrics reconcile`. A missing measurement schema/export failure must leave task execution intact and report degraded coverage; an explicit malformed receipt must fail.
-- [ ] Rerun affected tests and existing recovery/scheduler tests. Commit the coherent change.
+- Reproduce in fixtures: local failure followed by native success; a second candidate overwriting current verification files; duplicate enqueue with changed context; crash before receipt collection; active/uncertain attempt; accepted-but-not-integrated candidate.
+- Assert local verdict survives fallback, native success is not local success, uncertainty remains pending, old unscoped jobs stay unscoped, and replay never adds another attempt or receipt.
+- Add timing tests for queue/inference/verification/delivery boundaries, clock reversal, and unknown restart intervals. No fake zero durations.
+- Run `python3.11 -B -m unittest tests.test_store tests.test_worker tests.test_delegation tests.test_validation tests.test_measurements tests.test_cli -q`; confirm new tests fail.
+- Attach immutable metadata on enqueue, selected binding on admission, and local verdict at the common verifier/fallback seams. Preserve check evidence by candidate hash. Add only missing timestamps/durations; keep stale/admission/recovery behavior unchanged.
+- Expose `metrics reconcile`. A missing measurement schema/export failure must leave task execution intact and report degraded coverage; an explicit malformed receipt must fail.
+- Rerun affected tests and existing recovery/scheduler tests. Commit the coherent change.
 
 ## Task 3: Honest quality, time, usage, and savings aggregates
 
@@ -97,13 +101,13 @@ Define typed `local_verdict`, `delivery`, and `incident` payloads. Local verdict
 
 Usage payload fields: native binding, `source_run_id`, `span_id`, start/end, `phase`, `usage_schema`, token fields, `complete`, `attribution` (`exclusive|shared|unknown`), and evidence hash/reference. Authoritative totals and decompositions carry a common group ID with explicit `total|component` role. Components cannot be added to their authoritative total. Unknown source schemas and unresolved shared attribution cannot yield savings. One-time spans have allocation fractions per cohort whose sum cannot exceed 1; unallocated remainder stays visible.
 
-- [ ] Add table-driven tests for every denominator in the spec; separate first-candidate verdicts, local delivery, admission fallback, native rescue, cancellation, pending, and confirmed/withdrawn incidents.
-- [ ] Test version/environment/project separation, three repeated cases versus six distinct cases, last-30 versus lifetime, missing timings, and p95 hidden at 19 samples but present at 20.
-- [ ] Add a fictional arithmetic fixture: baseline 1,000 tokens, complete delegated-route usage 300, allocated overhead 100; expected proxy 600. A failed route with 1,100 usage and 100 overhead produces -200, never zero.
-- [ ] Test every missing term gives unknown; unique spans count once; totals plus components do not double-count; cached/reasoning subsets are not added twice; mixed producers/models are incomparable; partial coverage is not a whole-cohort claim.
-- [ ] Test allocating one overhead span across two projects cannot charge more than its original amount. An incomplete allocation leaves all-in savings unknown.
-- [ ] Run `python3.11 -B -m unittest tests.test_measurements -q`; confirm failures, implement the pure calculations with standard-library functions, then rerun.
-- [ ] Verify successful local-only selection cannot hide fallback costs or failed native baselines. Commit after the affected tests pass.
+- Add table-driven tests for every denominator in the spec; separate first-candidate verdicts, local delivery, admission fallback, native rescue, cancellation, pending, and confirmed/withdrawn incidents.
+- Test version/environment/project separation, three repeated cases versus six distinct cases, last-30 versus lifetime, missing timings, and p95 hidden at 19 samples but present at 20.
+- Add a fictional arithmetic fixture: baseline 1,000 tokens, complete delegated-route usage 300, allocated overhead 100; expected proxy 600. A failed route with 1,100 usage and 100 overhead produces -200, never zero.
+- Test every missing term gives unknown; unique spans count once; totals plus components do not double-count; cached/reasoning subsets are not added twice; mixed producers/models are incomparable; partial coverage is not a whole-cohort claim.
+- Test allocating one overhead span across two projects cannot charge more than its original amount. An incomplete allocation leaves all-in savings unknown.
+- Run `python3.11 -B -m unittest tests.test_measurements -q`; confirm failures, implement the pure calculations with standard-library functions, then rerun.
+- Verify successful local-only selection cannot hide fallback costs or failed native baselines. Commit after the affected tests pass.
 
 ## Task 4: Register and compare separately authorized evidence
 
@@ -117,12 +121,12 @@ Usage payload fields: native binding, `source_run_id`, `span_id`, start/end, `ph
 
 Manifest fields: project/cohort, case IDs and snapshot/contract/check hashes, exact local/native bindings, local/native maximum calls, consent reference, expiry/revocation evidence, and method (`paired|observational`). Run receipt links case, route, task ID, attempt identity, submitted/uncertain/completed state, source/check hashes, execution-order index, isolation evidence, and evaluator provenance. Registration is bookkeeping, not permission to execute. The external executor must reserve/enforce its own authorized budget before POST; report ingestion cannot retroactively prevent excess calls.
 
-- [ ] Write failing tests rejecting changed artifacts/cases/checks/settings, duplicate pair legs, wrong project, native fallback used as baseline, missing isolation, and reused consent for a different manifest.
-- [ ] Test identical receipt replay consumes no additional allowance; distinct failed and uncertain attempts do. Over-budget evidence is retained as a violation, excluded from qualification, and never triggers retry.
-- [ ] Test normal-work baselines are labelled observational; a paired label requires matching frozen cases and independent execution. Native baseline failure stays visible and cannot become a comparable saving.
-- [ ] Patch runtime streaming, native dispatch, and lifecycle functions to raise in command tests; all registration/report operations must still pass with zero calls.
-- [ ] Implement bounded ledger/import behavior only. Do not extend `begin_assessment`, its bundled fixture consent, or native fallback dispatch to run arbitrary cases.
-- [ ] Run `python3.11 -B -m unittest tests.test_measurements tests.test_cli tests.test_onboarding -q`; commit once passing.
+- Write failing tests rejecting changed artifacts/cases/checks/settings, duplicate pair legs, wrong project, native fallback used as baseline, missing isolation, and reused consent for a different manifest.
+- Test identical receipt replay consumes no additional allowance; distinct failed and uncertain attempts do. Over-budget evidence is retained as a violation, excluded from qualification, and never triggers retry.
+- Test normal-work baselines are labelled observational; a paired label requires matching frozen cases and independent execution. Native baseline failure stays visible and cannot become a comparable saving.
+- Patch runtime streaming, native dispatch, and lifecycle functions to raise in command tests; all registration/report operations must still pass with zero calls.
+- Implement bounded ledger/import behavior only. Do not extend `begin_assessment`, its bundled fixture consent, or native fallback dispatch to run arbitrary cases.
+- Run `python3.11 -B -m unittest tests.test_measurements tests.test_cli tests.test_onboarding -q`; commit once passing.
 
 ## Task 5: Reports, optional visibility, coordinator guidance, and release proof
 
@@ -134,14 +138,14 @@ Manifest fields: project/cohort, case IDs and snapshot/contract/check hashes, ex
 - `measurements.render_text_report(report: dict) -> str`.
 - `visibility.build_measurements_snapshot(report: dict, generated_at: float) -> dict`: sanitized read-only projection, sharing the existing visibility preference.
 
-- [ ] Add failing tests for empty/old state without writes, all cohorts visible, exact unknown reasons, correct format, and no usage figure inferred from account limits or text length.
-- [ ] Test export excludes source/prompts/paths/remotes/secrets; disabled visibility removes both exports and never republishes them. Export failures must not alter accepted work. Reports must work with visibility disabled.
-- [ ] Document the exact context/event/usage/comparison schemas, first-release limits, and examples using fictional data. Explain optional host receipt capture and unsupported telemetry yielding unknown savings.
-- [ ] Update coordinator guidance to capture normal-work context and final integration, preserve canonical verification, include its own overhead, and use report recommendations without granting approval. Keep legacy `outcome` behavior explicit and separate; do not double-submit receipts to both APIs as if they were one measurement.
-- [ ] Implement commands and projection. Keep existing generic task labels. Make private collection independent of the viewer; extend uninstall/export cleanup without deleting measurement history.
-- [ ] Run `python3.11 -B -m unittest discover -s tests -t . -q` and `git diff --check`. Check Markdown links and package portability. Run the skill validator only if its existing dependencies are available; otherwise record the limitation without installing anything.
-- [ ] Replay a fictional sequence covering two projects, local acceptance, failed local plus native rescue, missing usage, a comparable pair, an uncertain attempt, and a process restart. Assert zero inference/lifecycle calls and unchanged routing/profile/auth fixtures.
-- [ ] Perform native self-review against the spec and every connected caller. No new independent reviewer loop. Commit coherent corrections and record exact source revision/check results.
+- Add failing tests for empty/old state without writes, all cohorts visible, exact unknown reasons, correct format, and no usage figure inferred from account limits or text length.
+- Test export excludes source/prompts/paths/remotes/secrets; disabled visibility removes both exports and never republishes them. Export failures must not alter accepted work. Reports must work with visibility disabled.
+- Document the exact context/event/usage/comparison schemas, first-release limits, and examples using fictional data. Explain optional host receipt capture and unsupported telemetry yielding unknown savings.
+- Update coordinator guidance to capture normal-work context and final integration, preserve canonical verification, include its own overhead, and use report recommendations without granting approval. Keep legacy `outcome` behavior explicit and separate; do not double-submit receipts to both APIs as if they were one measurement.
+- Implement commands and projection. Keep existing generic task labels. Make private collection independent of the viewer; extend uninstall/export cleanup without deleting measurement history.
+- Run `python3.11 -B -m unittest discover -s tests -t . -q` and `git diff --check`. Check Markdown links and package portability. Run the skill validator only if its existing dependencies are available; otherwise record the limitation without installing anything.
+- Replay a fictional sequence covering two projects, local acceptance, failed local plus native rescue, missing usage, a comparable pair, an uncertain attempt, and a process restart. Assert zero inference/lifecycle calls and unchanged routing/profile/auth fixtures.
+- Perform native self-review against the spec and every connected caller. No new independent reviewer loop. Commit coherent corrections and record exact source revision/check results.
 
 ## Stop condition and live qualification handoff
 

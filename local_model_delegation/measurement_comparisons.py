@@ -60,7 +60,11 @@ def record_comparison_run(state_dir, comparison_id, receipt):
             require(task['job_id'] is not None,'comparison_local_job_required')
             obs=job_observation(db,task['job_id'])
             require(obs['binding']==manifest['local_binding'],'comparison_binding_mismatch')
-            require(any(a['attempt_id']==receipt['attempt_id'] for a in obs['attempts']),'comparison_attempt_mismatch')
+            attempt=next((a for a in obs['attempts'] if a['attempt_id']==receipt['attempt_id']),None)
+            require(attempt is not None,'comparison_attempt_mismatch')
+            if receipt['state']=='completed': require(attempt['state']=='complete','comparison_attempt_not_complete')
+            if attempt['submitted_at'] is not None:
+                require(receipt['submitted_at']==attempt['submitted_at'],'comparison_submission_mismatch')
         else:
             require(task['job_id'] is None,'fallback_is_not_baseline')
         for row in db.execute("SELECT receipt FROM measurement_events WHERE kind='comparison_run'"):

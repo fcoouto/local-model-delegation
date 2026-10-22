@@ -97,12 +97,14 @@ def runtime_entrypoint(bundle):
 
 
 def prepare_uninstall(state_dir):
-    from .visibility import _lock,_path
+    from .visibility import _lock,_path,measurement_path
     root=Path(state_dir)
     if not root.exists():return {'status':'ready','state_preserved':True}
     config=read_config(root);config['routing_enabled']=False
     atomic_json(root/('config.json' if config['schema_version']==2 else 'profiles.json'),config)
     store=Store(root)
     with store.db(write=True) as db:_quiescent(db)
-    with _lock(root):_path(root).unlink(missing_ok=True)
+    with _lock(root):
+        _path(root).unlink(missing_ok=True)
+        measurement_path(root).unlink(missing_ok=True)
     return {'status':'ready','state_preserved':True,'models_preserved':True}

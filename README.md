@@ -53,6 +53,14 @@ Read the [onboarding guide](docs/onboarding.md) for the agent's workflow and [on
 
 The objective is lower native usage without lower quality. **No net subscription saving is qualified yet.** Token differences are labelled proxies and include coordination, verification and fallback overhead.
 
+## Measurements per project
+
+Private scorecards separate each project, model version, and task scope: candidate acceptance, delivery without native rewriting, fallback, reported corrections, timing, admission observations, and attributable native-token savings. Synthetic trials stay separate. Missing usage or comparable baselines means savings remain unknown.
+
+Use `python3.11 -B delegate.py metrics report --project PROJECT_ID --format text` after recording evidence. Fresh authorized setup initializes collection; existing state uses `metrics init`. [Commands and receipt contracts](skills/local-delegation/references/measurements.md) cover registration, delivery, usage, and separately authorized comparisons. These commands never execute comparisons or alter routing/approval. Optional visibility follows the existing switch.
+
+Automatic native usage capture and real-project savings still require host qualification. The scheduler retains its earlier model-global benefit policy; project-aware automatic routing is not implemented by these reports.
+
 ## Clone and inspect
 
 Requires Python 3.11+, macOS and a qualified `sandbox-exec` boundary for executable candidates. Source runtime uses only the standard library.

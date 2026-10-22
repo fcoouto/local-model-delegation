@@ -59,16 +59,19 @@ def quality(tasks, events):
             counts['verdicts']+=1;counts['accepted']+=first['accepted']
             reasons[first['category']]+=not first['accepted']
         elif submitted: counts['missing_verdicts']+=1
+        closed_decision=bool(delivered) or obs.get('status') in ('failed','needs_reassessment')
+        if closed_decision:
+            counts['closed_submitted']+=submitted
+            counts['closed']+=1;closed.append(task)
+            fallback=bool(obs.get('fallback') or delivered and delivered['payload']['outcome']=='native_fallback')
+            counts['fallback']+=fallback
+            counts['pre_post_fallback']+=fallback and not submitted
+            counts['post_post_fallback']+=fallback and submitted
         if delivered:
             result=delivered['payload']['outcome'];counts[result]+=1
-            counts['closed_submitted']+=submitted
             # A contradictory delivery receipt cannot turn native rescue into local success.
             counts['local_success']+=int(result=='unchanged_local' and submitted and bool(verdicts)
                 and verdicts[-1]['payload']['accepted'] and not obs.get('fallback') and not obs.get('native_task_id'))
-            counts['closed']+=1;closed.append(task)
-            counts['fallback']+=bool(obs.get('fallback') or result=='native_fallback')
-            counts['pre_post_fallback']+=bool(obs.get('fallback') and not submitted)
-            counts['post_post_fallback']+=bool(obs.get('fallback') and submitted)
             for phase,value in delivered['payload']['durations'].items(): times[phase].append(value)
         else: counts['pending_delivery']+=1
         if obs.get('reason'): reasons[obs['reason']]+=1
@@ -148,19 +151,23 @@ def build_report(rows, *, project_id, profile_id=None, now):
     cohorts=[]
     for code,tasks in groups.items():
         q,counts,latency,closed=quality(tasks,events)
-        recent=sorted(closed,key=lambda t:max(e['observed_at'] for e in events[t['task_id']] if e['kind']=='delivery'))[-30:]
+        recent=sorted(closed,key=lambda t:max((e['observed_at'] for e in events[t['task_id']]),default=0))[-30:]
         result=savings(tasks,all_tasks,events,rows.get('pairs',[]))
         recommendation='insufficient_evidence'
         if q['confirmed_incidents'] or q['first_candidate']['evaluated']>q['first_candidate']['passed']: recommendation='needs_attention'
         elif q['first_candidate']['evaluated']:
             recommendation='savings_not_demonstrated' if result['net_native_token_proxy'] is None or result['net_native_token_proxy']<=0 else 'promising_scope'
+        samples={digest(s):s for t in tasks if (s:=t.get('observation',{}).get('resource_sample'))}
+        swaps=[s['swapout_delta_bytes'] for s in samples.values() if type(s.get('swapout_delta_bytes')) is int]
         cohorts.append({'cohort_id':code,**keys[code], 'quality':q,'last_30_closed':quality(recent,events)[0],
             'coverage':{'tasks':len(tasks),'distinct_cases':len({t['context']['case_hash'] for t in tasks}),
                         'attempts':counts['attempts'],'missing_verdicts':counts['missing_verdicts'],
                         'pending_delivery':counts['pending_delivery'],'uncertain_attempts':counts['uncertain_attempts']},
             'latency':latency,'savings':result,'recommendation':recommendation,
             'resources':{'request_bytes':sorted({t.get('observation',{}).get('request_bytes') for t in tasks if t.get('observation',{}).get('request_bytes') is not None}),
-                         'pressure':'unknown','swap':'unknown','limit':'Admission estimates are not measured model residency.'}})
+                         'pressure_counts':dict(Counter(s.get('pressure','unknown') for s in samples.values())),
+                         'observed_swapout_bytes':max(swaps) if swaps else None,'samples':len(samples),
+                         'limit':'Admission observations only; host swap deltas may overlap. Not measured model residency or inference-wide coverage.'}})
     return {'schema_version':1,'project_id':project_id,'generated_at':now,'cohorts':cohorts,
             'comparisons':[c for c in rows.get('comparisons',[]) if c['project_id']==project_id],
             'control':'read_only_recommendations','reliability_limit':'Descriptive counts are not a statistical reliability guarantee.'}

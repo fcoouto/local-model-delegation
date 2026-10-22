@@ -54,3 +54,7 @@ Report four items: **verified**, **pending or blocked**, **routing state**, and 
 The owner can paste the README prompt again, or say “Resume Local Model Delegation setup.” Read current state and continue at the first unfinished step. Preserve completed decisions; never create a second active queue to restart onboarding.
 
 The project remains a development preview. Desktop installation and real-model end-to-end qualification are separate from the [simulated onboarding evaluation](onboarding-validation.md); net subscription savings are not established.
+
+## Project measurements
+
+After authorized setup/update, the agent can register project measurement context and record ordinary work without extra inference. Fresh setup initializes the ledger; existing state uses `metrics init`. [Measurement contracts](../skills/local-delegation/references/measurements.md) explain the commands and optional telemetry. Candidate acceptance, destination delivery, and later reported corrections remain distinct. Reports cannot approve a model or enable routing. Additional comparisons need separate bounded consent; missing usage or baselines leaves savings unknown.

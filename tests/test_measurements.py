@@ -316,3 +316,120 @@ class Measurements(Fixture):
         m.revoke_comparison(self.state,cid,5,'f'*64)
         result=m.record_comparison_run(self.state,cid,receipt)
         self.assertIn('consent_not_valid_at_submission',result['violations'])
+
+    def test_report_empty_state_and_text_are_read_only(self):
+        m=self.api()
+        absent=self.root/'absent'
+        try: report=m.read_report(absent,project_id='project')
+        except ValueError as error: self.fail('empty reports should describe missing state: '+str(error))
+        self.assertEqual(report['cohorts'],[]);self.assertFalse(absent.exists())
+        m=self.setup_metrics()
+        before=(self.state/'profiles.json').read_bytes()
+        report=m.read_report(self.state,project_id=self.project_id)
+        self.assertEqual(report['cohorts'],[])
+        self.assertTrue(hasattr(m,'render_text_report'))
+        self.assertIn('No measured tasks',m.render_text_report(report))
+        self.assertEqual(before,(self.state/'profiles.json').read_bytes())
+
+    def test_visibility_is_optional_sanitized_and_removes_both_exports(self):
+        from local_model_delegation import visibility
+        m,store,job=self.staged_measurement()
+        self.assertTrue(hasattr(visibility,'publish_measurements'),'measurement export is missing')
+        m.capture_job_observation(self.state,job)
+        visibility.publish_measurements(self.state)
+        path=self.state/'visibility/measurements.json'
+        self.assertTrue(path.exists());text=path.read_text()
+        self.assertNotIn(str(self.project),text);self.assertNotIn('trimStart',text)
+        self.assertNotIn('environment_manifest',text);self.assertNotIn('native_binding',text)
+        visibility.set_visibility(self.state,False)
+        self.assertFalse(path.exists());self.assertFalse((path.parent/'status.json').exists())
+        m.capture_job_observation(self.state,job);visibility.publish_measurements(self.state)
+        self.assertFalse(path.exists())
+        self.assertEqual(len(m.read_report(self.state,project_id=self.project_id)['cohorts']),1)
+
+    def test_export_failure_does_not_undo_receipt(self):
+        from unittest.mock import patch
+        m=self.setup_metrics();m.begin_measurement(self.state,'task',self.context())
+        self.assertTrue(hasattr(__import__('local_model_delegation.visibility',fromlist=['publish_measurements']),'publish_measurements'))
+        with patch('local_model_delegation.visibility.publish_measurements',side_effect=OSError('fixture failure')):
+            event=m.append_event(self.state,'task',self.receipt('delivery',{'outcome':'not_integrated',
+                'artifact_hash':'a'*64,'checks_hash':'b'*64,'native_task_id':None,'durations':{}}))
+        with sqlite3.connect(self.state/'state.sqlite3') as db:
+            self.assertIsNotNone(db.execute('SELECT 1 FROM measurement_events WHERE event_id=?',(event['event_id'],)).fetchone())
+
+    def test_full_pair_report_uses_real_ledger_and_verification(self):
+        from tests.test_delegation import Delegation
+        from local_model_delegation.validation import prepare_verification,record_verification
+        m,store,manifest,run=self.comparison();job=run['task_id']
+        session=prepare_verification(self.state,job)
+        record_verification(self.state,job,Delegation.receipt(self,session))
+        cid=m.register_comparison(self.state,manifest)['comparison_id']
+        m.record_comparison_run(self.state,cid,run)
+        m.record_comparison_run(self.state,cid,{**run,'route':'native','task_id':'baseline','attempt_id':'native-one','order':1})
+        for task,outcome,amount in [(job,'unchanged_local',300),('baseline','native_only',1000)]:
+            m.append_event(self.state,task,self.receipt('delivery',{'outcome':outcome,'artifact_hash':'a'*64,
+                'checks_hash':'b'*64,'native_task_id':None,'durations':{'overall':20}},key=task+'-delivery'))
+            m.record_usage(self.state,task,self.receipt('usage',self.usage(amount,source_run_id=task),key=task+'-usage'))
+        m.record_usage(self.state,job,self.receipt('usage',self.usage(100,phase='onboarding',source_run_id='setup',allocations={job:1}),key='setup'))
+        report=m.read_report(self.state,project_id=self.project_id,profile_id='fictional')
+        self.assertEqual(report['cohorts'][0]['savings']['net_native_token_proxy'],600)
+        self.assertEqual(report['cohorts'][0]['quality']['local_delivery'],{'passed':1,'evaluated':1})
+        self.assertEqual(m.reconcile_measurements(self.state)['conflicts'],[])
+        self.assertEqual(m.read_report(self.state,project_id=self.project_id,profile_id='fictional')['cohorts'],report['cohorts'])
+
+    def test_incident_withdrawal_cannot_leave_old_incident_counted(self):
+        m=self.setup_metrics();m.begin_measurement(self.state,'task',self.context())
+        delivery=m.append_event(self.state,'task',self.receipt('delivery',{'outcome':'not_integrated',
+            'artifact_hash':'a'*64,'checks_hash':'b'*64,'native_task_id':None,'durations':{}}))
+        payload={'delivery_event':delivery['event_id'],'evidence_hash':'a'*64,'disposition':'confirmed'}
+        incident=m.append_event(self.state,'task',self.receipt('incident',payload,key='incident'))
+        m.append_event(self.state,'task',self.receipt('incident',{**payload,'disposition':'withdrawn'},key='withdrawal',supersedes=incident['event_id']))
+        self.assertEqual(m.read_report(self.state,project_id=self.project_id)['cohorts'][0]['quality']['confirmed_incidents'],0)
+
+    def test_resource_observations_remain_host_samples_not_model_residency(self):
+        m=self.api();rows=self.report_rows()
+        rows['tasks'][0]['observation']['resource_sample']={'observed_at':99,'pressure':'warning','swapout_delta_bytes':1024,'available_bytes':2048}
+        resources=m.build_report(rows,project_id='project',profile_id='fictional',now=200)['cohorts'][0]['resources']
+        self.assertEqual(resources.get('pressure_counts'),{'warning':1})
+        self.assertEqual(resources.get('observed_swapout_bytes'),1024)
+
+    def test_usage_supports_multiple_corrections_without_reusing_a_span(self):
+        m=self.setup_metrics();m.begin_measurement(self.state,'task',self.context())
+        receipt=self.receipt('usage',self.usage())
+        previous=m.record_usage(self.state,'task',receipt)['event_id']
+        for i in range(2):
+            receipt=self.receipt('usage',self.usage(301+i),key='correction'+str(i),supersedes=previous)
+            previous=m.record_usage(self.state,'task',receipt)['event_id']
+        self.assertEqual(len(m.read_report(self.state,project_id=self.project_id)['cohorts']),1)
+
+    def test_terminal_failure_counts_in_closed_decisions_without_delivery_receipt(self):
+        m=self.api();rows=self.report_rows();rows['tasks'][0]['observation'].update(status='failed',fallback=True)
+        rows['events']=[e for e in rows['events'] if e['event_id']!='localdelivery']
+        q=m.build_report(rows,project_id='project',profile_id='fictional',now=200)['cohorts'][0]['quality']
+        self.assertEqual(q['local_delivery'],{'passed':0,'evaluated':1})
+        self.assertEqual(q['fallback']['closed_decisions'],1)
+
+    def test_unverified_candidate_cannot_claim_unchanged_delivery(self):
+        m,store,job=self.staged_measurement()
+        with self.assertRaisesRegex(ValueError,'delivery_not_verified'):
+            m.append_event(self.state,job,self.receipt('delivery',{'outcome':'unchanged_local','artifact_hash':'a'*64,
+                'checks_hash':'b'*64,'native_task_id':None,'durations':{}}))
+
+    def test_format_rejection_records_a_local_verdict(self):
+        from local_model_delegation.validation import prepare_verification
+        from local_model_delegation.store import atomic_json
+        from local_model_delegation.contracts import text_hash
+        m,store,job=self.staged_measurement()
+        path=__import__('pathlib').Path(store.job(job)['result_path'])
+        atomic_json(path,{'text':'invalid json','sha256':text_hash('invalid json')})
+        with self.assertRaises(ValueError): prepare_verification(self.state,job)
+        cohort=m.read_report(self.state,project_id=self.project_id)['cohorts'][0]
+        self.assertEqual(cohort['quality']['first_candidate'],{'passed':0,'evaluated':1})
+        self.assertEqual(cohort['quality']['reasons'].get('format'),1)
+
+    def test_comparison_cannot_certify_an_unfinished_local_attempt(self):
+        m,store,manifest,receipt=self.comparison()
+        cid=m.register_comparison(self.state,manifest)['comparison_id']
+        with store.db() as db:db.execute("UPDATE attempts SET state='uncertain'")
+        with self.assertRaisesRegex(ValueError,'comparison_attempt_not_complete'):
+            m.record_comparison_run(self.state,cid,receipt)

@@ -339,6 +339,11 @@ def prepare_verification(state_dir, job_id):
         store = Store(state_dir)
         job = store.job(job_id)
         if job['status'] in ('candidate_ready', 'checking') and str(error) != 'verification_busy':
+            from .measurements import collect_verdict
+            from json import JSONDecodeError
+            category = 'format' if isinstance(error,JSONDecodeError) or str(error) in ('invalid_candidate','invalid_citation','unsafe_path') else 'verification'
+            if str(error)=='source_changed': category='source_changed'
+            collect_verdict(store.root,job_id,{'accepted':False,'error':type(error).__name__,'category':category},False,category)
             if str(error) == 'source_changed' or job['native_task_id']:
                 with store.db(write=True) as db:
                     db.execute('UPDATE jobs SET status=?,reason=? WHERE job_id=?',

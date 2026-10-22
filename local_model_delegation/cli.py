@@ -137,6 +137,10 @@ def main(argv=None):
     metrics = p.add_subparsers(dest='action', required=True)
     metrics.add_parser('init')
     metrics.add_parser('reconcile')
+    p = metrics.add_parser('report')
+    p.add_argument('--project', required=True)
+    p.add_argument('--model')
+    p.add_argument('--format', choices=['json','text'], default='json')
     p = metrics.add_parser('register')
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--label', required=True)
@@ -170,6 +174,10 @@ def main(argv=None):
             from . import measurements
             if args.action == 'init': result = measurements.initialize_measurements(args.state_dir)
             elif args.action == 'reconcile': result = measurements.reconcile_measurements(args.state_dir)
+            elif args.action == 'report':
+                result = measurements.read_report(args.state_dir,project_id=args.project,profile_id=args.model)
+                if args.format == 'text':
+                    print(measurements.render_text_report(result)); return 0
             elif args.action == 'register': result = measurements.register_project(args.state_dir, args.root, args.label)
             elif args.action == 'begin': result = measurements.begin_measurement(args.state_dir, args.task, read_input(args.context), args.job)
             elif args.action == 'comparison-register': result = measurements.register_comparison(args.state_dir, read_input(args.manifest))

@@ -49,6 +49,7 @@ def connection(state_dir, *, write=False, initialize=False):
     db = sqlite3.connect('file:'+quote(str(path))+'?mode='+('rw' if write else 'ro'), uri=True,
                          timeout=.25, isolation_level=None)
     db.row_factory = sqlite3.Row
+    committed = False
     try:
         db.execute('PRAGMA foreign_keys=ON')
         if write: db.execute('BEGIN IMMEDIATE')
@@ -59,12 +60,19 @@ def connection(state_dir, *, write=False, initialize=False):
         elif not initialize:
             raise ValueError('measurements_not_initialized')
         yield db
-        if write: db.commit()
+        if write:
+            db.commit(); committed = True
     except BaseException:
         if write: db.rollback()
         raise
     finally:
         db.close()
+    if committed:
+        try:
+            from .visibility import publish_measurements
+            publish_measurements(state_dir)
+        except (OSError,ValueError,sqlite3.Error):
+            pass  # A read-only export cannot undo a committed measurement.
 
 
 def initialize_measurements(state_dir: Path) -> dict:
@@ -170,7 +178,7 @@ def _validate_payload(kind, payload):
         require(identifier(payload['attempt_id']) and sha(payload['candidate_hash']) and sha(payload['checks_hash']))
         require(type(payload['accepted']) is bool and payload['category'] in ('accepted','semantic','format','framework','source_changed','verification'))
     elif kind == 'job_observation':
-        fields(payload, {'status','reason','binding','attempts','native_task_id','fallback','queued_at','request_bytes'})
+        fields(payload, {'status','reason','binding','attempts','native_task_id','fallback','queued_at','request_bytes','resource_sample'})
         require(isinstance(payload['attempts'],list) and isinstance(payload['binding'],dict))
     elif kind == 'delivery':
         fields(payload, {'outcome','artifact_hash','checks_hash','native_task_id','durations'})
@@ -208,13 +216,25 @@ def _append(db, task_id, receipt, *, internal=False):
         require(not db.execute('SELECT 1 FROM measurement_events WHERE supersedes=?', (supersedes,)).fetchone(), 'measurement_conflict')
     if receipt['kind'] == 'delivery' and not supersedes:
         require(not db.execute("SELECT 1 FROM measurement_events WHERE task_id=? AND kind='delivery'",(task_id,)).fetchone(), 'delivery_already_recorded')
+    if receipt['kind'] == 'delivery':
+        outcome=receipt['payload']['outcome']
+        if outcome == 'unchanged_local':
+            require(task['job_id'] is not None,'delivery_not_verified')
+            job=db.execute('SELECT status,native_task_id FROM jobs WHERE job_id=?',(task['job_id'],)).fetchone()
+            verdicts=[load_json(r['receipt'])['payload'] for r in db.execute("SELECT receipt FROM measurement_events WHERE task_id=? AND kind='local_verdict' ORDER BY rowid",(task_id,))]
+            require(job['status']=='accepted' and job['native_task_id'] is None and verdicts and verdicts[-1]['accepted'],'delivery_not_verified')
+        if outcome == 'native_only': require(task['job_id'] is None,'fallback_is_not_baseline')
     if receipt['kind'] == 'incident':
         require(db.execute("SELECT 1 FROM measurement_events WHERE event_id=? AND task_id=? AND kind='delivery'",
                            (receipt['payload']['delivery_event'],task_id)).fetchone(), 'invalid_incident')
     if receipt['kind'] == 'usage':
         payload = receipt['payload']
         require(load_json(task['context'])['native_binding'] == payload['native_binding'], 'usage_binding_mismatch')
-        for row in db.execute("SELECT event_id,task_id,receipt FROM measurement_events WHERE kind='usage'"):
+        if supersedes:
+            previous_payload=load_json(prior['receipt'])['payload']
+            require(all(previous_payload[k]==payload[k] for k in ('source_run_id','span_id','native_binding')), 'usage_span_conflict')
+            require(prior['producer']==receipt['producer'],'usage_span_conflict')
+        for row in db.execute("SELECT event_id,task_id,receipt FROM measurement_events e WHERE kind='usage' AND NOT EXISTS (SELECT 1 FROM measurement_events newer WHERE newer.supersedes=e.event_id)"):
             other = load_json(row['receipt'])
             if (other['producer'],other['payload']['source_run_id'],other['payload']['span_id']) == (receipt['producer'],payload['source_run_id'],payload['span_id']):
                 require(supersedes == row['event_id'] and row['task_id'] == task_id, 'usage_span_conflict')
@@ -260,8 +280,14 @@ def record_usage(state_dir: Path, task_id: str, receipt: dict) -> dict:
 
 
 def read_report(state_dir: Path, *, project_id: str, profile_id=None) -> dict:
-    with connection(state_dir) as db:
-        rows = read_measurement_rows(db)
+    require(identifier(project_id),'invalid_project_id')
+    try:
+        with connection(state_dir) as db:
+            rows = read_measurement_rows(db)
+    except ValueError as error:
+        if str(error) not in ('measurement_state_missing','measurements_not_initialized'): raise
+        return {'schema_version':1,'project_id':project_id,'cohorts':[], 'measurement_status':str(error),
+                'control':'read_only_recommendations'}
     return build_report(rows,project_id=project_id,profile_id=profile_id,now=time.time())
 
 
@@ -302,6 +328,23 @@ def revoke_comparison(state_dir, comparison_id, revoked_at, evidence_hash):
     return revoke(state_dir,comparison_id,revoked_at,evidence_hash)
 
 
+def render_text_report(report):
+    if not report['cohorts']:
+        return 'No measured tasks. '+report.get('measurement_status','No project evidence recorded.')
+    lines=[]
+    for cohort in report['cohorts']:
+        quality=cohort['quality'];saving=cohort['savings'];scope=cohort['scope']
+        lines.append(f"{cohort['model_binding'].get('profile_id','Unassigned')} / {scope['language']} {scope['capability']} / {cohort['origin']}")
+        rate=quality['first_candidate']
+        lines.append(f"First candidates: {rate['passed']}/{rate['evaluated']} accepted; {cohort['coverage']['missing_verdicts']} missing verdicts")
+        lines.append('Delivery: '+', '.join(f'{k}={v}' for k,v in quality['deliveries'].items()))
+        value=saving['net_native_token_proxy']
+        lines.append('Native token proxy: '+(str(value) if value is not None else 'unknown — '+', '.join(saving['unknown_reasons'])))
+        lines.append(f"Overall median: {cohort['latency']['overall']['median']} seconds; samples={cohort['latency']['overall']['samples']}")
+        lines.append(f"Evidence: {cohort['coverage']['tasks']} tasks, {cohort['coverage']['distinct_cases']} distinct cases; {cohort['recommendation']}")
+    return '\n'.join(lines)+'\nAccount savings remain unknown. Recommendations do not grant approval.'
+
+
 def bind_enqueued(db, job_id, context):
     if context is None: return
     # Missing optional collection cannot block existing authorization. Reports show the gap.
@@ -335,7 +378,8 @@ def job_observation(db, job_id):
     return {'status':job['status'],'reason':job['reason'],'binding':route.get('measurement_binding',model_binding(profile)),
             'attempts':attempts,'native_task_id':job['native_task_id'],
             'fallback': bool(route.get('local_failure') or job['native_task_id'] or job['status'].startswith(('fallback','dispatch'))),
-            'queued_at':job.get('queued_at'),'request_bytes':route.get('request_bytes')}
+            'queued_at':job.get('queued_at'),'request_bytes':route.get('request_bytes'),
+            'resource_sample':route.get('measurement_resource_sample')}
 
 
 def capture_job_observation(state_dir: Path, job_id: str) -> dict:
