@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.8
+
+- Fix automatic Habblaud observer startup from detached workers by reusing the validated immutable runtime bundle.
+- Start newly submitted jobs with the installed helper after an update, while existing jobs and recovery retain their recorded runtime pins.
+- Add an end-to-end regression covering a real detached worker, an older loaded-instance bundle, one model request and automatic hook delivery.
+
 ## 0.3.7
 
 - Show real local attempts beneath their coordinator in unchanged Habblaud through its existing hooks, for local npm and Docker deployments.
