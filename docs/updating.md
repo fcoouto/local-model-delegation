@@ -1,6 +1,6 @@
 # Guided plugin updates
 
-Use this procedure when the owner asks to update Local Model Delegation. The agent performs the available steps and asks only for missing authorization or a required manual action. An update preserves settings, exact approvals, model results and history. It keeps routing disabled; enabling it later is a separate decision.
+Use this procedure when the owner asks to update Local Model Delegation. The agent performs the available steps and asks only for missing authorization or a required manual action. An update preserves settings, exact approvals, model results and history. Routing and Habblaud publishing pause for verification, then return to their saved preferences. Restoring an already-enabled preference is part of the authorized update; first-time activation remains a separate decision.
 
 ## 1. Inspect and select a release
 
@@ -14,7 +14,9 @@ If no numbered release is published, report that fact. Do not silently install `
 
 Inspect live helper drivers and durable jobs, attempts, fallback dispatches and model operations. Do not duplicate work, resubmit an ambiguous attempt or clear a slot to bypass an update. Active work must settle using its existing pinned helper. If that helper cannot reconcile an uncertain external runtime, separately authorized [verified reset recovery](model-loading.md#recover-an-uncertain-inference-slot) may use a newer tested source before installation; this is recovery work, not an update test. A completed rejected synthetic trial is settled only when its assessment permit, brief and canonical outcome receipt match and it has no native dispatch.
 
-Routing and assessment admission must both be disabled. If the owner's update request requires routing to remain off, preserve that setting. When admission is enabled, stop new admission within the authorized update scope, preserve every other setting, and let active work settle before preparation. Do not disable or interrupt peer models. Record the prior admission values in private evidence; never restore them automatically.
+Before changing configuration, save an owner-only copy of the selected state's configuration under `STATE/updates/`, together with the state path, target package identity and any explicit request to remain paused. This records the original `routing_enabled`, assessment admission, `visibility_enabled`, and complete `habblaud` settings. Associate it with the preparation receipt when available. On resuming an interrupted update, reuse this original record; the already-paused configuration and preparation backup do not establish the owner's prior preference.
+
+Routing and assessment admission must both be disabled during preparation and verification. Pause new admission within the authorized update scope, preserve every other setting, and let active work settle before preparation. Do not disable or interrupt peer models. Previously disabled preferences remain disabled; an explicit owner request to remain paused takes precedence over restoration. Assessment admission is not automatically restarted by an update.
 
 Use the staged target helper for preparation. This is the explicit bootstrap path when an older installed helper lacks the new update commands. In the commands below, `TARGET`, `INSTALLED`, `STATE` and `RECEIPT` stand for verified absolute paths; the agent supplies them, not the owner.
 
@@ -23,7 +25,7 @@ python3.11 -B TARGET/delegate.py version
 python3.11 -B TARGET/delegate.py --state-dir STATE prepare-update --target TARGET --installed INSTALLED
 ```
 
-Preparation pins the old helper outside its mutable cache, copies private files and backs up SQLite under `STATE/updates/<id>/backup/`. The returned receipt binds both package identities and the original file/table hashes. The helper refuses unsupported state, unresolved work, reused release versions and downgrades. It does not grant approval or change settings. Keep this private backup and receipt outside the repository.
+Preparation pins the old helper outside its mutable cache, disables Habblaud publishing, waits for its observers, copies private files and backs up SQLite under `STATE/updates/<id>/backup/`. The returned receipt binds both package identities and the paused file/table hashes. The helper refuses unsupported state, unresolved work, reused release versions and downgrades. It does not grant approval. Keep the original preference record, private backup and receipt outside the repository.
 
 ## 3. Update through the native host
 
@@ -33,7 +35,7 @@ Use native Codex plugin installation/update controls. Inspect the installed CLI'
 
 The official [plugin packaging and marketplace guidance](https://developers.openai.com/plugins/build/plugins) describes local sources, Git selectors and desktop reload behavior. A source revision, installed cache and loaded chat skill are separate observations. Do not claim success from a changed manifest alone.
 
-## 4. Verify and report
+## 4. Verify while paused
 
 Locate the newly installed package through the host, then run:
 
@@ -47,7 +49,15 @@ Verification requires the prepared package digest and every original private fil
 
 If installation or verification fails, retain the receipt and backup, keep admission off, inspect actual installed state, and report the blocker. Do not blindly repeat an ambiguous installation or roll back the database. Any recovery must preserve history created since preparation.
 
-Report the exact package version, source revision, installed digest, preservation checks, routing state and pending host reload. Ask the owner to reopen Codex or start a fresh chat only if needed to load changed skills. Verify discovery there before claiming that part complete. Do not create a new model call to prove a package update.
+Ask the owner to reopen Codex or start a fresh chat only if needed to load changed skills. Verify discovery there before claiming that part complete. Do not create a new model call to prove a package update.
+
+## 5. Restore preferences and report the final state
+
+After all package/state verification succeeds and `doctor` reports supported state, restore the saved routing preference without asking for the same authorization again. Read the current configuration and atomically change only `routing_enabled` to the recorded value, unless the owner requested it remain off. Preserve approvals, model settings, visibility and all unrelated fields. Do not copy the old configuration over current state. If settings changed unexpectedly since verification or the original preference record is missing, reconcile that evidence before restoring; report the update as incomplete rather than guess.
+
+If Habblaud was previously enabled and the owner did not request it remain off, run `habblaud enable` with its recorded endpoint and account. Preserve the global visibility preference. Previously disabled publishing stays disabled. An unavailable Habblaud receiver does not revoke restored routing; report publishing restoration as pending without changing the endpoint or account.
+
+Finish with read-only `doctor` and `habblaud status`, and save their final routing/publishing values alongside the original preference record and update receipt. The helper's `verify-update` result describes the paused checkpoint; it does not perform restoration. Finish any repeated verification or `metrics init` before restoring preferences. Do not edit receipt hashes or rerun its paused-state comparison after restoration. Report exact version/revision/digest, preservation and discovery evidence, and actual final preferences, including any remaining pause or publishing failure. Successful installation alone is not a completed update when preference restoration is still pending.
 
 ## Compatibility boundary
 
