@@ -4,13 +4,23 @@ The delegation CLI's `--help` lists commands. State is shared at `~/.local/state
 
 ## Coordinator policy and native subagents
 
-The active coordinator policy decides whether a task should be delegated. This plugin supplies a proposal path for approved local models; it does not replace project instructions or a native subagent selection policy. Under Vibe Setup, keep its task-based capability choice, ownership, permission, verification and integration rules. Its native provider/model authorization does not itself approve a local model; local approval and routing activation remain separate gates.
+The active project's instructions govern task selection, authorization, ownership
+and integration. When using [Vibe Setup](https://github.com/fcoouto/vibe-setup),
+read its [delegation policy and native contract](https://github.com/fcoouto/vibe-setup/blob/main/skills/vibe-setup/delegation-brief.md).
+Use the destination project's installed `.codex/delegation-brief.md` and active
+instructions, or source matching that installed revision; repository `main` does
+not silently replace a project's reviewed policy. Do not copy Vibe's native
+declaration/report schemas into this plugin or install Vibe merely to delegate.
 
 Before submission, the coordinator reads applicable AGENTS instructions and relevant skills/plugins. Put the objective and relevant constraints in `behavior_contract`, supplied context in `files`, proposed write scope in `editable_paths`, and native verification criteria/commands in `acceptance`. Resolve dependencies and resource ownership before dispatch. Keep protected oracle tests, credentials and unnecessary context private. Every supplied constraint counts toward the approved operating input limit; do not omit a requirement to fit the model. Unsupported context, capability, tool requirements or task budgets keep work native.
 
 The local model receives supplied text only. It cannot load installed skills, invoke plugins, run commands, write project files or attest compliance. The coordinator performs required tool actions and independently verifies each applicable requirement before integration. This is a coordinator obligation, not automatic semantic enforcement by the HTTP helper.
 
-Local HTTP calls do not invoke native `SubagentStart`/`SubagentStop` hooks. Do not create a fake native agent or treat a local response as a native delegation report. Native fallback must use the active harness's actual declaration/report contract and authorized model/effort. When Vibe's guard applies, create its bounded declaration at the active harness root using the claimed fallback task name, include its exact pointer in the native message, and preserve the stable dispatch/reconciliation identity. If that native route is unavailable or disallowed, the coordinator retains the task.
+Local HTTP proposals do not invoke native subagent hooks. Native fallback must
+satisfy the active host/project's declaration and report contract as well as this
+plugin's dispatch/reconciliation protocol. If a required contract is unavailable,
+retain work with the coordinator rather than guessing or bypassing it. Local
+approval and routing remain governed by this plugin's contracts below.
 
 Keep native authentication, provider, defaults, permissions and hooks unchanged. No copied skill catalog, parallel policy file or Vibe installation is needed. Read the active project's current policy at dispatch; this mapping does not pin or replace it.
 
