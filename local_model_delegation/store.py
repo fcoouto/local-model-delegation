@@ -302,11 +302,13 @@ class Store:
             db.execute("UPDATE jobs SET status='candidate_ready',result_path=? WHERE job_id=? AND native_task_id=? AND status='fallback_running'", (str(path), job_id, native_task_id))
         return envelope(self.job(job_id))
 
-    def enqueue(self, brief, fallback, assessment=None, measurement=None):
+    def enqueue(self, brief, fallback, assessment=None, measurement=None, visibility=None):
         from .contracts import validate_fallback
         from .profiles import read_config
         from .measurements import bind_enqueued, validate_context
         if measurement is not None: validate_context(measurement)
+        from .habblaud import bind_context, validate_context as validate_visibility
+        if visibility is not None: validate_visibility(visibility)
         validate_brief(brief); validate_fallback(fallback)
         if brief['schema_version'] != 2 or brief['fallback'] != fallback: raise ValueError('invalid_brief')
         if assessment:
@@ -319,6 +321,8 @@ class Store:
             if row:
                 if row['brief_hash'] != digest(brief): raise ValueError('job_conflict')
                 bind_enqueued(db,row['job_id'],measurement)
+                bind_context(db,row['job_id'],visibility)
+                row=db.execute('SELECT * FROM jobs WHERE job_id=?',(row['job_id'],)).fetchone()
                 return envelope(self._job(row))
             identifier, now=uuid.uuid4().hex,time.time()
             route={'wait_until':now+brief['task_requirements']['wait_budget_seconds'],'observed_at':now}
@@ -326,6 +330,7 @@ class Store:
             db.execute("INSERT INTO jobs (job_id,chat,task_key,brief_hash,brief,profile,status,reason,fallback,queued_at,route_data) VALUES (?,?,?,?,?,'{}','waiting','waiting_for_slot',?,?,?)",
                        (identifier,brief['origin_chat_id'],brief['task_key'],digest(brief),canonical(brief),canonical(fallback),now,canonical(route)))
             bind_enqueued(db,identifier,measurement)
+            bind_context(db,identifier,visibility)
             return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(identifier,)).fetchone()))
 
     def waiting_jobs(self, now=None):

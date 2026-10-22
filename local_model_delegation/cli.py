@@ -34,14 +34,15 @@ def read_input(path):
     return load_json(path.read_text())
 
 
-def submit_task(state_dir, path, measurement_path=None):
+def submit_task(state_dir, path, measurement_path=None, visibility_path=None):
     brief = read_input(path)
     # Disabled/missing configuration causes no database, process or HTTP side effects.
     config = read_config(state_dir)
     if config.get("routing_enabled") is not True: raise ValueError("routing_disabled")
     validate_brief(brief)
     store = Store(state_dir)
-    result = store.enqueue(brief, brief["fallback"], measurement=read_input(measurement_path) if measurement_path else None)
+    result = store.enqueue(brief, brief["fallback"], measurement=read_input(measurement_path) if measurement_path else None,
+                           visibility=read_input(visibility_path) if visibility_path else None)
     from .scheduler import schedule_once
     schedule_once(state_dir)
     result = envelope(store.job(result["job_id"]))
@@ -74,6 +75,11 @@ def main(argv=None):
     p = commands.add_parser("submit")
     p.add_argument("--brief", type=Path, required=True)
     p.add_argument('--measurement-context', type=Path)
+    p.add_argument('--visibility-context', type=Path)
+    h = commands.add_parser('habblaud').add_subparsers(dest='action', required=True)
+    p = h.add_parser('enable'); p.add_argument('--endpoint', required=True); p.add_argument('--account', required=True)
+    p = h.add_parser('status'); p.add_argument('--job')
+    p = h.add_parser('bind'); p.add_argument('--job', required=True); p.add_argument('--context', type=Path, required=True)
     p = commands.add_parser("lookup")
     p.add_argument("--chat", required=True)
     p.add_argument("--task-key", required=True)
@@ -197,6 +203,11 @@ def main(argv=None):
             from .package import initialize_state, doctor, prepare_uninstall
             if args.command == "doctor": result = doctor(args.state_dir, args.inspect_runtime)
             else: result = {"setup": initialize_state, "prepare-uninstall": prepare_uninstall}[args.command](args.state_dir)
+        elif args.command == 'habblaud':
+            from . import habblaud
+            if args.action == 'enable': result = habblaud.configure(args.state_dir, args.endpoint, args.account)
+            elif args.action == 'bind': result = habblaud.bind(args.state_dir, args.job, read_input(args.context))
+            else: result = habblaud.status(args.state_dir, args.job)
         elif args.command == "visibility":
             from .visibility import set_visibility, visibility_status
             result = visibility_status(args.state_dir) if args.action == "status" else set_visibility(args.state_dir, args.action == "enable")
@@ -211,7 +222,7 @@ def main(argv=None):
             elif args.action == "submit": result = submit_trial(args.state_dir, args.assessment_id, args.trial_id)
             elif args.action == "trial": result = record_trial(args.state_dir, args.assessment_id, read_input(args.receipt))
             else: result = approve_assessment(args.state_dir, args.assessment_id, args.owner_reference, read_input(args.scope))
-        elif args.command == "submit": result = submit_task(args.state_dir, args.brief, args.measurement_context)
+        elif args.command == "submit": result = submit_task(args.state_dir, args.brief, args.measurement_context, args.visibility_context)
         elif args.command == "profile" and args.action == 'approve':
             from .onboarding import approve_scope
             result = approve_scope(args.state_dir, args.profile_id, args.owner_reference, read_input(args.scope))
