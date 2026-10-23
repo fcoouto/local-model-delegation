@@ -41,7 +41,47 @@ def _binding(profile):
 
 def _assessment(state_dir, identifier):
     if not isinstance(identifier, str) or not re.fullmatch('[a-f0-9]{32}', identifier): raise ValueError('invalid_assessment_id')
-    return load_json((Path(state_dir) / 'assessments' / identifier / 'assessment.json').read_text())
+    record = load_json((Path(state_dir) / 'assessments' / identifier / 'assessment.json').read_text())
+    if not isinstance(record, dict): raise ValueError('invalid_assessment_record')
+    new_fields = {'authorization', 'preview', 'preview_digest', 'profile_snapshot', 'source_profile'}
+    if 'schema_version' not in record:
+        if new_fields & record.keys(): raise ValueError('invalid_assessment_record')
+        return record
+    try:
+        preview, auth = record['preview'], record['authorization']
+        trials = record['trials']
+        if (type(record['schema_version']) is not int or record['schema_version'] != 1
+                or record['assessment_id'] != identifier or auth['mode'] != 'run'
+                or auth['state'] not in ('draft', 'authorized', 'paused', 'stopped', 'invalidated', 'complete')
+                or set(auth) != {'mode', 'state', 'owner_reference', 'timestamp', 'preview_digest'}
+                or digest(preview) != record['preview_digest'] or auth['preview_digest'] != record['preview_digest']
+                or preview['profile_digest'] != digest(record['profile_snapshot'])
+                or preview['profile_id'] != record['profile_id'] or record['profile_snapshot']['profile_id'] != record['profile_id']
+                or preview['binding'] != record['binding'] or preview['source_profile'] != record['source_profile']
+                or preview['fixture_digest'] != record['fixture_digest'] or record['capacity_target'] != 1
+                or preview['max_submissions'] != len(trials) or not trials
+                or len({t['trial_id'] for t in trials}) != len(trials)
+                or not isinstance(record['receipts'], dict)
+                or not set(record['receipts']) <= {t['trial_id'] for t in trials}):
+            raise ValueError('invalid_assessment_record')
+        from .profiles import generation_settings
+        frozen = []
+        for trial in trials:
+            brief = trial['brief']
+            validate_brief(brief)
+            if (digest(brief) != trial['brief_hash'] or brief['task_key'] != trial['trial_id']
+                    or brief['origin_chat_id'] != 'assessment-' + identifier): raise ValueError('invalid_assessment_record')
+            frozen.append({'trial_id': trial['trial_id'], 'brief_hash': trial['brief_hash'],
+                           'settings': generation_settings(brief, record['profile_snapshot'])})
+        if frozen != preview['trials']: raise ValueError('invalid_assessment_record')
+        if auth['state'] == 'draft':
+            if auth['owner_reference'] is not None or auth['timestamp'] is not None: raise ValueError('invalid_assessment_record')
+        elif auth['state'] in ('authorized', 'paused', 'complete'):
+            if not all(isinstance(auth[k], str) and auth[k].strip() for k in ('owner_reference', 'timestamp')):
+                raise ValueError('invalid_assessment_record')
+    except (KeyError, TypeError, AttributeError, ValueError):
+        raise ValueError('invalid_assessment_record') from None
+    return record
 
 
 def _policy(state_dir, owner_reference):
@@ -193,10 +233,91 @@ def prepare_assessment(state_dir, profile_id, selection, *, source_profile_id=No
     return {'assessment_id': identifier, 'state': 'draft', 'preview': preview, 'preview_digest': preview_digest}
 
 
-def authorize_assessment(state_dir, brief, permit):
+def _check_run_bindings(state_dir, assessment, *, check_runtime=False):
+    from .package import runtime_contents, validate_bundle
+    preview = assessment['preview']
+    profile = _profile(state_dir, assessment['profile_id'])
+    if digest(profile) != preview['profile_digest'] or _binding(profile) != assessment['binding']:
+        raise ValueError('assessment_identity_changed')
+    if digest(load_json(fixtures_path().read_text())) != assessment['fixture_digest']:
+        raise ValueError('assessment_scope_mismatch')
+    bundle = Path(state_dir).resolve() / 'runtimes' / preview['runtime_bundle']
+    validate_bundle(bundle, preview['runtime_bundle'])
+    source = Path(__file__).resolve().parents[1]
+    running_digest = source.name if source == bundle else digest(runtime_contents(source)[1])
+    if running_digest != preview['runtime_bundle']: raise ValueError('assessment_helper_changed')
+    if _verification_snapshot(assessment['trials']) != preview['verification']:
+        raise ValueError('assessment_checker_changed')
+    if check_runtime:
+        from .lmstudio import Runtime, select_loaded
+        from .worker import context_fits
+        from .validation import _qualified_isolation
+        loaded = select_loaded(Runtime(profile['endpoint'], token_env=profile.get('token_env')).list_models(),
+                               profile, assessment['binding']['runtime'])
+        if loaded is None: raise ValueError('assessment_model_unavailable')
+        if loaded['config'] != preview['loaded_config']: raise ValueError('assessment_runtime_changed')
+        if any(not context_fits(t['brief'], profile, loaded) for t in assessment['trials']):
+            raise ValueError('assessment_context_unfit')
+        if any(t['brief']['capability'] != 'file_summary' for t in assessment['trials']) and not _qualified_isolation():
+            raise ValueError('isolation_unsupported')
+    return profile
+
+
+def consent_assessment(state_dir, assessment_id, preview_digest, owner_reference):
+    from .worker import ownership
+    if not isinstance(owner_reference, str) or not owner_reference.strip(): raise ValueError('owner_confirmation_required')
+    store = Store(state_dir)
+    with ownership(store, 'plugin-update') as maintenance:
+        if not maintenance: raise ValueError('assessment_busy')
+        with ownership(store, 'assessment-' + assessment_id) as owned:
+            if not owned: raise ValueError('assessment_busy')
+            record = _assessment(state_dir, assessment_id)
+            if record.get('schema_version') != 1: raise ValueError('assessment_run_required')
+            auth = record['authorization']
+            if preview_digest != record['preview_digest']: raise ValueError('assessment_preview_mismatch')
+            if auth['state'] not in ('draft', 'authorized'): raise ValueError('assessment_' + auth['state'])
+            if auth['state'] == 'authorized' and auth['owner_reference'] != owner_reference:
+                raise ValueError('assessment_consent_conflict')
+            _check_run_bindings(state_dir, record, check_runtime=True)
+            if auth['state'] == 'draft':
+                auth.update(state='authorized', owner_reference=owner_reference, timestamp=datetime.now(timezone.utc).isoformat())
+                atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', record)
+            return {'assessment_id': assessment_id, 'state': auth['state']}
+
+
+def authorize_assessment(state_dir, brief, permit, *, purpose='submit', job=None):
+    if purpose not in ('submit', 'verify'): raise ValueError('invalid_authorization_purpose')
+    if not isinstance(permit, dict) or set(permit) != {'assessment_id', 'permit_token'}: raise ValueError('assessment_scope_mismatch')
     assessment = _assessment(state_dir, permit['assessment_id'])
-    _policy(state_dir, assessment['owner_reference'])
     if permit.get('permit_token') != assessment['permit_token']: raise ValueError('assessment_scope_mismatch')
+    if assessment.get('schema_version') == 1:
+        if not any(digest(brief) == trial['brief_hash'] for trial in assessment['trials']):
+            raise ValueError('assessment_scope_mismatch')
+        if purpose == 'submit':
+            state = assessment['authorization']['state']
+            if state != 'authorized': raise ValueError('assessment_consent_required' if state == 'draft' else 'assessment_' + state)
+            profile = _check_run_bindings(state_dir, assessment)
+        else:
+            profile = assessment['profile_snapshot']
+            if (not job or not job.get('attempt_id') or job.get('native_task_id')
+                    or job.get('route_data', {}).get('assessment') != permit
+                    or job.get('profile') != profile or job.get('brief') != brief):
+                raise ValueError('assessment_scope_mismatch')
+            store = Store(state_dir)
+            persisted = store.job(job['job_id'])
+            attempt = store.attempt(job['attempt_id'])
+            from .profiles import generation_settings
+            if (any(persisted[k] != job[k] for k in ('job_id', 'brief', 'profile', 'attempt_id', 'native_task_id'))
+                    or persisted.get('route_data', {}).get('assessment') != permit or attempt['job_id'] != job['job_id']
+                    or not attempt['data'].get('submitted_at')
+                    or attempt['data'].get('request_settings') != generation_settings(brief, profile)):
+                raise ValueError('assessment_scope_mismatch')
+            if _verification_snapshot(assessment['trials']) != assessment['preview']['verification']:
+                raise ValueError('assessment_checker_changed')
+        from .validation import source_matches
+        if not source_matches(brief): raise ValueError('assessment_scope_mismatch')
+        return profile
+    _policy(state_dir, assessment['owner_reference'])
     profile = _profile(state_dir, assessment['profile_id'])
     if _binding(profile) != assessment['binding']: raise ValueError('assessment_identity_changed')
     if (digest(load_json(fixtures_path().read_text())) != assessment['fixture_digest']
@@ -217,7 +338,7 @@ def record_trial(state_dir, assessment_id, receipt):
         trial = next((t for t in assessment['trials'] if t['trial_id']==receipt['trial_id']), None)
         job = store.job(receipt['job_id'])
         permit = {'assessment_id': assessment_id, 'permit_token': assessment['permit_token']}
-        authorize_assessment(state_dir, job['brief'], permit)
+        authorize_assessment(state_dir, job['brief'], permit, purpose='verify', job=job)
         if not trial or digest(job['brief']) != trial['brief_hash'] or job.get('route_data', {}).get('assessment') != permit:
             raise ValueError('assessment_scope_mismatch')
         if job['status'] not in ('accepted','failed','fallback_required'): raise ValueError('trial_not_complete')
@@ -272,6 +393,7 @@ def assessment_report(state_dir, assessment_id):
 
 
 def approve_assessment(state_dir, assessment_id, owner_reference, scope):
+    if _assessment(state_dir, assessment_id).get('schema_version') == 1: raise ValueError('explicit_setup_onboarding_required')
     if not isinstance(owner_reference, str) or not owner_reference.strip(): raise ValueError('owner_confirmation_required')
     report = assessment_report(state_dir, assessment_id)
     if report['recommendation'] != 'approve_provisional_scope' or scope != report['tested_scope']: raise ValueError('assessment_incomplete')
@@ -338,6 +460,9 @@ def record_outcome(state_dir, job_id, receipt):
             job=store._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone())
             if job['status'] not in ('accepted','failed'):raise ValueError('outcome_not_final')
             route=job.get('route_data',{})
+            permit = route.get('assessment')
+            if permit and _assessment(state_dir, permit['assessment_id']).get('schema_version') == 1:
+                raise ValueError('assessment_has_no_global_outcome')
             previous=route.get('outcome')
             if previous and previous!=receipt:raise ValueError('outcome_conflict')
             route['outcome']=receipt
@@ -376,6 +501,7 @@ def record_outcome(state_dir, job_id, receipt):
 
 
 def record_capacity(state_dir, assessment_id, receipt):
+    if _assessment(state_dir, assessment_id).get('schema_version') == 1: raise ValueError('assessment_single_slot_only')
     from .capacity import qualify_measurements, available_budget, machine_snapshot
     if (not isinstance(receipt,dict) or set(receipt)!={'context_length','resources','batches'}
             or not isinstance(receipt['batches'],list) or not isinstance(receipt['resources'],dict)):

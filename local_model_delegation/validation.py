@@ -231,7 +231,7 @@ def _verify_python_candidate(store, job_id):
             return envelope(store.job(job_id))
     receipt = {}
     try:
-        current = authorize_job(store, job)
+        current = authorize_job(store, job, purpose='verify')
         if current.get("approval") != job["profile"].get("approval"): raise ValueError("approval_changed")
         path = Path(job["result_path"])
         if path.is_symlink() or not path.resolve().is_relative_to(store.root / "jobs" / job_id): raise ValueError("unsafe_result")
@@ -264,7 +264,7 @@ def _verify_python_candidate(store, job_id):
                 or not receipt["submitted"].get("ok") or not added_count or not effective):
             raise ValueError("independent_checks_failed")
         if not source_matches(brief): raise ValueError("source_changed")
-        current = authorize_job(store, job)
+        current = authorize_job(store, job, purpose='verify')
         if current.get("approval") != job["profile"].get("approval"): raise ValueError("approval_changed")
         if job["attempt_id"] and not job["native_task_id"]:
             attempt = store.attempt(job["attempt_id"])
@@ -366,7 +366,7 @@ def _prepare_verification(state_dir, job_id):
         if job['status'] not in ('candidate_ready', 'checking'): raise ValueError('candidate_not_ready')
         validate_brief(job['brief'])
         if job['brief']['capability'] in PYTHON_CHANGE_CAPABILITIES: raise ValueError('use_python_checker')
-        authorize_job(store, job)
+        authorize_job(store, job, purpose='verify')
         if not source_matches(job['brief']): raise ValueError('source_changed')
         proposal, candidate_hash = _proposal(store, job)
         if job['brief']['capability'] != 'file_summary' and not _qualified_isolation():
@@ -412,7 +412,7 @@ def record_verification(state_dir, job_id, receipt):
             if receipt != load_json((store.root / 'jobs' / job_id / 'native-checks.json').read_text()):
                 raise ValueError('verification_mismatch')
             return envelope(job)
-        authorize_job(store, job)
+        authorize_job(store, job, purpose='verify')
         if not source_matches(job['brief']):
             with store.db(write=True) as db:
                 db.execute("UPDATE jobs SET status=?,reason='source_changed' WHERE job_id=? AND status='checking'",

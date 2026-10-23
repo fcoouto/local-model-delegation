@@ -1,5 +1,6 @@
 """Standalone assessments use disposable, unapproved profiles and fake inference."""
 import copy
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -115,3 +116,115 @@ class AssessmentRuns(Fixture):
         self.assertEqual(profiles.validate_profile_fields(self.candidate, 'test_writing'), self.candidate)
         with self.assertRaisesRegex(ValueError, 'model_not_approved'):
             profiles.validate_profile(self.candidate, 'test_writing')
+
+    def saved_run(self, selection=None):
+        prepared = self.prepare(selection)
+        record = assessment._assessment(self.state, prepared['assessment_id'])
+        permit = {k: record[k] for k in ('assessment_id', 'permit_token')}
+        return prepared, record, permit
+
+    def consent(self, prepared):
+        self.assertTrue(hasattr(assessment, 'consent_assessment'), 'consent_assessment must exist')
+        return assessment.consent_assessment(self.state, prepared['assessment_id'],
+                                             prepared['preview_digest'], 'fixture-run-consent')
+
+    def test_run_consent_is_required_even_with_standing_permission(self):
+        prepared, record, permit = self.saved_run()
+        config = load_json((self.state / 'config.json').read_text())
+        config['assessment_policy'] = {'enabled': True, 'owner_reference': 'standing'}
+        atomic_json(self.state / 'config.json', config)
+        before = (self.state / 'config.json').read_bytes()
+        with self.assertRaisesRegex(ValueError, 'assessment_consent_required'):
+            assessment.authorize_assessment(self.state, record['trials'][0]['brief'], permit)
+        self.assertEqual(self.consent(prepared), self.consent(prepared))
+        self.assertEqual(assessment.authorize_assessment(self.state, record['trials'][0]['brief'], permit), self.candidate)
+        self.assertEqual((self.state / 'config.json').read_bytes(), before)
+
+    def test_consent_rejects_wrong_digest_reference_and_terminal_state(self):
+        prepared, record, _ = self.saved_run()
+        self.assertTrue(hasattr(assessment, 'consent_assessment'))
+        for digest, reference in [('wrong', 'owner'), (prepared['preview_digest'], '')]:
+            with self.assertRaises(ValueError):
+                assessment.consent_assessment(self.state, prepared['assessment_id'], digest, reference)
+        self.consent(prepared)
+        with self.assertRaisesRegex(ValueError, 'assessment_consent_conflict'):
+            assessment.consent_assessment(self.state, prepared['assessment_id'], prepared['preview_digest'], 'another')
+        record = assessment._assessment(self.state, prepared['assessment_id'])
+        record['authorization']['state'] = 'stopped'
+        atomic_json(self.state / 'assessments' / prepared['assessment_id'] / 'assessment.json', record)
+        with self.assertRaisesRegex(ValueError, 'assessment_stopped'):
+            self.consent(prepared)
+
+    def test_changed_profile_and_checkers_reject_submission(self):
+        prepared, record, permit = self.saved_run()
+        self.consent(prepared)
+        self.candidate['request_settings']['temperature'] = .5
+        atomic_json(self.state / 'profiles/fictional.json', self.candidate)
+        with self.assertRaisesRegex(ValueError, 'assessment_identity_changed'):
+            assessment.authorize_assessment(self.state, record['trials'][0]['brief'], permit)
+        atomic_json(self.state / 'profiles/fictional.json', record['profile_snapshot'])
+        with patch.object(assessment, '_verification_snapshot', return_value={}):
+            with self.assertRaisesRegex(ValueError, 'assessment_checker_changed'):
+                assessment.authorize_assessment(self.state, record['trials'][0]['brief'], permit)
+
+    def test_frozen_scope_and_permit_cannot_be_substituted(self):
+        prepared, record, permit = self.saved_run()
+        self.consent(prepared)
+        brief = record['trials'][0]['brief']
+        for changed_brief, changed_permit in (({**brief, 'behavior_contract': 'different'}, permit),
+                                              (brief, {**permit, 'permit_token': 'wrong'})):
+            with self.assertRaisesRegex(ValueError, 'assessment_scope_mismatch'):
+                assessment.authorize_assessment(self.state, changed_brief, changed_permit)
+        fixture = self.root / 'changed-fixture.json'
+        atomic_json(fixture, {'cases': []})
+        with patch.object(assessment, 'fixtures_path', return_value=fixture):
+            with self.assertRaisesRegex(ValueError, 'assessment_scope_mismatch'):
+                assessment.authorize_assessment(self.state, brief, permit)
+
+    def test_standalone_runs_reject_legacy_approval_and_capacity(self):
+        prepared = self.prepare()
+        with self.assertRaisesRegex(ValueError, 'explicit_setup_onboarding_required'):
+            assessment.approve_assessment(self.state, prepared['assessment_id'], 'owner', [])
+        with self.assertRaisesRegex(ValueError, 'assessment_single_slot_only'):
+            assessment.record_capacity(self.state, prepared['assessment_id'], {})
+
+    def test_unknown_malformed_and_downgraded_records_fail_closed(self):
+        prepared, record, _ = self.saved_run()
+        path = self.state / 'assessments' / prepared['assessment_id'] / 'assessment.json'
+        for change in ({'schema_version': 2}, {'schema_version': True}, {'authorization': {}},
+                       {'preview_digest': 'forged'}, {'trials': []}):
+            atomic_json(path, {**record, **change})
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'invalid_assessment_record'):
+                assessment._assessment(self.state, prepared['assessment_id'])
+        del record['schema_version']
+        atomic_json(path, record)
+        with self.assertRaisesRegex(ValueError, 'invalid_assessment_record'):
+            assessment._assessment(self.state, prepared['assessment_id'])
+
+    def test_revoked_run_can_verify_only_its_submitted_candidate(self):
+        from local_model_delegation.store import Store
+        from local_model_delegation.contracts import canonical
+        from local_model_delegation.worker import run_local_attempt
+        from local_model_delegation.validation import verify_candidate
+        prepared, record, permit = self.saved_run({'groups': [{**self.group, 'capability': 'python_code_change'}]})
+        self.consent(prepared)
+        trial = record['trials'][0]
+        files = {n: item['content'] for n, item in trial['brief']['files'].items()}
+        files['helper.py'] = 'def transform(text):\n    return text.strip()\n'
+        files['test_helper.py'] += '\n    def test_regression(self):\n        self.assertEqual(transform(" a "), "a")\n'
+        self.server.answer = json.dumps({'files': files, 'summary': 'Strip both ends'})
+        store = Store(self.state)
+        saved = store.reserve(trial['brief'], self.candidate, {**self.loaded(), 'endpoint': self.server.endpoint})
+        with store.db(write=True) as db:
+            db.execute('UPDATE jobs SET route_data=? WHERE job_id=?', (canonical({'assessment': permit}), saved['job_id']))
+        self.assertEqual(run_local_attempt(self.state, saved['attempt_id']), 0)
+        record = assessment._assessment(self.state, prepared['assessment_id'])
+        record['authorization']['state'] = 'stopped'
+        atomic_json(self.state / 'assessments' / prepared['assessment_id'] / 'assessment.json', record)
+        (self.state / 'profiles/fictional.json').unlink()
+        self.assertEqual(verify_candidate(self.state, saved['job_id'])['status'], 'accepted')
+        job = store.job(saved['job_id'])
+        with self.assertRaisesRegex(ValueError, 'assessment_scope_mismatch'):
+            assessment.authorize_assessment(self.state, record['trials'][1]['brief'], permit, purpose='verify', job=job)
+        with self.assertRaisesRegex(ValueError, 'assessment_scope_mismatch'):
+            assessment.authorize_assessment(self.state, trial['brief'], permit, purpose='verify', job={**job, 'attempt_id': None})

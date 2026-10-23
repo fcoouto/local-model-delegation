@@ -168,7 +168,7 @@ def read_profile_by_id(state_dir, profile_id, capability):
     return validate_profile(profile, capability)
 
 
-def authorize_job(store, job):
+def authorize_job(store, job, *, purpose='submit'):
     if job["brief"].get("schema_version") != 2: raise ValueError("invalid_brief")
     if job.get("native_task_id") and not job["profile"]:
         from .contracts import validate_fallback
@@ -176,7 +176,7 @@ def authorize_job(store, job):
         return {}
     if job.get("route_data", {}).get("assessment"):
         from .onboarding import authorize_assessment
-        current = authorize_assessment(store.root, job["brief"], job["route_data"]["assessment"])
+        current = authorize_assessment(store.root, job["brief"], job["route_data"]["assessment"], purpose=purpose, job=job)
         if current["profile_id"] != job["profile"]["profile_id"]: raise ValueError("assessment_scope_mismatch")
         return current
     profile = job["profile"]
