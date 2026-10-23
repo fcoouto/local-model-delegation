@@ -77,6 +77,18 @@ class Slots(Fixture):
         self.store.transition(first["attempt_id"], 0, "reserved", "uncertain", {"heartbeat": 0})
         self.assertEqual(self.store.reserve(self.brief("next"), self.profile(), self.loaded())["status"], "fallback_required")
 
+    def test_outcome_metadata_does_not_block_a_free_parallel_slot(self):
+        profile = self.profile()
+        first = self.store.reserve(self.brief('finished'), profile, self.loaded(2))
+        peer = self.store.reserve(self.brief('peer'), profile, self.loaded(2))
+        self.store.transition(first['attempt_id'], 0, 'reserved', 'released', {})
+        updated = copy.deepcopy(profile)
+        updated['outcomes'] = [{'accepted': True}]
+        updated['benefit_evidence'] = {'credible': True}
+        result = self.store.reserve(self.brief('next'), updated, self.loaded(2))
+        self.assertEqual(result['status'], 'reserved')
+        self.assertEqual(self.store.attempt(peer['attempt_id'])['state'], 'reserved')
+
     def test_repeated_submit_recovers_same_job(self):
         first = self.store.reserve(self.brief(), self.profile(), self.loaded())
         again = self.store.reserve(self.brief(), self.profile(), self.loaded())

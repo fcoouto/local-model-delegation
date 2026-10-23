@@ -49,6 +49,54 @@ class Lifecycle(Fixture):
         self.assertEqual(api.reset_external(self.state,key,'owner')['status'],'retired')
         self.assertEqual(server.calls.count(('POST','/api/v1/models/unload')),1)
 
+    def test_owner_reset_accepts_changed_scope_without_changing_approval(self):
+        api=self.module(); server,store,job,key=self.reset_fixture()
+        from local_model_delegation.profiles import read_profiles
+        profile=read_profiles(self.state)[0]
+        profile['scope'][0]['max_input_bytes']=90000
+        profile['approval']['scope']=copy.deepcopy(profile['scope'])
+        profile['approval']['owner_reference']='new-fictional-scope-approval'
+        atomic_json(self.state/'profiles/fictional.json',profile)
+        original=store.instance(key)['data']['profile']
+        result=api.reset_external(self.state,key,'owner-reset-after-scope-change')
+        self.assertEqual(result['status'],'retired')
+        self.assertEqual(read_profiles(self.state)[0],profile)
+        self.assertEqual(store.instance(key)['data']['profile'],original)
+        self.assertEqual(store.attempt(job['attempt_id'])['state'],'released')
+        self.assertEqual(server.requests,[{'instance_id':'fixture-instance'}])
+
+    def test_changed_scope_never_bypasses_reset_runtime_binding(self):
+        for field,value in [('endpoint','http://127.0.0.1:2'),('model_id','other'),
+                            ('request_settings',{'max_output_tokens':2048,'reasoning':'off','temperature':1})]:
+            with self.subTest(field=field):
+                api=self.module(); server,store,job,key=self.reset_fixture()
+                before=store.instance(key)
+                data=copy.deepcopy(before['data'])
+                data['profile']['approval']['owner_reference']='older-scope-approval'
+                data['profile'][field]=value
+                with store.db(write=True) as db:
+                    db.execute('UPDATE instances SET data=? WHERE instance_key=?',(canonical(data),key))
+                original=store.instance(key)
+                with self.assertRaisesRegex(ValueError,'approval_changed'):
+                    api.reset_external(self.state,key,'owner-reset')
+                self.assertEqual(store.instance(key),original)
+                self.assertEqual(store.attempt(job['attempt_id'])['state'],'uncertain')
+                self.assertFalse(any(c[0]=='POST' for c in server.calls))
+
+    def test_changed_scope_preserves_historical_approval_identity_guard(self):
+        api=self.module(); server,store,job,key=self.reset_fixture()
+        data=copy.deepcopy(store.instance(key)['data'])
+        data['profile']['approval']['owner_reference']='older-scope-approval'
+        data['profile']['approval']['model_identity']['indexed_identifier']='old-runtime-binding'
+        with store.db(write=True) as db:
+            db.execute('UPDATE instances SET data=? WHERE instance_key=?',(canonical(data),key))
+        before=store.instance(key)
+        with self.assertRaisesRegex(ValueError,'approval_changed'):
+            api.reset_external(self.state,key,'owner-reset')
+        self.assertEqual(store.instance(key),before)
+        self.assertEqual(store.attempt(job['attempt_id'])['state'],'uncertain')
+        self.assertFalse(any(c[0]=='POST' for c in server.calls))
+
     def test_reset_requires_pause_owner_and_no_observer(self):
         api=self.module(); server,store,job,key=self.reset_fixture()
         with self.assertRaisesRegex(ValueError,'owner_reference_required'):

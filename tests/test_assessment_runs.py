@@ -131,6 +131,80 @@ class AssessmentRuns(Fixture):
         return assessment.consent_assessment(self.state, prepared['assessment_id'],
                                              prepared['preview_digest'], 'fixture-run-consent')
 
+    def admission_with_previous_slot(self, *, approved=True, occupied=False, consent=True):
+        from local_model_delegation.store import Store
+        from local_model_delegation.profiles import model_identity
+        catalog = Path(self.candidate['runtime_catalog'])
+        saved_catalog = catalog.read_bytes()
+        previous = self.profile()
+        catalog.write_bytes(saved_catalog)
+        previous['endpoint'] = self.server.endpoint
+        previous['approval']['model_identity'] = model_identity(previous)
+        if not approved:
+            previous.update(approval=None, scope=[], qualification_status='needs_assessment')
+        store = Store(self.state)
+        loaded = {**self.loaded(), 'endpoint': self.server.endpoint}
+        first = store.reserve(self.brief('previous'), previous, loaded)
+        key = store.attempt(first['attempt_id'])['instance_key']
+        if not occupied:
+            store.transition(first['attempt_id'], 0, 'reserved', 'released', {})
+        self.candidate['request_settings']['max_output_tokens'] = 2048
+        self.write_config(self.candidate, enabled=False)
+        prepared, record, permit = self.saved_run()
+        if consent:
+            self.consent(prepared)
+        brief = record['trials'][0]['brief']
+        return store, key, first, loaded, brief, permit
+
+    def test_authorized_campaign_refreshes_only_idle_output_ceiling(self):
+        for approved in (True, False):
+            with self.subTest(previously_approved=approved):
+                self.state = self.root / ('approved-state' if approved else 'unapproved-state')
+                store, key, first, loaded, brief, permit = self.admission_with_previous_slot(approved=approved)
+                previous = store.job(first['job_id'])['profile']
+                job = store.enqueue(brief, brief['fallback'], assessment=permit)
+                result = store.admit(job['job_id'], self.candidate, loaded,
+                                     {'pressure': 'normal', 'observed_at': time.time()})
+                self.assertEqual(result['status'], 'reserved')
+                self.assertEqual(store.instance(key)['data']['profile']['request_settings']['max_output_tokens'], 2048)
+                self.assertIsNone(store.instance(key)['data']['profile']['approval'])
+                self.assertEqual(store.job(first['job_id'])['profile'], previous)
+                self.assertFalse(any(method == 'POST' for method, _ in self.server.calls))
+
+    def test_campaign_ceiling_refresh_preserves_recovery_and_identity_guards(self):
+        from local_model_delegation.contracts import canonical
+        for guard in ('occupied', 'recovery', 'unverified', 'config', 'reasoning', 'temperature', 'artifact'):
+            with self.subTest(guard=guard):
+                self.state = self.root / (guard + '-state')
+                store, key, first, loaded, brief, permit = self.admission_with_previous_slot(occupied=guard == 'occupied')
+                data = store.instance(key)['data']
+                if guard == 'recovery':
+                    data['recovery_blocked'] = True
+                elif guard == 'unverified':
+                    loaded['binding_verified'] = False
+                elif guard == 'config':
+                    data['config']['context_length'] = 16384
+                elif guard in ('reasoning', 'temperature'):
+                    data['profile']['request_settings'][guard] = 'off' if guard == 'reasoning' else 0.5
+                elif guard == 'artifact':
+                    data['artifact_digest'] = data['profile']['artifact']['digest'] = '0' * 64
+                with store.db(write=True) as db:
+                    db.execute('UPDATE instances SET data=? WHERE instance_key=?', (canonical(data), key))
+                job = store.enqueue(brief, brief['fallback'], assessment=permit)
+                result = store.admit(job['job_id'], self.candidate, loaded,
+                                     {'pressure': 'normal', 'observed_at': time.time()})
+                self.assertIsNone(result['attempt_id'])
+                self.assertEqual(store.instance(key)['data'], data)
+                if guard == 'occupied':
+                    self.assertEqual(store.attempt(first['attempt_id'])['state'], 'reserved')
+
+    def test_campaign_ceiling_refresh_requires_exact_run_consent(self):
+        store, key, first, loaded, brief, permit = self.admission_with_previous_slot(consent=False)
+        before = store.instance(key)
+        with self.assertRaisesRegex(ValueError, 'assessment_consent_required'):
+            store.enqueue(brief, brief['fallback'], assessment=permit)
+        self.assertEqual(store.instance(key), before)
+
     def test_run_consent_is_required_even_with_standing_permission(self):
         prepared, record, permit = self.saved_run()
         config = load_json((self.state / 'config.json').read_text())
