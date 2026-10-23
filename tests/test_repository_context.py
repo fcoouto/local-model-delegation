@@ -138,4 +138,3 @@ class RepositoryContextTests(unittest.TestCase):
             ]}
             with self.subTest(name=name), self.assertRaises(ValueError):
                 apply_edits(self.frozen, self.manifest, [name], proposal)
-
