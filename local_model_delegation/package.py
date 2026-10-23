@@ -112,7 +112,7 @@ def prepare_uninstall(state_dir):
         config=read_config(root);config['routing_enabled']=False
         atomic_json(root/'config.json',config)
         with store.db(write=True) as db:_quiescent(db)
-        from .habblaud import quiesce
+        from .representation import quiesce
         quiesce(root)
         with _lock(root):
             _path(root).unlink(missing_ok=True)

@@ -315,7 +315,7 @@ class AssessmentRuns(Fixture):
         def barrier(*args):
             entered.set()
             if not release.wait(5): raise RuntimeError('test barrier timeout')
-        with patch('local_model_delegation.habblaud.ensure_observer', side_effect=barrier):
+        with patch('local_model_delegation.representation.ensure_observer', side_effect=barrier):
             thread = threading.Thread(target=run_local_attempt, args=(self.state, reserved['attempt_id']))
             thread.start()
             try:

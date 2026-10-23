@@ -63,7 +63,7 @@ def launch(state_dir, command, identifier):
     environment = {"PATH": "/usr/bin:/bin", "HOME": str(store.root), "PYTHONDONTWRITEBYTECODE": "1"}
     from .profiles import read_profiles
     import re
-    for profile in ([] if command == "habblaud-observer" else read_profiles(store.root)):
+    for profile in ([] if command == "representation-observer" else read_profiles(store.root)):
         name = profile.get("token_env")
         if name and re.fullmatch(r"[A-Z][A-Z0-9_]*", name) and name not in environment and name in os.environ:
             environment[name] = os.environ[name]
@@ -154,7 +154,7 @@ def run_local_attempt(state_dir, attempt_id):
                         store.select_fallback(job['job_id'], rejection)
                     return 1
             if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time(), "submitted_at": time.time(), 'request_settings':settings}): return 0
-        from .habblaud import ensure_observer
+        from .representation import ensure_observer
         ensure_observer(state_dir, job["job_id"])
         runtime = Runtime(job["profile"]["endpoint"], token_env=job["profile"].get("token_env"))
         watch = ActivityWatch(job["profile"]["stale_tolerance_seconds"], time.monotonic())
@@ -320,7 +320,7 @@ def reconcile_attempts(state_dir, *, assessment_id=None):
 def wait_job(state_dir, job_id, seconds):
     if not 0 <= seconds <= 60: raise ValueError("invalid_wait")
     store = Store(state_dir)
-    from .habblaud import ensure_observer
+    from .representation import ensure_observer
     ensure_observer(state_dir, job_id)
     end = time.monotonic() + seconds
     while True:

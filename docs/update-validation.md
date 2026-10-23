@@ -1,8 +1,8 @@
 # Update validation
 
-## Preference-restoration workflow
+## Operational-state restoration workflow
 
-The update reference previously directed a consuming agent to leave previously enabled routing and Habblaud publishing off and ask for activation again. A fresh-context application test reproduced that behavior before correction. With the revised reference, an independent agent restored both preferences after successful verification without asking again, preserved initially disabled preferences and routing-only pause requests, reused original evidence after interruption, and kept failed verification paused. It also identified missing preference evidence as a reconciliation requirement and an unavailable receiver as pending publishing restoration without revoking restored routing.
+The update reference previously directed a consuming agent to leave previously enabled routing and agent representation publishing off and ask for activation again. A fresh-context application test reproduced that behavior before correction. With the revised reference, an independent agent restored both controls after successful verification without asking again, preserved initially disabled controls and routing-only pause requests, reused original evidence after interruption, and kept failed verification paused. It also identified missing state evidence as a reconciliation requirement and an unavailable receiver as pending publishing restoration without revoking restored routing.
 
 These were read-only instruction-application scenarios, not native installation or inference tests. The unchanged runtime suite passed all 306 tests; both packaged skills passed structural validation. The correction is in the agent workflow: `verify-update` still verifies a paused checkpoint, and the coordinator performs restoration afterward.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Optional presentation-only wrapper for an existing Habblaud SubagentStart hook."""
+"""Optional presentation-only wrapper for an existing agent representation SubagentStart hook."""
 import argparse
 from datetime import datetime, timedelta, timezone
 import json
@@ -104,7 +104,7 @@ def session_root(event, home, task_path):
 
 
 def display_role(event, role):
-    # agent_type is Habblaud's display input here, never a Codex spawn/profile setting.
+    # agent_type is the receiver's display input here, never a Codex spawn/profile setting.
     if isinstance(role, str) and role.strip():
         return dict(event, agent_role=role, agent_type=role)
     return event
@@ -164,7 +164,7 @@ def main():
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
-        parser.error("the original Habblaud hook command is required after --")
+        parser.error("the original representation hook command is required after --")
     raw = sys.stdin.buffer.read(subagents.MAX_INPUT + 1)
     if len(raw) <= subagents.MAX_INPUT:
         try:

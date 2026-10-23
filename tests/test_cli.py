@@ -86,10 +86,10 @@ class CLI(Fixture):
         store=Store(self.state)
         first=store.reserve(self.brief('one'),self.profile(),None)
         second=store.reserve(self.brief('two'),self.profile(),None)
-        a=self.invoke('fallback','claim','--job',first['job_id'],'--task-name','habblaud_verification')
-        b=self.invoke('fallback','claim','--job',second['job_id'],'--task-name','habblaud_verification')
-        self.assertEqual(a['task_name'],'habblaud_verification_'+first['job_id'][:8])
-        self.assertEqual(b['task_name'],'habblaud_verification_'+second['job_id'][:8])
+        a=self.invoke('fallback','claim','--job',first['job_id'],'--task-name','representation_verification')
+        b=self.invoke('fallback','claim','--job',second['job_id'],'--task-name','representation_verification')
+        self.assertEqual(a['task_name'],'representation_verification_'+first['job_id'][:8])
+        self.assertEqual(b['task_name'],'representation_verification_'+second['job_id'][:8])
         resumed=self.invoke('fallback','claim','--job',first['job_id'],'--task-name','different_label')
         self.assertEqual(resumed['task_name'],a['task_name'])
         self.assertFalse(resumed['may_dispatch'])
@@ -124,10 +124,10 @@ class CLI(Fixture):
 
     def test_foreign_readable_task_is_not_attached_during_recovery(self):
         store=Store(self.state); job=store.reserve(self.brief(),self.profile(),None)
-        claim=store.claim_fallback(job['job_id'],'habblaud_verification')
-        result=reconcile_native(store,job['job_id'],[{'task_name':'/root/habblaud_verification'}])
+        claim=store.claim_fallback(job['job_id'],'representation_verification')
+        result=reconcile_native(store,job['job_id'],[{'task_name':'/root/representation_verification'}])
         self.assertIsNone(result['native_task_id'])
-        self.assertFalse(store.attach_fallback(job['job_id'],claim['dispatch_token'],'/root/habblaud_verification'))
+        self.assertFalse(store.attach_fallback(job['job_id'],claim['dispatch_token'],'/root/representation_verification'))
 
     def test_spawn_ack_lost_does_not_respawn(self):
         store = Store(self.state)

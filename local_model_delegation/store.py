@@ -396,7 +396,7 @@ class Store:
         from .profiles import read_config
         from .measurements import bind_enqueued, validate_context
         if measurement is not None: validate_context(measurement)
-        from .habblaud import bind_context, validate_context as validate_visibility
+        from .representation import bind_context, validate_context as validate_visibility
         if visibility is not None: validate_visibility(visibility)
         validate_brief(brief); validate_fallback(fallback)
         if brief['schema_version'] != 2 or brief['fallback'] != fallback: raise ValueError('invalid_brief')
