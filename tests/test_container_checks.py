@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from local_model_delegation.store import atomic_json
 from local_model_delegation.container_checks import reconcile_operation, _check_lock, validate_check
@@ -20,6 +20,21 @@ def environment():
 
 
 class ContainerBoundaryTests(unittest.TestCase):
+    def test_postgres_waits_for_final_server_after_temporary_initialization(self):
+        from local_model_delegation.container_checks import _postgres
+        docker = Mock(spec=['spec','call']); docker.spec = environment()
+        phases = iter(['bash\n','postgres\n'])
+        def call(args, **kwargs):
+            if args[0] == 'exec' and args[-2:] == ['cat','/proc/1/comm']:
+                return {'returncode':0,'stdout':next(phases)}
+            return {'returncode':0,'stdout':'1\n'}
+        docker.call.side_effect = call
+        with patch('local_model_delegation.container_checks.time.sleep'):
+            _postgres(docker,'a'*32,'lmd-'+'a'*32,'fictional-password')
+        calls = [c.args[0] for c in docker.call.call_args_list]
+        self.assertEqual(sum(a[-2:] == ['cat','/proc/1/comm'] for a in calls),2)
+        self.assertEqual(sum('psql' in a for a in calls),1)
+
     def test_environment_is_closed_and_images_are_immutable(self):
         validate_environment(environment())
         for key, value in [('image', 'python:latest'), ('endpoint', 'tcp://127.0.0.1:2375'),

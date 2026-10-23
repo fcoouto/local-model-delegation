@@ -258,6 +258,11 @@ def _postgres(docker, operation, volume, admin_password):
     docker.call(['start', name])
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
+        # The entrypoint's temporary initialization server also accepts SQL, then shuts down.
+        process = docker.call(['exec', name, 'cat', '/proc/1/comm'], check=False, timeout=3)
+        if process['returncode'] != 0 or process['stdout'].strip() != 'postgres':
+            time.sleep(0.1)
+            continue
         result = docker.call(['exec', '--env', 'PGPASSWORD=' + admin_password, name,
                               'psql', '-h', '/var/run/postgresql', '-U', 'postgres', '-d', 'postgres',
                               '-XAt', '-c', 'SELECT 1'], check=False, timeout=3)
