@@ -1,6 +1,6 @@
 # Project-specific local model assessment
 
-Date: 2026-10-23. Status: reviewed design with the owner's project-scope clarification incorporated; awaiting owner approval.
+Date: 2026-10-23. Status: approved for implementation on 2026-10-23, including the difficulty distribution below.
 
 ## Purpose
 
@@ -54,7 +54,7 @@ Setup and Assess My Model use the same project-selection and assessment flow:
 
 Installation and connection checks need not wait for project selection. Assessment and evidence-backed project qualification do. Setup may reuse matching project assessment evidence without repeating generations. Declining assessment does not create a qualification claim or silently enable routing. Existing explicitly approved provisional use retains its current meaning.
 
-Coordinator proposal: remove fixed per-specialty counts and the 4+4 split. Select the smallest portfolio that represents the owner's important recurring task families and includes distinct examples at the claimed difficulty boundaries. Freeze the count and coverage in the preview. When evidence is too sparse, narrow the conclusion rather than manufacture a percentage. The exact initial count is a preparation decision, visible to the owner before execution.
+The owner approved 6–10 project-grounded assignments per selected domain, default eight, without a fixed synthetic/historical split. The default distribution is two light, three medium, two high and one extra high. Six uses 1/2/2/1; ten uses 2/4/3/1. For seven and nine, the coordinator specifies 2/2/2/1 and 2/3/3/1 respectively. Internal difficulty values are `simple`, `moderate`, `complex` and `extra_complex`; do not collapse extra high into complex. Every level needs a rationale based on interacting constraints, not code length or execution time. The single extra-high case is exploratory and cannot establish reliable qualification alone. Freeze the selected domains, task counts and coverage in the preview. Assessment proportions do not replace actual workload frequencies.
 
 ## Turning project work into assignments
 
