@@ -209,7 +209,8 @@ def run_checks(state_dir, source_root, execution, checks):
 
 def verify_references(state_dir, task):
     execution = validate_execution(task['execution'])
-    parent = private_dir(Path(state_dir)/'project-reference-checks')
+    from .assessment_storage import workspace_root
+    parent = private_dir(workspace_root(state_dir)/'reference-checks')
     results = {}
     for variant in ('base','reference'):
         with tempfile.TemporaryDirectory(dir=parent) as directory:

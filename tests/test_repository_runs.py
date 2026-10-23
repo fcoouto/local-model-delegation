@@ -93,8 +93,12 @@ class RepositoryRuns(unittest.TestCase):
         with patch('local_model_delegation.container_checks.run_check',return_value={
                 'returncode':0,'reason':None,'cleanup':'verified_absent'}) as check:
             with self.assertRaisesRegex(ValueError,'project_reference_failed'):
-                repository.verify_references(self.root,self.task)
+                repository.verify_references(self.root/'state',self.task)
             self.assertEqual(check.call_count,4)
+            from local_model_delegation.assessment_storage import workspace_root
+            external = workspace_root(self.root/'state')
+            self.assertTrue(all(call.args[1].is_relative_to(external) for call in check.call_args_list))
+            self.assertFalse((self.root/'state/project-reference-checks').exists())
 
 
 from . import test_project_assessment_runs as campaigns

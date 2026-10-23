@@ -73,12 +73,27 @@
 **Interfaces:** Eight original assignment IDs and difficulty distribution remain unchanged. Prepared pack binds each fixture, real environment, public/hidden checks, verified base/reference and independent semantic review. Runtime budgets must be observed, not fabricated.
 
 - [x] Materialize all eight pinned historical/constructed source fixtures. Preserve complete modules and actual routing/model/transaction paths.
-- [ ] Qualify dependency images and isolated settings. Run each reference and deliberately failing base, with required PostgreSQL concurrency and nonzero expected test discovery.
-- [ ] Inspect saved exact-runtime measurements without generation. Freeze supported measured budgets if available; otherwise record the precise remaining calibration prerequisite without inventing values or generating responses.
-- [ ] Obtain one independent final code/security review and independent per-case reference semantic review in the same bounded review package. Resolve critical/important findings with regression tests.
-- [ ] Complete required lifecycle/security evidence and publish the reviewed follow-up PR. No merge, release or install without the applicable authorization.
-- [ ] Save the full Qwen preparation report and frozen run preview if all gates pass. No consent or submission command is run.
+- [x] Qualify dependency images and isolated settings. Run each reference and deliberately failing base, with required PostgreSQL concurrency and nonzero expected test discovery.
+- [x] Inspect saved exact-runtime measurements without generation. Freeze supported measured budgets if available; otherwise record the precise remaining calibration prerequisite without inventing values or generating responses.
+- [x] Obtain one independent final code/security review and independent per-case reference semantic review in the same bounded review package. Resolve critical/important findings with regression tests.
+- [x] Complete required lifecycle/security evidence and publish the reviewed follow-up PR. No merge, release or install without the applicable authorization.
+- [x] Save the full Qwen preparation report and frozen run preview if all gates pass. No consent or submission command is run.
 
 ## Checkpoints and completion
 
 Use at most four phases: source, isolation, integration, preparation. Preserve the private ledger and current test evidence on interruption. Completion means all eight preparations are verified and reviewed; a missing runtime measurement remains an explicit blocker even when software work is complete.
+
+## Preparation result
+
+All eight private fixtures have passing reference checks and meaningful failing-base
+checks against frozen source and real migration-backed PostgreSQL. Exact-input
+receipts and independent semantic review remain private. Sixteen isolation controls
+passed. The combined harness and published assessment-storage integration pass
+463 offline tests; the reviewed storage patch keeps disposable reference checks
+outside durable plugin state.
+
+The owner-facing preparation report records the remaining gate: saved responses
+contain no usable exact-runtime throughput or supported-output-ceiling evidence.
+Token/time budgets remain unset, so no runnable campaign, consent or submission was
+created. No model responses were generated. Runtime calibration requires separate
+authorization; approval and routing remain unchanged.
