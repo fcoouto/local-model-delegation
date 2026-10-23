@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.16 — 2026-10-23
 
 - Separate assessment runtimes and temporary reference checks from plugin state with the read-only `assessment storage` command.
 - Detect misplaced dependency trees before update preparation changes observers or creates backups; retain evidence preservation and active-work gates.
