@@ -98,7 +98,14 @@ def reset_external(state_dir, instance_key, owner_reference):
     with ExitStack() as stack:
         _disabled(store.root)
         instance = store.instance(instance_key)
-        profile = _profile(store.root, instance['data']['profile']['profile_id'])
+        assessment_identity = None
+        try:
+            profile = _profile(store.root, instance['data']['profile']['profile_id'])
+        except ValueError:
+            from .project_runs import reset_profile
+            profile = reset_profile(store.root, instance)
+            from .profiles import model_identity
+            assessment_identity = model_identity(profile)
         if profile != instance['data']['profile']: raise ValueError('approval_changed')
         _locks(stack, store, profile['endpoint'], profile['model_id'])
         operation = _operation(store, identifier)
@@ -112,7 +119,7 @@ def reset_external(state_dir, instance_key, owner_reference):
                 if not stack.enter_context(ownership(store, name)): raise ValueError('observer_active')
         runtime = Runtime(profile['endpoint'], token_env=profile.get('token_env'))
         before = _snapshot(runtime)
-        loaded = select_loaded(before, profile)
+        loaded = select_loaded(before, profile, assessment_identity)
         old_id = instance['data']['instance_id']
         if old_id in _loaded(before) and (not loaded or loaded['instance_id'] != old_id):
             raise ValueError('runtime_binding_mismatch')

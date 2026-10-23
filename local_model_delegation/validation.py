@@ -418,6 +418,12 @@ def _prepare_verification(state_dir, job_id):
 
 
 def record_verification(state_dir, job_id, receipt):
+    from .project_runs import verification_lock
+    with verification_lock(state_dir, job_id):
+        return _record_verification(state_dir, job_id, receipt)
+
+
+def _record_verification(state_dir, job_id, receipt):
     from .worker import ownership
     store = Store(state_dir)
     with ownership(store, 'check-' + job_id) as owned:
@@ -450,12 +456,14 @@ def record_verification(state_dir, job_id, receipt):
                 or not isinstance(receipt['criteria'], list) or len(receipt['criteria']) != len(job['brief']['acceptance']['criteria'])
                 or not isinstance(receipt['claims'], list) or len(receipt['claims']) != len(proposal.get('claims', []))):
             raise ValueError('incomplete_verification')
-        passed = all(v is True for v in [*receipt['criteria'], *receipt['checks'].values(), *receipt['claims']])
+        from .project_runs import checks_incomplete
+        incomplete = checks_incomplete(state_dir, job, session, receipt['checks'])
+        passed = not incomplete and all(v is True for v in [*receipt['criteria'], *receipt['checks'].values(), *receipt['claims']])
         atomic_json(store.root / 'jobs' / job_id / 'native-checks.json', receipt)
         from .measurements import collect_verdict
-        collect_verdict(store.root,job_id,receipt,passed,'semantic')
+        collect_verdict(store.root,job_id,receipt,passed,'verification' if incomplete else 'semantic')
         if not passed and not job['native_task_id']:
-            return store.select_fallback(job_id, 'native_verification_failed')
+            return store.select_fallback(job_id, 'project_verification_incomplete' if incomplete else 'native_verification_failed')
         with store.db(write=True) as db:
             state = 'accepted' if passed else ('failed' if job['native_task_id'] else 'fallback_required')
             db.execute("UPDATE jobs SET status=?,reason=? WHERE job_id=?", (state, None if passed else 'native_verification_failed', job_id))
@@ -463,10 +471,18 @@ def record_verification(state_dir, job_id, receipt):
 
 
 def run_native_checks(state_dir, job_id):
+    from .project_runs import verification_lock
+    with verification_lock(state_dir, job_id):
+        return _run_native_checks(state_dir, job_id)
+
+
+def _run_native_checks(state_dir, job_id):
     """Run only predeclared native commands, inside the qualified sandbox, with no credentials."""
     session = prepare_verification(state_dir, job_id)
     root = Path(session['stage'])
-    outcomes = {}
+    from .project_runs import prepare_hidden_checks
+    prepare_hidden_checks(state_dir, Store(state_dir).job(job_id), session)
+    outcomes, reasons = {}, {}
     for check in session['acceptance']['checks']:
         executable = Path(check['argv'][0])
         if not executable.is_file(): raise ValueError('verification_unsupported')
@@ -475,4 +491,7 @@ def run_native_checks(state_dir, job_id):
         code = 'import os\nos.chdir(' + repr(str(cwd)) + ')\nos.execv(' + repr(str(executable)) + ',' + repr(check['argv']) + ')\n'
         result = run_isolated(root, code, check['timeout_seconds'], (str(executable.resolve().parent),))
         outcomes[check['id']] = result['returncode'] == 0 and result['reason'] is None
+        reasons[check['id']] = result['reason']
+    from .project_runs import record_check_observation
+    record_check_observation(state_dir, job_id, session, outcomes, reasons)
     return {'job_id': job_id, 'checks': outcomes}

@@ -104,6 +104,8 @@ def main(argv=None):
     p.add_argument("--owner-reference")
     p.add_argument("--scope", type=Path)
     p.add_argument("--max-output-tokens", type=int)
+    p.add_argument("--project", type=Path)
+    p.add_argument("--assessment-id")
     p = commands.add_parser("verify")
     p.add_argument("action", choices=["prepare", "checks", "record"])
     p.add_argument("--job", required=True)
@@ -118,14 +120,17 @@ def main(argv=None):
     p.add_argument('--instance-key')
     p.add_argument('--operation-id')
     p = commands.add_parser("assessment")
-    p.add_argument("action", choices=["choices", "prepare", "consent", "pause", "stop", "resume", "begin", "report", "trial", "submit", "capacity", "approve"])
+    p.add_argument("action", choices=["choices", "projects", "project-preview", "advance", "prepare", "consent", "pause", "stop", "resume", "begin", "report", "trial", "submit", "capacity", "approve"])
     p.add_argument("--profile-id")
     p.add_argument("--assessment-id")
     p.add_argument("--owner-reference")
     p.add_argument("--receipt", type=Path)
     p.add_argument("--scope", type=Path)
     p.add_argument("--trial-id")
+    p.add_argument("--job")
     p.add_argument('--selection', type=Path)
+    p.add_argument('--repository', action='append')
+    p.add_argument('--project', type=Path)
     p.add_argument('--source-profile-id')
     p.add_argument('--preview-digest')
     p.add_argument('--check-current', action='store_true')
@@ -230,20 +235,29 @@ def main(argv=None):
         elif args.command == "assessment":
             from .onboarding import (begin_assessment, assessment_report, record_trial, approve_assessment, submit_trial,
                                      record_capacity, assessment_choices, prepare_assessment, consent_assessment, control_assessment)
-            required = {'choices': set(), 'prepare': {'profile_id', 'selection'},
+            required = {'projects': {'project', 'owner_reference'}, 'advance': {'assessment_id', 'job'}, 'project-preview': {'project', 'selection', 'owner_reference'}, 'choices': set(), 'prepare': {'profile_id', 'selection'},
                         'consent': {'assessment_id', 'preview_digest', 'owner_reference'},
                         'pause': {'assessment_id'}, 'stop': {'assessment_id'}, 'resume': {'assessment_id'},
                         'begin': {'profile_id', 'owner_reference'}, 'report': {'assessment_id'},
                         'trial': {'assessment_id', 'receipt'}, 'submit': {'assessment_id', 'trial_id'},
                         'capacity': {'assessment_id', 'receipt'}, 'approve': {'assessment_id', 'owner_reference', 'scope'}}
             fields = {'profile_id', 'assessment_id', 'owner_reference', 'receipt', 'scope', 'trial_id',
-                      'selection', 'source_profile_id', 'preview_digest', 'check_current'}
+                      'selection', 'project', 'repository', 'job', 'source_profile_id', 'preview_digest', 'check_current'}
             supplied = {k for k in fields if getattr(args, k) is not None and getattr(args, k) is not False}
-            optional = {'prepare': {'source_profile_id'}, 'report': {'check_current'}}.get(args.action, set())
+            optional = {'projects': {'repository'}, 'prepare': {'source_profile_id', 'project', 'owner_reference'}, 'report': {'check_current'}}.get(args.action, set())
             if not required[args.action] <= supplied or not supplied <= required[args.action] | optional:
                 raise ValueError('invalid_assessment_arguments')
-            if args.action == 'choices': result = assessment_choices()
-            elif args.action == 'prepare': result = prepare_assessment(args.state_dir, args.profile_id, read_input(args.selection), source_profile_id=args.source_profile_id)
+            if args.action == 'projects':
+                from .projects import assessment_projects
+                result = assessment_projects(args.project, args.owner_reference, args.repository)
+            elif args.action == 'advance':
+                from .project_runs import advance_cycle
+                result = advance_cycle(args.state_dir, args.assessment_id, args.job)
+            elif args.action == 'project-preview':
+                from .project_assessment import project_preview
+                result = project_preview(args.project, read_input(args.selection), args.owner_reference)
+            elif args.action == 'choices': result = assessment_choices()
+            elif args.action == 'prepare': result = prepare_assessment(args.state_dir, args.profile_id, read_input(args.selection), source_profile_id=args.source_profile_id, project_root=args.project, owner_reference=args.owner_reference)
             elif args.action == 'consent': result = consent_assessment(args.state_dir, args.assessment_id, args.preview_digest, args.owner_reference)
             elif args.action in ('pause', 'stop', 'resume'): result = control_assessment(args.state_dir, args.assessment_id, args.action)
             elif args.action == "begin": result = begin_assessment(args.state_dir, args.profile_id, args.owner_reference)
@@ -255,7 +269,8 @@ def main(argv=None):
         elif args.command == "submit": result = submit_task(args.state_dir, args.brief, args.measurement_context, args.visibility_context)
         elif args.command == "profile" and args.action == 'approve':
             from .onboarding import approve_scope
-            result = approve_scope(args.state_dir, args.profile_id, args.owner_reference, read_input(args.scope), max_output_tokens=args.max_output_tokens)
+            result = approve_scope(args.state_dir, args.profile_id, args.owner_reference, read_input(args.scope), max_output_tokens=args.max_output_tokens,
+                                   project_root=args.project, assessment_id=args.assessment_id)
         elif args.command == "profile":
             profile = read_input(args.file)
             if profile.get("schema_version") != 2: raise ValueError("invalid_profile")

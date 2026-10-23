@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.14 — 2026-10-23
+
+- Assess local models against project-grounded assignments with separate correctness and timing results, frozen runtime budgets and up to three public-feedback work cycles.
+- Select a Git repository or multiple repositories within an umbrella. Keep campaign consent, evidence and approvals bound to each repository; retain legacy grants unchanged.
+- Report demonstrated difficulty bands and provisional task coverage only with matching evidence and confirmed workload weights. Pair native first-cycle comparisons through the existing measurement ledger.
+- Preserve incomplete verification and uncertain runtime outcomes without scoring them as capability failures or replaying submissions. Reject stale retained approval bindings.
+- Add offline repository discovery with worktree deduplication, strict path selection and exact whitespace preservation.
+
+Private project assignments and model evidence are not included. Real framework isolation, runtime output limits and model capability require separate qualification.
+
 ## 0.3.13 — 2026-10-23
 
 - Publish the Assess my Model action with focused or all-ability assessment, explicit per-run consent, resumable execution, pause/stop controls and offline reports. Assessments do not grant model approval or activate routing.

@@ -20,3 +20,7 @@ Verified terminal exhaustion frees the request's slot and records a failed local
 Report observations by task type and context size, with the number of attempts and failures. A few accepted tasks justify continued supervised use in that scope; they do not establish general reliability. Broaden difficulty gradually through authorized normal work. Do not convert observed maxima into approval ceilings, infer maximum concurrency from weight size, or require proven savings before collecting evidence.
 
 The optional synthetic pack and historical capacity measurements remain available. Their strict measurement conditions describe those experiments, not everyday admission. Shared slots cover participating helper clients only. [Approved model loading](model-loading.md) has separate consent and verification; it does not qualify inference quality. Higher concurrency, arbitrary-language quality and automatic native usage attribution require separate qualification.
+
+## Project evidence
+
+Use [project campaigns](../skills/assess-my-model/references/operations.md#project-campaigns-default) for new project qualification. Record exact backend output-limit support and measured prefill/decode performance before selecting a generous finite assessment ceiling. Fake-runtime tests do not establish real cancellation, large-output support, dependency isolation or fresh-client discovery. Keep unsupported project scenarios visible rather than weakening checks. Source profiles, production ceilings and approvals remain unchanged by assessment preparation.

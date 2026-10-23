@@ -30,7 +30,7 @@ def _assessment_wait_failure(store, job, reason):
     with ownership(store, 'assessment-' + permit['assessment_id']) as owned:
         if owned:
             run = _assessment(store.root, permit['assessment_id'])
-            if run.get('schema_version') == 1 and run['authorization']['state'] != 'authorized':
+            if run.get('schema_version') in (1, 2) and run['authorization']['state'] != 'authorized':
                 _defer_run_job(store, job, run['authorization']['state'])
             else:
                 store.decide_wait(job['job_id'], {'action': 'fallback', 'reason': reason})
@@ -51,7 +51,7 @@ def schedule_once(state_dir, resources=None):
                 with ownership(store, 'assessment-' + permit['assessment_id']) as run_owned:
                     if not run_owned: continue
                     run = _assessment(state_dir, permit['assessment_id'])
-                    if run.get('schema_version') == 1 and run['authorization']['state'] != 'authorized':
+                    if run.get('schema_version') in (1, 2) and run['authorization']['state'] != 'authorized':
                         _defer_run_job(store, job, run['authorization']['state'])
                         continue
             if time.time()>=job['route_data']['wait_until']:
