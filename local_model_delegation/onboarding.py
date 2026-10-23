@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import sys
 import uuid
+from .contracts import model_context
 from .contracts import COMPLEXITIES, PYTHON_CHANGE_CAPABILITIES, canonical, digest, load_json, text_hash, validate_brief
 from .profiles import fingerprint_artifact, model_identity, read_config, read_profiles
 from .store import Store, atomic_json, private_dir
@@ -169,8 +170,20 @@ def assessment_choices():
 
 def _verification_snapshot(trials):
     executables = {str(Path(sys.executable).resolve())}
-    executables.update(check['argv'][0] for t in trials for check in t['brief']['acceptance']['checks'])
-    return {name: fingerprint_artifact(Path(name).parent, [Path(name).name]) for name in sorted(executables)}
+    executables.update(check['argv'][0] for t in trials if t['brief']['schema_version'] == 2 for check in t['brief']['acceptance']['checks'])
+    result = {name: fingerprint_artifact(Path(name).parent, [Path(name).name]) for name in sorted(executables)}
+    from .repository_runs import verification_identity
+    seen = set()
+    for trial in trials:
+        if trial['brief']['schema_version'] == 3:
+            repo = trial['brief']['repository']
+            key = digest({k:repo[k] for k in ('environment','public_assets','private_assets','setup_source')})
+            if key in seen:
+                continue
+            seen.add(key)
+            identity = verification_identity(trial['brief'])
+            result['repository-' + digest(identity)] = identity
+    return result
 
 
 def prepare_assessment(state_dir, profile_id, selection, *, source_profile_id=None, project_root=None, owner_reference=None):
@@ -401,7 +414,7 @@ def _assessment_buckets(assessment):
     for trial in assessment['trials']:
         brief = trial['brief']
         scope = {k: brief['task_requirements'][k] for k in ('language','complexity','context_bucket')}
-        scope.update(capability=brief['capability'], max_input_bytes=len(canonical({'contract': brief['behavior_contract'], 'files': brief['files'], 'editable_paths': brief['editable_paths']}).encode()))
+        scope.update(capability=brief['capability'], max_input_bytes=len(canonical(model_context(brief)).encode()))
         key = digest({k:v for k,v in scope.items() if k!='max_input_bytes'})
         bucket = buckets.setdefault(key, {'scope': scope, 'trials': 0, 'passed': 0, 'cases': set()})
         bucket['scope']['max_input_bytes'] = max(bucket['scope']['max_input_bytes'], scope['max_input_bytes'])
@@ -569,6 +582,8 @@ def _approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_
                 or binding != assessment['binding']):
             raise ValueError('project_assessment_mismatch')
         check_bindings(state_dir, assessment)
+        if any(t['brief']['schema_version'] == 3 for t in assessment['trials']):
+            raise ValueError('repository_delegation_scope_not_qualified')
         result = assessment_report(state_dir, assessment_id)
         for item in scope:
             if not any(b['recommendation'] == 'suitable_within_tested_scope'
@@ -777,7 +792,7 @@ def record_outcome(state_dir, job_id, receipt):
                 if not scopes and route.get('assessment'):
                     brief=job['brief']
                     scopes=[{'capability':brief['capability'],**{k:brief['task_requirements'][k] for k in ('language','complexity','context_bucket')},
-                             'max_input_bytes':len(canonical({'contract':brief['behavior_contract'],'files':brief['files'],'editable_paths':brief['editable_paths']}).encode())}]
+                             'max_input_bytes':len(canonical(model_context(brief)).encode())}]
                 current['benefit_evidence']={'credible':True,'kind':'usage_proxy','native_overhead':sum(counts),
                                             'job_id':job_id,'subscription_savings':'unknown',
                                             'scope':scopes}

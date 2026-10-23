@@ -1,5 +1,6 @@
 """Project evidence summaries; curated samples never establish statistical reliability."""
 from collections import Counter
+from .contracts import model_context
 from .contracts import canonical, digest, text_hash
 
 
@@ -24,8 +25,7 @@ def summarize(record, results):
             recommendation = ('suitable_within_tested_scope' if suitable else
                               'mixed_results_requiring_narrower_scope' if counts['failed'] and counts['passed'] else 'not_established')
             briefs = [t['brief'] for t in record['trials'] if t['case_id'] in ids and t['cycle'] == 1]
-            size = min(len(canonical({'contract': b['behavior_contract'], 'files': b['files'],
-                                      'editable_paths': b['editable_paths']}).encode()) for b in briefs)
+            size = min(len(canonical(model_context(b)).encode()) for b in briefs)
             buckets.append({'domain_id': domain['id'], 'role': domain['role'], 'specialty': domain['specialty'],
                             'capability': domain['capability'], 'language': domain['language'],
                             'complexity': difficulty, 'context_bucket': context, 'max_input_bytes': size,

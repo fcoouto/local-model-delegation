@@ -58,6 +58,9 @@ def safe_path(root: Path, name: str) -> Path:
 def validate_brief(data: dict[str, Any]) -> dict[str, Any]:
     if isinstance(data, dict) and type(data.get("schema_version")) is int and data["schema_version"] == 2:
         return validate_v2(data)
+    if isinstance(data, dict) and type(data.get("schema_version")) is int and data["schema_version"] == 3:
+        from .repository_runs import validate_brief as validate_repository_brief
+        return validate_repository_brief(data)
     raise ValueError("invalid_brief")
 
 
@@ -173,3 +176,11 @@ def validate_v2(data):
 def envelope(job: dict[str, Any]) -> dict[str, Any]:
     return {"schema_version": 1, **{key: job.get(key) for key in (
         "job_id", "attempt_id", "status", "reason", "fallback", "result_path", "native_task_id")}}
+
+
+def model_context(brief):
+    """The exact model-visible payload, excluding private verification metadata."""
+    if brief.get('schema_version') == 3:
+        from .repository_runs import model_input
+        return model_input(brief)
+    return {'contract':brief['behavior_contract'],'files':brief['files'],'editable_paths':brief['editable_paths']}

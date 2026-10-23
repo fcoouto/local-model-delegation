@@ -399,7 +399,7 @@ class Store:
         from .habblaud import bind_context, validate_context as validate_visibility
         if visibility is not None: validate_visibility(visibility)
         validate_brief(brief); validate_fallback(fallback)
-        if brief['schema_version'] != 2 or brief['fallback'] != fallback: raise ValueError('invalid_brief')
+        if (brief['schema_version'] != 2 and not (brief['schema_version'] == 3 and assessment)) or brief['fallback'] != fallback: raise ValueError('invalid_brief')
         if assessment:
             from .onboarding import authorize_assessment
             authorize_assessment(self.root, brief, assessment)
