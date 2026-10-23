@@ -65,3 +65,8 @@ Runtime binding trusts the owner-selected local index and matching discovery met
 New project qualification uses exact canonical repository identity from `projects.resolve_project_identity`, shared by its ordinary worktrees. Approval scope may additionally contain `project` (`kind`, `identity`) and `assessment_id`. Project entries match only that identity plus the existing capability/language/complexity/context/input budget. Role and specialty labels cannot expand scope. Existing entries without `project` are legacy global permission, not retroactive project evidence. Preserve their meaning until explicit owner-authorized migration. Changed approval invalidates queued snapshots before execution.
 
 Difficulty values are exact: `simple`, `moderate`, `complex`, `extra_complex`. A larger context or a passing extra-high example never promotes lower-scope approval. Project campaigns have separate unapproved profiles and permits; campaign success cannot activate ordinary routing. See the [assessment procedure](../../assess-my-model/references/operations.md#project-campaigns-default) for cycles, frozen budgets and hidden-check boundaries.
+
+
+## Repository assessment briefs
+
+Brief schema 3 is restricted to versioned repository assessments, not ordinary routing. See [repository execution](../../../docs/repository-assessments.md) for frozen source/asset manifests, bounded source operations, exact edit proposals, Docker/PostgreSQL checks and durable campaign continuation. Schema 2 limits and historical receipts remain unchanged. Native verification still owns semantic acceptance; a test receipt alone cannot authorize project changes or model approval.

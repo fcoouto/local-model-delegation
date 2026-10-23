@@ -53,7 +53,7 @@ Reopen Codex or start a fresh chat if the host needs to reload skills. The agent
 4. **Decide:** approve the exact model and a practical provisional scope, then separately choose whether to enable delegation.
 5. **Verify:** report what was checked, what remains pending and how to resume. “Installed” does not mean “ready to delegate.”
 
-**Supported today:** Codex on macOS, Python 3.11+, and LM Studio over a loopback HTTP connection. Executable candidates require qualified macOS isolation. The shared core is host-agnostic; Claude integration, other runtimes and non-text tasks are future work. With separate loading permission, the plugin can load an approved model before delegation. See [model loading and recovery](docs/model-loading.md).
+**Supported today:** Codex on macOS, Python 3.11+, and LM Studio over a loopback HTTP connection. Executable candidates require qualified macOS isolation, or the explicitly qualified container backend for [repository assessments](docs/repository-assessments.md). The shared core is host-agnostic; Claude integration, other runtimes and non-text tasks are future work. With separate loading permission, the plugin can load an approved model before delegation. See [model loading and recovery](docs/model-loading.md).
 
 Read the [onboarding guide](docs/onboarding.md) for the agent's workflow and [onboarding evaluation](docs/onboarding-validation.md) for what has been tested. Cloning this repository installs nothing, approves no model and changes no provider or authentication settings.
 

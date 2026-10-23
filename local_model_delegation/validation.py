@@ -102,6 +102,13 @@ def parse_python_proposal(text, brief):
 
 
 def source_matches(brief):
+    if brief.get('schema_version') == 3:
+        from .repository_runs import descriptor
+        try:
+            descriptor({'root':brief['source_root'],'manifest':brief['repository']['manifest']})
+        except (ValueError,OSError):
+            return False
+        return True
     try:
         return (all(text_hash(safe_path(Path(brief["source_root"]), name).read_text()) == item["sha256"] for name, item in brief["files"].items())
                 and all(not safe_path(Path(brief["source_root"]), name).exists() for name in brief["editable_paths"] if name not in brief["files"]))
@@ -311,6 +318,12 @@ def _verify_python_candidate(store, job_id):
 def parse_proposal(text, brief):
     """Structural checks only. Semantic acceptance belongs to the native coordinator."""
     value = _candidate_json(text)
+    if brief.get('schema_version') == 3:
+        from .repository_context import apply_edits
+        if isinstance(value,dict) and value.get('action') != 'submit':
+            raise ValueError('repository_context_action')
+        return {'summary':value.get('summary') if isinstance(value,dict) else None,
+                'files':apply_edits(Path(brief['source_root']),brief['repository']['manifest'],brief['editable_paths'],value)}
     summary = brief['capability'] == 'file_summary'
     expected = {'summary', 'claims' if summary else 'files'}
     if not isinstance(value, dict) or set(value) != expected or not isinstance(value['summary'], str):
@@ -341,14 +354,19 @@ class InvalidProposal(ValueError):
     """Invalid model output, distinct from corrupted state or unavailable verification."""
 
 
-def _proposal(store, job):
+def _response(store, job):
     path = Path(job['result_path'])
     if path.is_symlink() or not path.resolve().is_relative_to(store.root / 'jobs' / job['job_id']): raise ValueError('unsafe_result')
     artifact = load_json(path.read_text())
     if text_hash(artifact['text']) != artifact['sha256']: raise ValueError('candidate_hash_mismatch')
-    try: proposal = parse_proposal(artifact['text'], job['brief'])
+    return artifact['text'], artifact['sha256']
+
+
+def _proposal(store, job):
+    text, candidate_hash = _response(store, job)
+    try: proposal = parse_proposal(text, job['brief'])
     except ValueError as error: raise InvalidProposal(str(error)) from error
-    return proposal, artifact['sha256']
+    return proposal, candidate_hash
 
 
 def _verification_binding(job, candidate_hash):
@@ -392,7 +410,7 @@ def _prepare_verification(state_dir, job_id):
         authorize_job(store, job, purpose='verify')
         if not source_matches(job['brief']): raise ValueError('source_changed')
         proposal, candidate_hash = _proposal(store, job)
-        if job['brief']['capability'] != 'file_summary' and not _qualified_isolation():
+        if job['brief']['schema_version'] == 2 and job['brief']['capability'] != 'file_summary' and not _qualified_isolation():
             raise ValueError('verification_unsupported')
         binding = _verification_binding(job, candidate_hash)
         path = store.root / 'jobs' / job_id / 'verification.json'
@@ -402,7 +420,15 @@ def _prepare_verification(state_dir, job_id):
                 with store.db(write=True) as db: db.execute("UPDATE jobs SET status='checking' WHERE job_id=?", (job_id,))
                 return saved
         stage = private_dir(store.root / 'jobs' / job_id / ('stage-' + uuid.uuid4().hex))
-        files = {n: item['content'] for n, item in job['brief']['files'].items()}
+        repository_source = None
+        if job['brief']['schema_version'] == 3:
+            from .repository_runs import copy_source
+            stage.rmdir()
+            repository_source = copy_source({'root':job['brief']['source_root'],
+                                             'manifest':job['brief']['repository']['manifest']},stage,proposal['files'])
+            files = {}
+        else:
+            files = {n: item['content'] for n, item in job['brief']['files'].items()}
         files.update(proposal.get('files', {}))
         for name, content in files.items():
             target = safe_path(stage, name)
@@ -411,6 +437,8 @@ def _prepare_verification(state_dir, job_id):
             target.chmod(0o600)
         session = {**binding, 'session_token': uuid.uuid4().hex + uuid.uuid4().hex,
                    'stage': str(stage), 'acceptance': job['brief']['acceptance'], 'claims': proposal.get('claims', [])}
+        if repository_source is not None:
+            session['repository_manifest'] = repository_source['manifest']
         atomic_json(path, session)
         with store.db(write=True) as db:
             db.execute("UPDATE jobs SET status='checking' WHERE job_id=? AND status IN ('candidate_ready','checking')", (job_id,))
@@ -482,6 +510,14 @@ def _run_native_checks(state_dir, job_id):
     root = Path(session['stage'])
     from .project_runs import prepare_hidden_checks
     prepare_hidden_checks(state_dir, Store(state_dir).job(job_id), session)
+    job = Store(state_dir).job(job_id)
+    if job['brief']['schema_version'] == 3:
+        from .repository_runs import execution_from_brief, run_checks, descriptor
+        descriptor({'root':session['stage'],'manifest':session['repository_manifest']})
+        outcomes, reasons = run_checks(state_dir,root,execution_from_brief(job['brief']),session['acceptance']['checks'])
+        from .project_runs import record_check_observation
+        record_check_observation(state_dir,job_id,session,outcomes,reasons)
+        return {'job_id':job_id,'checks':outcomes}
     outcomes, reasons = {}, {}
     for check in session['acceptance']['checks']:
         executable = Path(check['argv'][0])

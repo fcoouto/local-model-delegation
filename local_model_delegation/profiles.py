@@ -189,7 +189,8 @@ def read_profile_by_id(state_dir, profile_id, capability):
 
 
 def authorize_job(store, job, *, purpose='submit'):
-    if job["brief"].get("schema_version") != 2: raise ValueError("invalid_brief")
+    if job["brief"].get("schema_version") != 2 and not (job["brief"].get("schema_version") == 3 and job.get("route_data", {}).get("assessment")):
+        raise ValueError("invalid_brief")
     if job.get("native_task_id") and not job["profile"]:
         from .contracts import validate_fallback
         validate_fallback(job["fallback"])

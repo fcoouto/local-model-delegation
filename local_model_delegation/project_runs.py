@@ -28,6 +28,9 @@ def _execution(task):
     execution = task['execution']
     if execution is None:
         raise ValueError('project_execution_required')
+    if execution.get('schema_version') == 2:
+        from .repository_runs import validate_execution
+        return validate_execution(execution)
     _fields(execution, 'files editable_paths criteria public_checks private_files private_checks reference_files review_reference max_cycles budget',
             'invalid_project_execution')
     for name in ('files', 'private_files', 'reference_files'):
@@ -44,7 +47,11 @@ def _execution(task):
             or type(execution['max_cycles']) is not int or not 1 <= execution['max_cycles'] <= 3):
         raise ValueError('invalid_project_execution')
     _text(execution['review_reference'])
-    budget = execution['budget']
+    validate_budget(execution['budget'])
+    return execution
+
+
+def validate_budget(budget):
     _fields(budget, 'context_length output_ceiling prefill_seconds decode_tokens_per_second measurement_reference',
             'invalid_project_budget')
     if (any(type(budget[k]) is not int or budget[k] <= 0 for k in ('context_length', 'output_ceiling'))
@@ -53,7 +60,7 @@ def _execution(task):
             or not math.isfinite(budget['prefill_seconds']) or budget['prefill_seconds'] < 0):
         raise ValueError('invalid_project_budget')
     _text(budget['measurement_reference'])
-    return execution
+    return budget
 
 
 def _checks(root, checks):
@@ -75,6 +82,9 @@ def _checks(root, checks):
 def verify_references(state_dir, task):
     """Run frozen base/reference checks; semantic review remains independently native."""
     execution = _execution(task)
+    if execution.get('schema_version') == 2:
+        from .repository_runs import verify_references as verify_repository
+        return verify_repository(state_dir, task)
     from .validation import _qualified_isolation
     if (execution['public_checks'] or execution['private_checks']) and not _qualified_isolation():
         raise ValueError('isolation_unsupported')
@@ -96,8 +106,11 @@ def verify_references(state_dir, task):
             'execution_digest': digest(execution)}
 
 
-def _brief(state_dir, identifier, domain, task, profile, cycle, files, feedback=''):
+def _brief(state_dir, identifier, domain, task, profile, cycle, files=None, feedback=''):
     execution = _execution(task)
+    if execution.get('schema_version') == 2:
+        from .repository_runs import build_trial
+        return build_trial(state_dir, identifier, domain, task, profile, cycle)
     trial_id = task['id'] + '-cycle-' + str(cycle)
     root = private_dir(Path(state_dir) / 'assessments' / identifier / trial_id)
     _write_files(root, files)
@@ -160,7 +173,7 @@ def prepare_project_run(state_dir, profile_id, project_root, pack, owner_referen
             execution = _execution(task)
             if execution['budget']['context_length'] != loaded['config'].get('context_length'):
                 raise ValueError('assessment_runtime_changed')
-            trials.append(_brief(state_dir, identifier, domain, task, profile, 1, execution['files']))
+            trials.append(_brief(state_dir, identifier, domain, task, profile, 1, execution.get('files')))
             references[task['id']] = verify_references(state_dir, task)
     binding = _binding(profile)
     from .worker import context_fits
@@ -172,7 +185,7 @@ def prepare_project_run(state_dir, profile_id, project_root, pack, owner_referen
                    profile_id=profile['profile_id'], source_profile_id=profile_id,
                    binding=binding, profile_digest=digest(profile), loaded_config=loaded['config'],
                    prepared_at=datetime.now(timezone.utc).isoformat(), concurrency=1,
-                   max_submissions=sum(t['execution']['max_cycles'] for d in pack['domains'] for t in d['assignments']),
+                   max_submissions=sum(t['execution']['max_cycles'] + (12 if t['execution'].get('schema_version') == 2 else 0) for d in pack['domains'] for t in d['assignments']),
                    initial_trials=[{'trial_id': t['trial_id'], 'brief_hash': t['brief_hash'],
                                     'deadline_seconds': t['deadline_seconds']} for t in trials],
                    runtime_bundle=bundle.name, verification=verification, reference_checks=references,
@@ -183,6 +196,11 @@ def prepare_project_run(state_dir, profile_id, project_root, pack, owner_referen
                                         'comparison_boundary': 'first_cycle', 'max_cycles': 1},
                    timing_policy='Generation deadlines exclude queue wait; each check has its own frozen timeout. '
                                  'Record complete elapsed work separately; interruption is inconclusive.')
+    if any(t['brief']['schema_version'] == 3 for t in trials):
+        preview['repository_protocol'] = {'context_turns_per_assignment':12,'proposals_per_assignment':3,
+                                          'response_bytes':32768,'retained_views':2,
+                                          'approval_supported':False}
+        preview['comparison_protocol']['tool_parity'] = 'Same frozen public source, bounded context actions and one proposal; disclose every asymmetry.'
     preview.pop('preview_digest', None)
     preview_digest = digest(preview)
     record = {'schema_version': 2, 'assessment_id': identifier, 'profile_id': profile['profile_id'],
@@ -226,13 +244,19 @@ def validate_record(record, identifier):
             domain, task = _task(record, trial['case_id'])
             if (trial['domain_id'] != domain['id'] or type(trial['cycle']) is not int
                     or not 1 <= trial['cycle'] <= task['execution']['max_cycles']
-                    or trial['trial_id'] != task['id'] + '-cycle-' + str(trial['cycle'])
+                    or trial['trial_id'] != task['id'] + '-cycle-' + str(trial['cycle']) +
+                    ('-context-' + str(trial.get('context_turns')) if trial['brief']['schema_version'] == 3 else '')
                     or not positive(trial['deadline_seconds'])):
                 raise ValueError('invalid_assessment_record')
             parent = previous.get(task['id'])
-            if trial['cycle'] > 1:
+            repository = trial['brief']['schema_version'] == 3
+            if repository and (trial.get('context_turns') != trial['brief']['repository']['context_turns']):
+                raise ValueError('invalid_assessment_record')
+            if trial['cycle'] > 1 or (repository and trial['context_turns'] > 0):
                 receipt = record['cycle_receipts'][parent['trial_id']]
-                if (trial['cycle'] != parent['cycle'] + 1
+                context_step = repository and receipt.get('operation') == 'context'
+                if (trial['cycle'] != parent['cycle'] + (0 if context_step else 1)
+                        or (repository and trial['context_turns'] != parent['context_turns'] + (1 if context_step else 0))
                         or trial['deadline_seconds'] != parent['deadline_seconds']
                         or receipt['next_trial_id'] != trial['trial_id']
                         or receipt['case_id'] != trial['case_id']
@@ -244,7 +268,7 @@ def validate_record(record, identifier):
                 raise ValueError('invalid_assessment_record')
             previous[task['id']] = trial
             seen.add(trial['trial_id'])
-            if trial['cycle'] == 1:
+            if trial['cycle'] == 1 and (not repository or trial['context_turns'] == 0):
                 initial.append({k: trial[k] for k in ('trial_id', 'brief_hash', 'deadline_seconds')})
         if (initial != preview['initial_trials'] or len(seen) > preview['max_submissions']
                 or set(record['receipts']) & set(record['cycle_receipts'])
@@ -282,7 +306,7 @@ def check_bindings(state_dir, record, *, check_runtime=False):
         if any(not context_fits(t['brief'], profile, loaded) for t in record['trials']):
             raise ValueError('assessment_context_unfit')
         from .validation import _qualified_isolation
-        if any(t['brief']['acceptance']['checks'] for t in record['trials']) and not _qualified_isolation():
+        if any(t['brief']['schema_version'] == 2 and t['brief']['acceptance']['checks'] for t in record['trials']) and not _qualified_isolation():
             raise ValueError('isolation_unsupported')
     return profile
 
@@ -335,7 +359,8 @@ def report(state_dir, record, *, check_current=False):
             counts['planned'] += 1
             counts[disposition] += 1
             results.append({'case_id': task['id'], 'domain_id': domain['id'], 'difficulty': task['difficulty'],
-                            'origin': task['origin'], 'disposition': disposition, 'cycles': len(trials),
+                            'origin': task['origin'], 'disposition': disposition, 'cycles': trial['cycle'],
+                            'context_turns': trial.get('context_turns',0),
                             'observation': _trial_observation(store, job) if job else None})
     freshness = 'unverified'
     if check_current:
@@ -405,11 +430,14 @@ def advance_cycle(state_dir, assessment_id, job_id):
             raise ValueError('candidate_not_ready')
         domain, task = _task(record, trial['case_id'])
         execution = task['execution']
-        if trial['cycle'] >= execution['max_cycles']:
+        if trial['brief']['schema_version'] != 3 and trial['cycle'] >= execution['max_cycles']:
             raise ValueError('assessment_cycle_limit')
         job_root = store.root / 'jobs' / job_id
         if any((job_root / name).exists() for name in ('project-finalizing.json', 'native-checks.json')):
             raise ValueError('assessment_already_finalizing')
+        if trial['brief']['schema_version'] == 3:
+            from .repository_runs import advance
+            return advance(state_dir, record, trial, job)
         try:
             proposal, candidate_hash = _proposal(store, job)
         except InvalidProposal:
@@ -451,7 +479,8 @@ def prepare_hidden_checks(state_dir, job, session):
     _, task = _task(record, trial['case_id'])
     atomic_json(Path(state_dir) / 'jobs' / job['job_id'] / 'project-finalizing.json',
                 {'candidate_hash': session['candidate_hash'], 'trial_id': trial['trial_id']})
-    _write_files(Path(session['stage']), task['execution']['private_files'])
+    if task['execution'].get('schema_version') != 2:
+        _write_files(Path(session['stage']), task['execution']['private_files'])
 
 
 def record_final(state_dir, record, receipt):
@@ -470,7 +499,7 @@ def record_final(state_dir, record, receipt):
     if _trial_blocker(store, job) and not reset:
         raise ValueError('trial_unresolved')
     disposition = ('unfinished' if reset else 'passed' if job['status'] == 'accepted' else 'unfinished'
-                   if job['reason'] in ('output_budget_exhausted', 'project_verification_incomplete') else 'failed')
+                   if job['reason'] in ('output_budget_exhausted', 'context_budget_exhausted', 'project_verification_incomplete') else 'failed')
     value = {**receipt, 'case_id': trial['case_id'], 'disposition': disposition,
              'passed': disposition == 'passed', **_trial_observation(store, job)}
     existing = record['receipts'].get(trial['trial_id'])

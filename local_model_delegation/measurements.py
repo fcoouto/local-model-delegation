@@ -9,6 +9,7 @@ import stat
 import time
 from urllib.parse import quote
 import uuid
+from .contracts import model_context
 from .contracts import canonical, digest, load_json, MAX_ANSWER_BYTES
 
 
@@ -147,9 +148,9 @@ def _begin(db, task_id, context, job_id=None, *, assessment_project=None):
         require(job is not None,'unknown_job')
         brief = load_json(job['brief'])
         require((assessment_project or resolve_project_identity(Path(brief['source_root'])))['identity'] == project['identity'], 'measurement_project_mismatch')
-        require(brief.get('schema_version') == 2, 'invalid_brief')
+        require(brief.get('schema_version') in (2, 3), 'invalid_brief')
         scope = {'capability':brief['capability'], **{k:brief['task_requirements'][k] for k in ('language','complexity','context_bucket')},
-                 'input_bytes':len(canonical({'contract':brief['behavior_contract'],'files':brief['files'],'editable_paths':brief['editable_paths']}).encode()),
+                 'input_bytes':len(canonical(model_context(brief)).encode()),
                  'file_count':len(brief['files'])}
         require(context['scope'] == scope, 'measurement_scope_mismatch')
         route = load_json(dict(job).get('route_data') or '{}')
