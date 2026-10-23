@@ -488,6 +488,12 @@ class Store:
                                 from .measurements import model_binding
                                 from .profiles import generation_settings
                                 route['measurement_binding'] = model_binding(current,executed=True,request_settings=generation_settings(job['brief'],current))
+                        if route.get('assessment') and assessment.get('schema_version') == 2:
+                            from .measurements import model_binding
+                            from .profiles import generation_settings
+                            route['measurement_binding'] = model_binding(current, executed=True,
+                                request_settings=generation_settings(job['brief'], current),
+                                runtime_identity=assessment['binding']['runtime'])
                         db.execute('UPDATE jobs SET profile=?,status=?,reason=NULL,attempt_id=?,route_data=? WHERE job_id=?',
                                    (canonical(current),status,attempt,canonical(route),job_id))
                         db.execute('INSERT INTO attempts VALUES (?,?,?,?,?,?)',(attempt,job_id,key,generation,'reserved',canonical({'created':time.time()})))

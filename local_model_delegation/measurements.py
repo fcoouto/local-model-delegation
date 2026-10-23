@@ -136,7 +136,7 @@ def validate_native(binding):
     require(all(identifier(v) for v in binding.values()))
 
 
-def _begin(db, task_id, context, job_id=None):
+def _begin(db, task_id, context, job_id=None, *, assessment_project=None):
     require(identifier(task_id), 'invalid_measurement_task')
     validate_context(context)
     project = db.execute('SELECT * FROM measurement_projects WHERE project_id=?', (context['project_id'],)).fetchone()
@@ -146,7 +146,7 @@ def _begin(db, task_id, context, job_id=None):
         job = db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone()
         require(job is not None,'unknown_job')
         brief = load_json(job['brief'])
-        require(resolve_project_identity(Path(brief['source_root']))['identity'] == project['identity'], 'measurement_project_mismatch')
+        require((assessment_project or resolve_project_identity(Path(brief['source_root'])))['identity'] == project['identity'], 'measurement_project_mismatch')
         require(brief.get('schema_version') == 2, 'invalid_brief')
         scope = {'capability':brief['capability'], **{k:brief['task_requirements'][k] for k in ('language','complexity','context_bucket')},
                  'input_bytes':len(canonical({'contract':brief['behavior_contract'],'files':brief['files'],'editable_paths':brief['editable_paths']}).encode()),
@@ -164,8 +164,25 @@ def _begin(db, task_id, context, job_id=None):
 
 
 def begin_measurement(state_dir: Path, task_id: str, context: dict, job_id=None) -> dict:
+    project = None
+    if job_id:
+        from .store import Store
+        job = Store(state_dir, read_only=True).job(job_id)
+        permit = job.get('route_data', {}).get('assessment')
+        if permit:
+            from .onboarding import _assessment
+            record = _assessment(state_dir, permit['assessment_id'])
+            if record.get('schema_version') == 2:
+                require(permit['permit_token'] == record['permit_token'], 'assessment_scope_mismatch')
+                trial = next((t for t in record['trials'] if t['brief_hash'] == digest(job['brief'])), None)
+                require(trial is not None, 'assessment_scope_mismatch')
+                from .project_runs import _task
+                _, task = _task(record, trial['case_id'])
+                require(context.get('case_id') == task['id'] and context.get('case_hash') == digest(task),
+                        'comparison_case_mismatch')
+                project = record['preview']['project']
     with connection(state_dir, write=True) as db:
-        return _begin(db, task_id, context, job_id)
+        return _begin(db, task_id, context, job_id, assessment_project=project)
 
 
 def _validate_payload(kind, payload):
@@ -353,10 +370,11 @@ def bind_enqueued(db, job_id, context):
     _begin(db, job_id, context, job_id)
 
 
-def model_binding(profile, *, executed=False, request_settings=None):
+def model_binding(profile, *, executed=False, request_settings=None, runtime_identity=None):
     if not profile: return {}
+    identity = runtime_identity or (profile.get('approval') or {}).get('model_identity')
     return {'profile_id':profile['profile_id'], 'artifact_digest':profile['artifact']['digest'],
-            'runtime_digest':digest((profile.get('approval') or {}).get('model_identity')) if profile.get('approval') else None,
+            'runtime_digest':digest(identity) if identity is not None else None,
             'settings_digest':digest(profile['request_settings'] if request_settings is None else request_settings), 'helper_digest':helper_digest() if executed else None}
 
 

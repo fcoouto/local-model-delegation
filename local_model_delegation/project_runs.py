@@ -178,8 +178,8 @@ def prepare_project_run(state_dir, profile_id, project_root, pack, owner_referen
                    comparison_protocol={'feedback': 'public checks only', 'native_limits': 'not enforced by this helper',
                                         'tool_parity': 'supplied files and isolated checks; disclose every asymmetry',
                                         'subset': [next(t['id'] for t in d['assignments'] if t['difficulty'] == level)
-                                                   for d in pack['domains']
-                                                   for level in ('simple', 'moderate', 'complex', 'extra_complex')]},
+                                                   for d in pack['domains'] for level in ('moderate', 'complex')][:2],
+                                        'comparison_boundary': 'first_cycle', 'max_cycles': 1},
                    timing_policy='Generation deadlines exclude queue wait; each check has its own frozen timeout. '
                                  'Record complete elapsed work separately; interruption is inconclusive.')
     preview.pop('preview_digest', None)
@@ -341,9 +341,10 @@ def report(state_dir, record, *, check_current=False):
         try: check_bindings(state_dir, record, check_runtime=True)
         except (ValueError, OSError): freshness = 'stale_or_unavailable'
         else: freshness = 'current'
-    return {'schema_version': 2, 'freshness': freshness, 'assessment_id': record['assessment_id'], 'state': record['authorization']['state'],
+    from .project_reports import summarize
+    return {'schema_version': 2, **summarize(record, results), 'freshness': freshness, 'assessment_id': record['assessment_id'], 'state': record['authorization']['state'],
             'project': record['preview']['project'], 'counts': counts, 'assignments': results,
-            'workload_coverage': None, 'limitations': ['Project evidence is provisional; approval and routing are separate.',
+            'limitations': ['Project evidence is provisional; approval and routing are separate.',
                                                       'Speed does not determine capability.']}
 
 

@@ -522,7 +522,16 @@ def approve_assessment(state_dir, assessment_id, owner_reference, scope):
     return approve_scope(state_dir, report['profile_id'], owner_reference, scope)
 
 
-def approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_tokens=None):
+def approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_tokens=None, project_root=None, assessment_id=None):
+    from .worker import ownership
+    with ownership(Store(state_dir), 'profile-approval-' + str(profile_id)) as owned:
+        if not owned:
+            raise ValueError('profile_approval_busy')
+        return _approve_scope(state_dir, profile_id, owner_reference, scope,
+                              max_output_tokens=max_output_tokens, project_root=project_root, assessment_id=assessment_id)
+
+
+def _approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_tokens=None, project_root=None, assessment_id=None):
     """Record explicit provisional operating permission, never fabricated assessment evidence."""
     if not isinstance(owner_reference, str) or not owner_reference.strip(): raise ValueError('owner_confirmation_required')
     profile = _profile(state_dir, profile_id)
@@ -539,13 +548,36 @@ def approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_t
                 or type(item['max_input_bytes']) is not int or not 0 < item['max_input_bytes'] <= 800000):
             raise ValueError('invalid_scope')
     binding = _binding(profile)
+    if project_root is not None:
+        if assessment_id is None:
+            raise ValueError('project_assessment_required')
+        from .project_runs import check_bindings
+        from .projects import resolve_project_identity
+        assessment = _assessment(state_dir, assessment_id)
+        if (assessment.get('schema_version') != 2
+                or resolve_project_identity(project_root) != assessment['preview']['project']
+                or profile_id != assessment['source_profile']['profile_id']
+                or binding != assessment['binding']):
+            raise ValueError('project_assessment_mismatch')
+        check_bindings(state_dir, assessment)
+        result = assessment_report(state_dir, assessment_id)
+        for item in scope:
+            if not any(b['recommendation'] == 'suitable_within_tested_scope'
+                       and all(item[k] == b[k] for k in ('capability', 'language', 'complexity', 'context_bucket'))
+                       and item['max_input_bytes'] <= b['max_input_bytes'] for b in result['scope_results']):
+                raise ValueError('project_scope_not_established')
+        additions = [{**item, 'project': assessment['preview']['project'], 'assessment_id': assessment_id} for item in scope]
+        scope = [*profile.get('scope', []), *[item for item in additions if item not in profile.get('scope', [])]]
+    elif assessment_id is not None:
+        raise ValueError('project_permission_required')
     profile['artifact'].update(binding['artifact'])
     profile.update(scope=scope, qualification_status='qualified')
     profile['approval'] = {'owner_reference':owner_reference, 'timestamp':datetime.now(timezone.utc).isoformat(),
                            'artifact_digest':binding['artifact']['digest'], 'model_identity':binding['runtime'],
                            'capabilities':profile['capabilities'], 'request_settings':profile['request_settings'], 'scope':scope}
     atomic_json(Path(state_dir) / 'profiles' / (profile['profile_id']+'.json'), profile)
-    return {'status':'approval_recorded','routing_enabled':read_config(state_dir).get('routing_enabled') is True}
+    return {'status':'approval_recorded', 'approval_kind': 'project_bound' if project_root is not None else 'legacy_global',
+            'routing_enabled':read_config(state_dir).get('routing_enabled') is True}
 
 
 def submit_trial(state_dir, assessment_id, trial_id):

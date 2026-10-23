@@ -217,6 +217,16 @@ def generation_settings(brief, profile):
     return {**settings, 'max_output_tokens':requested}
 
 
+def _project_matches(scope, brief):
+    if 'project' not in scope:
+        return True
+    from .projects import resolve_project_identity
+    try:
+        return scope['project'] == resolve_project_identity(Path(brief['source_root']))
+    except (ValueError, OSError, KeyError):
+        return False
+
+
 def scope_matches(profile, brief):
     from .contracts import canonical
     if 'request_settings' in profile:
@@ -225,6 +235,7 @@ def scope_matches(profile, brief):
     requirements = brief["task_requirements"]
     size = len(canonical({"contract": brief["behavior_contract"], "files": brief["files"], "editable_paths": brief["editable_paths"]}).encode())
     return any(isinstance(scope, dict) and scope.get("capability") == brief["capability"]
+               and _project_matches(scope, brief)
                and all(scope.get(k) == requirements[k] for k in ("language", "complexity", "context_bucket"))
                and type(scope.get("max_input_bytes")) is int and size <= scope["max_input_bytes"]
                for scope in profile.get("scope", []))
