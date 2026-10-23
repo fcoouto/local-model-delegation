@@ -93,7 +93,7 @@ def eligible(profile: dict[str, Any], identity: dict[str, Any], capability: str)
                 and profile.get("schema_version") == 2 and approval.get("scope") == profile.get("scope"))
 
 
-def validate_profile(p, capability):
+def validate_profile_fields(p, capability):
     try:
         settings, fallback = p["request_settings"], p["fallback"]
         if (p.get("schema_version") != 2 or not re.fullmatch(r"[A-Za-z0-9_-]+", p["profile_id"])
@@ -113,6 +113,14 @@ def validate_profile(p, capability):
         endpoint = urlsplit(p["endpoint"])
         if endpoint.scheme != "http" or endpoint.hostname not in ("127.0.0.1", "::1") or endpoint.username or endpoint.password or endpoint.path not in ("", "/") or endpoint.query or endpoint.fragment:
             raise ValueError("unsupported_endpoint")
+    except (KeyError, TypeError, OSError):
+        raise ValueError("invalid_profile") from None
+    return p
+
+
+def validate_profile(p, capability):
+    validate_profile_fields(p, capability)
+    try:
         identity = fingerprint_artifact(Path(p["artifact"]["root"]), p["artifact"]["files"])
         if not eligible(p, identity, capability):
             raise ValueError("model_not_approved")

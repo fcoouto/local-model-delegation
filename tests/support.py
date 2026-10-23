@@ -115,7 +115,8 @@ class Fixture(unittest.TestCase):
 
 class FakeRuntime:
     """Actual loopback HTTP, deterministic lifecycle and stream faults."""
-    def __init__(self, answer=None, delay=0, incomplete=False, mismatch=False, output_tokens=50):
+    def __init__(self, answer=None, delay=0, incomplete=False, mismatch=False, output_tokens=50, model_format='fictional'):
+        self.model_format = model_format
         self.answer = json.dumps({"files": {"helper.py": FIXED, "test_helper.py": SUPPLIED + ADDED}, "summary": "strip both ends"}) if answer is None else answer
         self.output_tokens, self.terminal_result = output_tokens, None
         self.delay, self.incomplete, self.mismatch = delay, incomplete, mismatch
@@ -133,7 +134,7 @@ class FakeRuntime:
             def do_GET(self):
                 outer.calls.append(("GET", self.path))
                 body = {"models": [{"key": "fictional-model", "type": "llm",
-                    "format": "fictional", "architecture": "fictional", "publisher": "test", "params_string": "1B",
+                    "format": outer.model_format, "architecture": "fictional", "publisher": "test", "params_string": "1B",
                     "quantization": {"name": "4bit", "bits_per_weight": 4}, "loaded_instances":
                     ([{"id": outer.instance_id, "config": {"parallel": outer.parallel, "context_length": 8192}}] if outer.loaded else [])}]}
                 if outer.peer_loaded:

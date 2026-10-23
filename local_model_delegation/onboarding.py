@@ -57,11 +57,22 @@ def begin_assessment(state_dir, profile_id, owner_reference):
     binding = _binding(profile)
     manifest = load_json(fixtures_path().read_text())
     identifier = uuid.uuid4().hex
+    trials = _build_trials(state_dir, identifier, profile, manifest)
+    assessment = {'assessment_id': identifier, 'permit_token': uuid.uuid4().hex + uuid.uuid4().hex,
+                  'profile_id': profile_id, 'owner_reference': owner_reference, 'binding': binding,
+                  'fixture_digest': digest(manifest), 'capacity_target':1, 'trials': trials, 'receipts': {}}
+    atomic_json(Path(state_dir) / 'assessments' / identifier / 'assessment.json', assessment)
+    return assessment
+
+
+def _build_trials(state_dir, assessment_id, profile, manifest, *, groups=None):
+    identifier = assessment_id
     root = private_dir(Path(state_dir) / 'assessments' / identifier)
     target=1
     trials = []
     for case in manifest['cases']:
-        if case['capability'] in PYTHON_CHANGE_CAPABILITIES and case['capability'] not in profile['capabilities']:
+        if groups is not None and _case_group(case) not in groups: continue
+        if groups is None and case['capability'] in PYTHON_CHANGE_CAPABILITIES and case['capability'] not in profile['capabilities']:
             compatible = next((c for c in profile['capabilities'] if c in PYTHON_CHANGE_CAPABILITIES), None)
             if compatible: case = {**case, 'capability':compatible}
         if case['capability'] not in profile['capabilities']: continue
@@ -85,17 +96,101 @@ def begin_assessment(state_dir, profile_id, owner_reference):
                 # Native coordinator must also verify semantics; syntax alone never qualifies a trial.
                 import shutil
                 executable = str(Path(sys.executable).resolve()) if case['language']=='python' else shutil.which('node')
-                if not executable: continue
+                if not executable:
+                    if groups is not None: raise ValueError('assessment_checker_unavailable')
+                    continue
                 argv = [executable, '-m', 'compileall', '-q', '.'] if case['language']=='python' else [str(Path(executable).resolve()), '--check', 'helper.js']
                 brief['acceptance']['checks'] = [{'id':'syntax','argv':argv,'cwd':'.','timeout_seconds':30}]
             validate_brief(brief)
             trials.append({'trial_id': trial_id, 'case_id': case['id'], 'brief': brief, 'brief_hash': digest(brief)})
     if not trials: raise ValueError('assessment_scope_unsupported')
-    assessment = {'assessment_id': identifier, 'permit_token': uuid.uuid4().hex + uuid.uuid4().hex,
-                  'profile_id': profile_id, 'owner_reference': owner_reference, 'binding': binding,
-                  'fixture_digest': digest(manifest), 'capacity_target':target, 'trials': trials, 'receipts': {}}
-    atomic_json(root / 'assessment.json', assessment)
-    return assessment
+    return trials
+
+
+def _case_group(case):
+    return {k: case[k] for k in ('capability', 'language', 'complexity', 'context_bucket')}
+
+
+def assessment_choices():
+    groups = []
+    for case in load_json(fixtures_path().read_text())['cases']:
+        group = _case_group(case)
+        match = next((g for g in groups if _case_group(g) == group), None)
+        if match is None:
+            match = {**group, 'distinct_cases': 0, 'trials': 0}
+            groups.append(match)
+        match['distinct_cases'] += 1
+        match['trials'] += 2
+    return {'groups': groups, 'total_trials': sum(g['trials'] for g in groups)}
+
+
+def _verification_snapshot(trials):
+    executables = {str(Path(sys.executable).resolve())}
+    executables.update(check['argv'][0] for t in trials for check in t['brief']['acceptance']['checks'])
+    return {name: fingerprint_artifact(Path(name).parent, [Path(name).name]) for name in sorted(executables)}
+
+
+def prepare_assessment(state_dir, profile_id, selection, *, source_profile_id=None):
+    from .lmstudio import Runtime, select_loaded
+    from .profiles import validate_profile_fields, generation_settings
+    from .validation import _qualified_isolation
+    from .worker import context_fits
+    from .package import pin_runtime_bundle
+    choices = assessment_choices()['groups']
+    all_groups = [_case_group(g) for g in choices]
+    if isinstance(selection, dict) and set(selection) == {'all'} and selection['all'] is True:
+        groups = all_groups
+    elif (isinstance(selection, dict) and set(selection) == {'groups'}
+          and isinstance(selection['groups'], list) and len(selection['groups']) == 1
+          and selection['groups'][0] in all_groups):
+        groups = selection['groups']
+    else: raise ValueError('invalid_assessment_selection')
+    profile = _profile(state_dir, profile_id)
+    if profile.get('approval') is not None or profile.get('scope') or profile.get('qualification_status') != 'needs_assessment':
+        raise ValueError('assessment_requires_unapproved_profile')
+    for group in groups:
+        validate_profile_fields(profile, group['capability'])
+        if group['capability'] not in profile['capabilities']: raise ValueError('assessment_scope_unsupported')
+    binding = _binding(profile)
+    if binding['runtime']['metadata']['format'] not in ('gguf', 'mlx', 'splash'):
+        raise ValueError('assessment_model_unsupported')
+    source_profile = None
+    if source_profile_id is not None:
+        source = _profile(state_dir, source_profile_id)
+        source_binding = _binding(source)
+        if source_profile_id == profile_id or any(source_binding[k] != binding[k] for k in ('artifact', 'runtime')):
+            raise ValueError('assessment_source_mismatch')
+        source_profile = {'profile_id': source_profile_id, 'binding': source_binding,
+                          'approval_at_preparation': source.get('approval')}
+    runtime = Runtime(profile['endpoint'], token_env=profile.get('token_env'))
+    loaded = select_loaded(runtime.list_models(), profile, binding['runtime'])
+    if loaded is None: raise ValueError('assessment_model_unavailable')
+    if any(g['capability'] != 'file_summary' for g in groups) and not _qualified_isolation():
+        raise ValueError('isolation_unsupported')
+    identifier = uuid.uuid4().hex
+    manifest = load_json(fixtures_path().read_text())
+    trials = _build_trials(state_dir, identifier, profile, manifest, groups=groups)
+    if any(not context_fits(t['brief'], profile, loaded) for t in trials):
+        raise ValueError('assessment_context_unfit')
+    bundle = pin_runtime_bundle(state_dir)
+    preview = {'profile_id': profile_id, 'binding': binding, 'source_profile': source_profile,
+               'profile_digest': digest(profile),
+               'groups': groups, 'distinct_cases': len({t['case_id'] for t in trials}),
+               'max_submissions': len(trials), 'concurrency': 1, 'loaded_config': loaded['config'],
+               'fixture_digest': digest(manifest), 'runtime_bundle': bundle.name,
+               'verification': _verification_snapshot(trials),
+               'trials': [{'trial_id': t['trial_id'], 'brief_hash': t['brief_hash'],
+                           'settings': generation_settings(t['brief'], profile)} for t in trials]}
+    preview_digest = digest(preview)
+    record = {'schema_version': 1, 'assessment_id': identifier,
+              'permit_token': uuid.uuid4().hex + uuid.uuid4().hex, 'profile_id': profile_id,
+              'binding': binding, 'fixture_digest': digest(manifest), 'capacity_target': 1,
+              'trials': trials, 'receipts': {}, 'preview': preview, 'preview_digest': preview_digest,
+              'profile_snapshot': profile, 'source_profile': source_profile,
+              'authorization': {'mode': 'run', 'state': 'draft', 'owner_reference': None,
+                                'timestamp': None, 'preview_digest': preview_digest}}
+    atomic_json(Path(state_dir) / 'assessments' / identifier / 'assessment.json', record)
+    return {'assessment_id': identifier, 'state': 'draft', 'preview': preview, 'preview_digest': preview_digest}
 
 
 def authorize_assessment(state_dir, brief, permit):
