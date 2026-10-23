@@ -12,9 +12,10 @@ Its procedures stay in that project. The user's authorization and active project
 instructions govern both routes; availability alone grants no authority.
 
 - [Choose the execution route](#choose-the-execution-route)
+- [Difficulty-based worker selection](#difficulty-based-worker-selection)
 - [Role and specialty](#role-and-specialty)
 - [Task and specialty guide](#task-and-specialty-guide)
-- [Role visibility in Habblaud](#role-visibility-in-habblaud)
+- [Native role metadata](#native-role-metadata)
 - [Demonstrated ability versus runtime capacity](#demonstrated-ability-versus-runtime-capacity)
 - [Discover models and check capacity](#discover-models-and-check-capacity)
 - [Local proposal and native fallback workflow](#local-proposal-and-native-fallback-workflow)
@@ -46,6 +47,198 @@ Preserve the coordinator's native model, reasoning, provider, authentication and
 permissions. Reuse existing approvals; ordinary task delegation does not authorize
 installation, assessment, new approvals or route activation. Do not weaken task
 requirements to fit a local model, or claim savings without evidence.
+
+## Difficulty-based worker selection
+
+The Coordinator owns classification, selection, acceptance and integration. Keep
+its model, reasoning, provider, authentication and permissions unchanged. With
+explicit project/task authorization, choose each worker's model and reasoning
+through the actual client's supported controls. Roles and specialties do not
+select native profiles. Never change global defaults, install a proxy, introduce
+API billing or inspect credentials to obtain another model.
+
+Worker selection is opt-in. Record it independently of lifecycle preferences in
+`.codex/vibe-workflow.toml`:
+
+```toml
+[worker_selection]
+enabled = true
+authorization_ref = "reference to the user's scoped authorization"
+```
+
+Absent settings or `enabled=false` retain the existing authorized route. Setup
+does not activate selection for other projects, approve local models or expand
+benchmark authority. Preserve explicit model restrictions and task overrides.
+Available models are discovered from the current authenticated host; portable
+instructions never hard-code a commercial model list.
+
+### Classify difficulty and risk
+
+Rate reasoning complexity, ambiguity, dependency coupling and context burden
+from 0 to 3, with one concrete reason for each. Use the maximum, not an average;
+file count and diff size alone do not establish difficulty.
+
+| Tier | Required reasoning | Initial search, subject to qualification |
+| --- | --- | --- |
+| D0 | Explicit retrieval/transformation, bounded context, deterministic checks. | Direct tool/Coordinator first; otherwise lightweight capability, low effort. |
+| D1 | Known contract/cause, bounded implementation or focused tests. | Lightweight/balanced capability, medium effort. |
+| D2 | Interacting components/state, substantial context or uncertain diagnosis. | Reasoning-capable model, high effort. |
+| D3 | Architecture, deep ambiguity, concurrency or adversarial judgment. | Best demonstrated pair for the exact scope; higher supported effort only when justified. |
+
+These are search starting points, not certified model mappings. Effort labels
+are not equivalent across models. Risk is separate: R0 is negligible-impact
+read-only/reversible work; R1 is ordinary behavior change; R2 covers security,
+privacy, authorization, irreversible data effects or comparable impact. R2 raises
+the tier to at least D2 and requires domain-specific evidence and independent
+review. Read-only security review can be R2. A one-line authorization edit is
+not a cheap mechanical task. Uncertainty takes the higher plausible tier until
+investigation resolves it.
+
+Define acceptance checks before selection. If a result cannot be independently
+verified, narrow the assignment or keep judgment with the Coordinator. A larger
+model does not supply missing verification. Review qualification needs evidence
+of finding defects and avoiding unsupported findings; successful implementation
+alone does not qualify a reviewer.
+
+### Prefer qualified local execution
+
+First keep tasks with deterministic tools or the Coordinator when delegation
+cannot justify its overhead. Otherwise prefer a local model when its exact
+approved scope/settings match the entire task, routing is enabled, the plugin
+admits capacity, and verification is supported. Match language/domain, specialty,
+difficulty, risk, context, tool and output needs; do not infer capability from a
+name, parameter count or a broad specialty label.
+
+Unknown savings alone does not disqualify an eligible local route. A documented
+hard deadline or comparable measured harmful outcomes may justify native work;
+record that evidence and the rejected local option. Do not prefer a paid model
+merely because its isolated call appears faster. Preserve the plugin's waiting,
+reservation and recovery rules; never clear an uncertain reservation to obtain
+capacity. Local runtime/thinking settings stay within approved assessed profiles.
+
+When local execution is ineligible, select an authorized native pair with matching
+qualification. Compare full expected cost: briefing, attempts, verification,
+repair/fallback and integration. Without comparable cost data, call the ranking
+provisional, not cheapest. If no pair qualifies, retain the existing authorized
+inherited route or the Coordinator and disclose the evidence gap.
+
+Select model and effort together. Full-history forks in clients that require
+inheritance cannot carry overrides: use a fresh context with the task's complete
+bounded brief and explicit supported model/effort fields. Inspect native profile
+and default precedence. Record requested and observed settings separately. A
+mismatch fails selection: stop/reconcile that worker before replacement and
+preserve partial work. If observations or overrides are unavailable, retain the
+authorized inherited route and mark model-selection qualification unverified.
+
+### Qualification states and finite recovery
+
+Qualification binds exact observable model/version, reasoning, client/tool path,
+role/specialty, language/domain, tier/risk and context/output bounds. Local records
+also bind artifact/runtime/settings digests. An alias without immutable version
+information carries a dated observation and freshness limit, not invented identity.
+
+| State | Permitted execution |
+| --- | --- |
+| Not assessed | Separately authorized bounded evaluation only; entry records Pilot only. |
+| Pilot only | Authorized evaluation; capped canary only after the case gate and scoped canary authorization. |
+| Qualified | Matching ordinary work with current evidence and all authorization/capacity gates. |
+| Suspended | No ordinary work; diagnosed, newly authorized reassessment must pass before promotion. |
+
+The preserved inherited route is the baseline/fallback exception, not blanket
+competence certification. These states never bypass local plugin approval or
+assessment gates; an ordinary local submission cannot relabel itself a pilot.
+
+Initial qualification defaults per narrow scope: 12 distinct paired cases
+(four ordinary, four boundary, four difficult/failure), one candidate pair versus
+the preserved inherited baseline; 24 worker invocations plus separately budgeted
+evaluation. Freeze inputs, checks, tool permissions and context policy; separate
+contexts and counterbalance order. Hidden oracles are not worker context. Require
+all mandatory criteria, no critical violations, and dedicated cases for D2/D3/R2.
+Baseline failures remain failures. Then permit a scoped ten-task canary: ten
+candidate deliveries must pass without escalation, Coordinator rewriting or major
+attributable regression. Rescue completes work but never qualifies that candidate.
+These are operational gates, not statistical reliability guarantees. A failed
+cohort cannot silently restart until a reviewed scope and budget authorize it.
+
+Ordinary task budget defaults to at most two dispatch/submission attempts total:
+initial plus one justified repair/escalation. Stricter project/task limits win;
+a denied dispatch consumes an attempt. Record a concrete deadline/output allowance
+before dispatch. Diagnose failure before changing one justified variable; no
+identical retries, cascading agent trees or implicit budget resets. Unknown worker
+state requires reconciliation, not duplicate execution. Coordinator rescue remains
+inside the task budget and measured costs. Workers do not choose replacements.
+
+Suspend affected qualifications on critical violations, confirmed major missed
+defects, repeated settings mismatches or material source/client/model changes.
+Retain negative evidence and unaffected qualifications. Benchmark allowance defaults
+to zero; ordinary delegation never authorizes extra comparisons or assessments.
+
+### Decision records, validation and savings
+
+Keep private records outside Git: policy/task/attempt IDs, source/contract/check
+hashes, classification reasons/risk, authorization and qualification references,
+client-supported pairs, Coordinator baseline, candidate/rejection reasons, exact
+requested/observed settings, child/local job identity, budgets, checks and outcomes.
+Unknown values remain unknown. Do not add fields to the strict native declaration
+or seven-field report: reference private decisions through existing context or
+instructions. Existing hooks validate structure; they do not enforce model choice,
+time limits, truth, sandboxing or the whole policy and can fail open.
+
+Use `workflow.py plan-delegation ROOT` for deterministic planning and
+`report-delegation ROOT` to reconcile observations and measurement evidence.
+These helpers make no model calls, change no settings and grant no authority.
+They validate attributed input evidence, not its truth. Actual local execution and
+measurements remain with the installed plugin; do not create a duplicate scheduler
+or registry. Native/native comparison records are separate from the plugin's
+local/native comparison interface. See the package README for request contracts.
+
+Test policy boundaries deterministically, then qualify App and VS Code separately
+with the [native qualification](https://github.com/fcoouto/vibe-setup/blob/main/skills/vibe-setup/qualification.md) procedure from the installed
+package. A selected worker must demonstrably use the requested model/effort while
+the Coordinator remains unchanged. Inherited smoke tests, CLI runs, unit fixtures,
+installation and display labels cannot establish that client result. Model-control
+qualification also does not establish task competence or savings.
+
+Compare identical delegated assignments with inherited versus selected workers to
+isolate selection. A separate comparison against direct Coordinator execution is
+needed to claim delegation itself saves resources. Keep context and verification
+requirements equal; changing context and model together does not isolate either.
+
+Maintain three accounts: operating difference (matched baseline minus candidate,
+including all attempts/overhead); experiment investment (both disposable arms,
+evaluation, setup and qualification); and delivered-work net estimate (matched
+baseline-referenced differences on delivered work minus investment). A disposable
+100-unit baseline and 60-unit candidate show a 40-unit operating difference but
+spend 160 units and deliver no production saving. Ten subsequent matched delivered
+tasks costing 60 instead of baseline 100 give a 240-unit net estimate after that
+160-unit investment, before other overhead. This is a counterfactual resource
+estimate, not a subscription saving.
+
+Deduplicate authoritative spans; totals take precedence over their components;
+charge each span once to task costs or investment. Include unsuccessful work,
+rescue, measurement overhead and unallocated investment in cumulative reports.
+No amortization over hypothetical tasks. Preserve negative savings. Zero baseline
+makes percentages not applicable. Missing/incomplete attribution or incomparable
+baselines makes full-task savings unknown, never zero cost.
+
+Report case counts/diversity, first-attempt acceptance, delivery, missed defects,
+false-positive findings, fallback rate, timing and usage coverage by scope and
+model. Keep local failures separate from native rescue. Cached input/reasoning
+subsets are not extra tokens. Never infer usage from characters, elapsed time,
+quota percentages or badges. Tokens are proxies; currency requires applicable
+billing evidence or clearly labeled estimates, never API prices applied to a
+subscription. Local energy/runtime costs remain unknown unless measured.
+
+Show end-to-end latency separately from summed parallel runtime; include failures
+and timeouts. P95 requires at least 20 observations. Proposed optimization target:
+10% full-cost improvement with no mandatory quality regression. Repeatable-savings
+claims need at least 20 distinct matched cases and a positive lower 95% confidence
+bound under a frozen case-cluster analysis; sample count alone is insufficient.
+Additional trials require their own budget. Observational work is not a causal
+comparison. Without telemetry, report quality/timing and savings unknown.
+
+Rollback disables worker selection, retains inherited execution and all evidence,
+and preserves in-flight ownership. Do not mutate local approvals or uncertain jobs.
 
 ## Role and specialty
 
@@ -134,70 +327,37 @@ first does not establish ability for the others. Successful implementation also
 does not establish review ability. A bounded subtask can qualify without granting
 the model a broad specialist title.
 
-## Role visibility in Habblaud
+## Native role metadata
 
-Role declarations guide agents; they do not automatically populate a dashboard.
-The optional [native display adapter](native-display.md) forwards a bound assignment
-role through the existing Habblaud hook when native `agent_role` is absent or null.
-It preserves any supplied native role and does not change Habblaud or execution
-settings. Installation and live delivery require separate qualification.
-Keep Habblaud unchanged and qualify its existing input path separately. Inspection
-and disposable source/DOM probes against Habblaud 1.0.3
-([`faa1a012`](https://github.com/marmottajr/habblaud/tree/faa1a012b5fbf632c66dc6801c5383e53a542406))
-on 2026-10-22 established the following behavior; recheck it when the installed version changes:
+Role declarations guide agents. The native dispatch must carry the exact
+`task_name` and bind the resulting child to its parent and harness root. Keep the
+canonical role and nonempty specialty in the declaration; unknown roles are
+rejected and custom specialties remain **Not assessed** without matching evidence.
 
-| Path | Observed behavior |
-| --- | --- |
-| Native child rollout | Habblaud reads `agent_role` or `agent_type` from supported spawn metadata; role text is limited to 40 characters. |
-| Existing Codex hook endpoint | A child's first `agent_type` can supply the visible role. A longer composite survives the hook path. |
-| Already visible child | The displayed role stays fixed. Later hooks or newly discovered rollout role metadata do not relabel it. A rollout role seen first takes precedence over the hook label. |
-| Main agent | Source and badge rendering use fixed main-agent labels. `Coordinator` is an assignment role, but this version cannot display it as the main badge through these inputs. |
+Normal setup and upgrades validate the trusted project hook definitions and
+scripts, complete dispatch arguments, actual child identity, declaration reads,
+first report and inherited execution settings. Use `qualification.md` beside the
+installed Vibe Setup `workflow.py` for that bounded producer check; resolve the
+installed helper location from this project's setup instructions. This establishes the inputs a downstream consumer
+can read; it does not establish that a consumer received or displayed them.
 
-The [rollout parser](https://github.com/marmottajr/habblaud/blob/faa1a012b5fbf632c66dc6801c5383e53a542406/server/sources/codex/rollout.ts),
-[Codex source](https://github.com/marmottajr/habblaud/blob/faa1a012b5fbf632c66dc6801c5383e53a542406/server/sources/codex/source.ts)
-and [badge renderer](https://github.com/marmottajr/habblaud/blob/faa1a012b5fbf632c66dc6801c5383e53a542406/client/src/ui/widgets.ts)
-are the compatibility references. These fixtures establish parsing and rendering,
-not delivery from every Codex client or a live Docker/Node installation.
+If an existing optional event adapter is installed, verify its input contract
+with the package's adapter tests. Derive `agent_role` only when absent or null;
+any supplied value wins, including a value provided by a later runtime. Validate
+parent/child/task binding and preserve unrelated fields and execution settings.
+These disposable contract tests are separate from actual native execution.
+Do not install or activate a consumer integration as part of an ordinary upgrade.
 
 Inspect the active client's actual spawn schema. A native `agent_type` may select
-a configuration profile with different models or permissions; never use one just
-to obtain a badge. When a client exposes no independent role metadata field,
-retain the role in the declaration/instructions. The optional adapter can supply
-the missing display label; without observed delivery, report it as unverified.
-Do not invent spawn parameters, rewrite session logs,
-change native profiles or emit synthetic workers to conceal that limitation.
+a configuration profile; never use it solely to label an assignment. Do not invent
+spawn parameters, rewrite session logs or emit synthetic live workers. If the
+native interface lacks independent role metadata, preserve the declaration and
+report the producer limitation without changing model, reasoning or permissions.
 
-Native and local workers use the same display format:
-`<Role> · <Model Display Name>`, for example `Reviewer · Qwen3.8 27B Splash`.
-Use the explicit assignment role and the human-readable name of the actual
-attempt's model: display `Qwen3.8 27B Splash`, not `qwen3.8-27b-splash`. Prefer
-existing model display metadata; otherwise format the actual model identifier
-for display without changing its stored identity or selection. Do not add a
-`LOCAL` marker, provider, route or specialty to the badge. Keep role and specialty
-separate in assignment metadata. For legacy assignments without a role, display
-`Unspecified role`; this is a display placeholder, not a stored role value.
-Do not infer the role from the model name or execution route.
-
-For local workers, the plugin owns the existing-hook adapter and sends the full
-display label on the first observation of the real attempt. Pass the canonical
-role and specialty separately to that adapter. Keep the complete values in the
-assignment metadata: Habblaud can visually ellipsize long badges from the right,
-and native rollout parsing has the 40-character limit above. Hover text retains
-the full hook label. These transport limits do not authorize a different label
-format for local and native workers.
-
-Native session data can also populate the agent's **Stats > Model** field.
-The existing Codex hook endpoint ignores the event's `model` field, so hook-only
-local workers cannot populate it through that path. Keep Habblaud unchanged and
-report local model Stats as unavailable; the badge's model display name does not
-establish Stats support. Do not fabricate native session data to fill that field.
-
-Existing hooks still attach local characters to the Codex provider/account.
-Stop, interruption and expired hook presence can
-look like successful completion. A role label does not fix these identity or
-lifecycle limitations; the plugin must document them and own transport testing.
-Vibe neither installs that adapter nor changes local routing. Coordinator badge
-support remains unavailable under the unchanged-Habblaud constraint.
+Only load the [optional consumer compatibility guide](native-display.md) when the
+user explicitly requests that consumer's setup or test. Keep that result separate
+from the ordinary hooks and subagent dispatch validation. Do not introduce named
+consumer products into default upgrade messages or completion requirements.
 
 ## Demonstrated ability versus runtime capacity
 
@@ -317,7 +477,9 @@ evidence means unknown.
 
 Use native subagents with the active client's provider, authentication and
 permissions. Inherit the coordinator's model and reasoning unless the user
-authorizes a scoped capability choice, such as the cleanup profile below.
+authorizes task-based worker selection or a scoped capability choice. Under the
+selection policy above, choose explicit supported worker settings; the Coordinator
+remains unchanged. The cleanup profile below remains independently bounded.
 Before dispatch, the coordinator creates a plain JSON declaration
 at the active harness root's `.codex-delegations/<task_name>.json`. This directory
 is beside
@@ -358,7 +520,9 @@ Actual behavior still requires a real client fixture.
    below into `.codex-delegations/parser_fix.json` as **raw JSON**, without Markdown
    fences. Assign its role and specialty; keep the task name as the unique task
    identity. Finish writing before dispatch; keep it unchanged until the worker ends.
-3. Call the native spawn tool with `task_name: "parser_fix"`. Its task message
+3. Prepare the native tool arguments before calling it. `task_name` is a required
+   top-level argument, even if the client's tool schema makes it optional. A name
+   in the message or declaration filename does not supply this argument. Its task message
    must name the harness root and include exactly one declaration pointer, for example:
    `Harness root: <absolute harness root>. Read .codex-delegations/parser_fix.json before work.`
    Name the software repository and command directory separately. State the base
@@ -369,6 +533,33 @@ Actual behavior still requires a real client fixture.
    and its actual diff/checks/report. Compare trusted child identity when available;
    otherwise retain the explicit unverified-binding risk. A structurally valid
    record or report is not evidence of successful work.
+   Retain the native child ID, parent/task binding and inherited worktree attachment
+   in existing private task evidence for later native cleanup; names and cwd alone
+   do not establish ownership.
+
+Use this required argument shape, replacing the example name and root together:
+
+```json
+{
+  "task_name": "parser_fix",
+  "message": "Harness root: /absolute/harness. Read .codex-delegations/parser_fix.json before work."
+}
+```
+
+Before the first tool call, check the actual argument object: its top-level
+`task_name` matches `[a-z0-9_]{1,64}`, the declaration filename and the one pointer
+in `message`; the declaration is complete and readable under the active harness
+root. Inspect the current native tool schema before adding client-specific fields.
+If that tool cannot carry `task_name`, report an unsupported dispatch format without
+trying it. For inherited execution, omit model, reasoning and profile overrides.
+These are coordinator checks; the existing hook remains the independent guard.
+
+For a single-attempt qualification, a rejected tool call consumes the attempt even
+when no child starts. Record the denial and stop that run. A later authorized run
+gets a fresh declaration and separate evidence; do not turn a retry into a pass.
+Report required role, specialty and directory observations inside `summary` or
+`checks`, using only the seven report fields below. Additional fields such as
+`observed` invalidate the report.
 
 The coordinator owns these transient inputs, avoids task-name reuse between
 active workers and excludes them from publication using the setup recipe.
@@ -427,7 +618,13 @@ An independent reader's `.codex-delegations/parser_review.json` for native
 
 ## Lightweight cleanup worker
 
-Post-merge cleanup must remain inexpensive. Use one bounded native worker on a
+After confirmed merge or recorded supersession, queued cleanup runs directly in
+Python over every eligible pending retirement handoff in the same Git repository.
+Startup never runs cleanup. Do not spawn a worker, model turn, timer or poll for
+that queue pass. Unsupported managed removals remain pending for their native owner.
+The profile below applies only when cleanup delegation is separately needed.
+
+Terminal-task cleanup must remain inexpensive. When delegating, use one bounded native worker on a
 lightweight compatible model available in the current authenticated client.
 Choose from the host's supported models and reasoning settings; do not hard-code
 a model family or version. Keep the coordinator's model/settings unchanged. Never
@@ -436,27 +633,40 @@ If no suitable native choice is available, report the limitation and offer the
 helper's manual invocation; do not silently upgrade to an expensive worker.
 
 Python performs the factual safety checks and ordered deletions. The worker runs
-one lifecycle `resume` invocation from outside the target worktree, using the
-existing event ID and a fresh report of worktree ownership and stopped writers.
-The helper confirms every associated PR merged, checks the local worktree and
-branch identities, deletes remote refs conditionally, verifies absence, then
-removes the exact worktree without force. The worker must never substitute its
-own recursive deletion, force push, stale receipt or approval assertion.
+one lifecycle `cleanup` invocation from outside the target worktree, using its
+existing task ID and a fresh report of worktree ownership and stopped writers.
+An existing event ID can still use `resume`. The helper confirms merged PRs or
+recorded supersession, checks ownership and heads, and applies independent default-ON
+`delete_remote_branches` / `delete_worktrees` options. It deletes eligible remote
+refs before local removal when both actions are enabled; either option may be
+opted out independently. Closed-unmerged PRs retain remote branches and worktrees unless explicitly
+superseded. Local refs remain as the recovery copy. Native worktrees return an
+owner action; the coordinator first follows `native_action.preflight` in the installed
+helper's `task-lifecycle.md`. Only verified completed task children with inherited
+attachments may be archived; running, unfinished or uncertain children stay intact.
+The coordinator performs the owner action and a bounded follow-up
+`cleanup` verifies path and Git-registration absence. Queued archives stay pending.
+The worker must never substitute its own recursive deletion, force push, stale
+receipt or approval assertion.
 
 Declare a three-minute, one-attempt budget. Scope writable resources to the exact
-worktree, its recorded remote refs and its Git-common-directory lifecycle record;
-use `read_only=false` because cleanup has authorized mutations. Keep other tasks,
-branches, the primary checkout and local branch refs outside that scope. Respect
-`auto_cleanup=false` and whole-lifecycle opt-out before any deletion.
+task and eligible queued retirement handoffs within the same Git common directory,
+their recorded remote refs and lifecycle records;
+use `read_only=false` because cleanup has authorized mutations. Keep unmarked, active, foreign and ambiguously owned resources, the primary
+checkout and local branch refs outside that scope. Respect
+`delete_remote_branches=false`, `delete_worktrees=false`, the legacy
+`auto_cleanup=false` master opt-out and whole-lifecycle opt-out before deletion.
 
 Do not inspect the codebase, rerun project tests/builds, repeat independent review,
 spawn other workers, poll GitHub or create a recurring task for cleanup. Trigger
-only when reconciliation first observes merges, including after a human merge
-report. On a pending result, report the precise manual action and stop; retry only
-after new evidence or the requested action. Completed cleanup uses its recorded
+only when reconciliation confirms merge or recorded supersession, including after
+a human report of that transition. Each closure visits all eligible queued retirement
+handoffs in that repository once and reports `pending_cleanup.tasks`. Startup never
+runs cleanup; it only cancels retirement before checkout reuse. On a pending result, report the precise manual
+action and stop; retry only after new evidence or the requested action. Completed cleanup uses its recorded
 result and does not start another worker merely to recheck unchanged state.
 
-Return the existing compact report schema: observed merged PR count, remote refs
+Return the existing compact report schema: observed merged/superseded PR counts, remote refs
 confirmed absent, worktree removal status, evidence reference and any pending
 action. The coordinator reads that result and the bounded helper evidence; it does
 not repeat the full cleanup investigation with a larger model. These are workflow
