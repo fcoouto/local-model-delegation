@@ -8,6 +8,7 @@ from typing import Any
 
 PYTHON_CODE_CHANGE = "python_code_change"
 PYTHON_CHANGE_CAPABILITIES = {PYTHON_CODE_CHANGE}
+COMPLEXITIES = ('simple', 'moderate', 'complex', 'extra_complex')
 CAPABILITIES = PYTHON_CHANGE_CAPABILITIES | {"test_writing", "code_change", "file_summary"}
 MAX_ANSWER_BYTES = 2 * 1024 * 1024
 
@@ -123,7 +124,7 @@ def validate_v2(data):
     requirements = data["task_requirements"]
     if (not isinstance(requirements, dict) or set(requirements) - {'max_output_tokens'} != {"language", "complexity", "context_bucket", "urgency", "wait_budget_seconds"}
             or ('max_output_tokens' in requirements and (type(requirements['max_output_tokens']) is not int or requirements['max_output_tokens'] <= 0))
-            or requirements["complexity"] not in ("simple", "moderate", "complex")
+            or requirements["complexity"] not in COMPLEXITIES
             or requirements["urgency"] not in ("normal", "urgent") or not positive(requirements["wait_budget_seconds"])
             or any(not isinstance(requirements[k], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", requirements[k]) for k in ("language", "context_bucket"))):
         raise ValueError("invalid_requirements")

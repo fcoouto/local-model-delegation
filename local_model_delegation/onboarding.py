@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 import sys
 import uuid
-from .contracts import PYTHON_CHANGE_CAPABILITIES, canonical, digest, load_json, text_hash, validate_brief
+from .contracts import COMPLEXITIES, PYTHON_CHANGE_CAPABILITIES, canonical, digest, load_json, text_hash, validate_brief
 from .profiles import fingerprint_artifact, model_identity, read_config, read_profiles
 from .store import Store, atomic_json, private_dir
 
@@ -512,7 +512,7 @@ def approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_t
         if (not isinstance(item, dict)
                 or set(item) != {'capability','language','complexity','context_bucket','max_input_bytes'}
                 or item['capability'] not in profile['capabilities']
-                or item['complexity'] not in ('simple','moderate','complex')
+                or item['complexity'] not in COMPLEXITIES
                 or any(not isinstance(item[k], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', item[k]) for k in ('language','context_bucket'))
                 or type(item['max_input_bytes']) is not int or not 0 < item['max_input_bytes'] <= 800000):
             raise ValueError('invalid_scope')
