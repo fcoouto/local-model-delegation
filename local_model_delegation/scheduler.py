@@ -31,6 +31,15 @@ def schedule_once(state_dir, resources=None):
         if not owned: return {'status':'scheduler_busy'}
         results=[]
         for job in store.waiting_jobs():
+            permit=job['route_data'].get('assessment')
+            if permit:
+                from .onboarding import _assessment, _defer_run_job
+                with ownership(store, 'assessment-' + permit['assessment_id']) as run_owned:
+                    if not run_owned: continue
+                    run = _assessment(state_dir, permit['assessment_id'])
+                    if run.get('schema_version') == 1 and run['authorization']['state'] != 'authorized':
+                        _defer_run_job(store, job, run['authorization']['state'])
+                        continue
             if time.time()>=job['route_data']['wait_until']:
                 with store.db(write=True) as db: db.execute("UPDATE jobs SET reason='route_decision_required' WHERE job_id=? AND status='waiting'",(job['job_id'],))
                 results.append(envelope(store.job(job['job_id']))); continue
@@ -76,5 +85,5 @@ def run_scheduler(state_dir):
         while True:
             schedule_once(state_dir)
             jobs=store.waiting_jobs()
-            if not any(j['reason']!='route_decision_required' for j in jobs): return 0
+            if not any(j['reason'] not in ('route_decision_required', 'assessment_paused') for j in jobs): return 0
             time.sleep(1)

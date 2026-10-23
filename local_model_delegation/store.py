@@ -387,6 +387,16 @@ class Store:
                 db.execute("UPDATE jobs SET reason='route_decision_required' WHERE job_id=?",(job_id,))
             else:
                 current=authorize_job(self,{**job,'profile':profile})
+                if route.get('assessment'):
+                    from .onboarding import _assessment
+                    assessment = _assessment(self.root, route['assessment']['assessment_id'])
+                    if assessment.get('schema_version') == 1:
+                        if any(load_json(r['data']).get('submitted_at') for r in db.execute('SELECT data FROM attempts WHERE job_id=?', (job_id,))):
+                            raise ValueError('assessment_already_submitted')
+                        if any(r['task_key'] not in assessment['receipts'] for r in db.execute(
+                                'SELECT task_key FROM jobs WHERE chat=? AND job_id!=?', (job['chat'], job_id))):
+                            db.execute("UPDATE jobs SET reason='assessment_trial_pending' WHERE job_id=?", (job_id,))
+                            return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?', (job_id,)).fetchone()))
                 from .worker import context_fits
                 if loaded and not context_fits(job['brief'],current,loaded):
                     db.execute("UPDATE jobs SET status='fallback_required',reason='context_budget_exceeded' WHERE job_id=?",(job_id,))

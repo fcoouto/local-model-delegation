@@ -103,13 +103,18 @@ def prepare_uninstall(state_dir):
     from .visibility import _lock,_path,measurement_path
     root=Path(state_dir)
     if not root.exists():return {'status':'ready','state_preserved':True}
-    config=read_config(root);config['routing_enabled']=False
-    atomic_json(root/'config.json',config)
     store=Store(root)
-    with store.db(write=True) as db:_quiescent(db)
-    from .habblaud import quiesce
-    quiesce(root)
-    with _lock(root):
-        _path(root).unlink(missing_ok=True)
-        measurement_path(root).unlink(missing_ok=True)
+    from .worker import ownership
+    from .onboarding import require_assessments_paused
+    with ownership(store, 'plugin-update') as owned:
+        if not owned: raise ValueError('update_busy')
+        require_assessments_paused(root)
+        config=read_config(root);config['routing_enabled']=False
+        atomic_json(root/'config.json',config)
+        with store.db(write=True) as db:_quiescent(db)
+        from .habblaud import quiesce
+        quiesce(root)
+        with _lock(root):
+            _path(root).unlink(missing_ok=True)
+            measurement_path(root).unlink(missing_ok=True)
     return {'status':'ready','state_preserved':True,'models_preserved':True}

@@ -427,16 +427,135 @@ def approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_t
 
 
 def submit_trial(state_dir, assessment_id, trial_id):
-    assessment=_assessment(state_dir,assessment_id)
-    trial=next((t for t in assessment['trials'] if t['trial_id']==trial_id),None)
-    if trial is None:raise ValueError('unknown_trial')
-    permit={'assessment_id':assessment_id,'permit_token':assessment['permit_token']}
-    authorize_assessment(state_dir,trial['brief'],permit)
-    store=Store(state_dir)
-    result=store.enqueue(trial['brief'],trial['brief']['fallback'],assessment=permit)
-    from .worker import launch
-    launch(state_dir,'scheduler','queue')
+    from .worker import ownership, launch
+    from .contracts import envelope
+    store = Store(state_dir)
+    with ownership(store, 'assessment-' + assessment_id) as owned:
+        if not owned: raise ValueError('assessment_busy')
+        assessment = _assessment(state_dir, assessment_id)
+        trial = next((t for t in assessment['trials'] if t['trial_id'] == trial_id), None)
+        if trial is None: raise ValueError('unknown_trial')
+        if assessment.get('schema_version') == 1:
+            existing = store.lookup(trial['brief']['origin_chat_id'], trial_id)
+            if existing:
+                job = store.job(existing['job_id'])
+                if digest(job['brief']) != trial['brief_hash'] or job['route_data'].get('assessment') != {
+                        'assessment_id': assessment_id, 'permit_token': assessment['permit_token']}:
+                    raise ValueError('assessment_scope_mismatch')
+                return envelope(job)
+            progress = _run_progress(store, assessment)
+            if progress['pending_jobs'] or progress['blockers']: raise ValueError('assessment_trial_pending')
+        permit = {'assessment_id': assessment_id, 'permit_token': assessment['permit_token']}
+        try: authorize_assessment(state_dir, trial['brief'], permit)
+        except (ValueError, OSError):
+            if assessment.get('schema_version') == 1 and assessment['authorization']['state'] == 'authorized':
+                assessment['authorization']['state'] = 'invalidated'
+                atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
+            raise
+        result = store.enqueue(trial['brief'], trial['brief']['fallback'], assessment=permit)
+    launch(state_dir, 'scheduler', 'queue')
     return result
+
+
+def _run_jobs(store, assessment):
+    jobs = []
+    for trial in assessment['trials']:
+        found = store.lookup(trial['brief']['origin_chat_id'], trial['trial_id'])
+        if found: jobs.append((trial, store.job(found['job_id'])))
+    return jobs
+
+
+def _trial_blocker(store, job):
+    if job['attempt_id']:
+        attempt = store.attempt(job['attempt_id'])
+        if attempt['state'] == 'uncertain': return 'request_uncertain'
+    if job['status'] == 'needs_reassessment': return job['reason'] or 'needs_reassessment'
+    if job['status'] in ('fallback_required', 'failed'):
+        if not job['attempt_id'] or not store.attempt(job['attempt_id'])['data'].get('submitted_at'):
+            return job['reason'] or 'not_submitted'
+        if store.attempt(job['attempt_id'])['state'] != 'complete': return job['reason'] or 'request_unresolved'
+        if job['reason'] == 'verification_unsupported': return 'verification_unsupported'
+        failure = store.root / 'jobs' / job['job_id'] / 'check-failure.json'
+        if failure.exists():
+            reason = load_json(failure.read_text()).get('reason', '')
+            if reason.startswith(('assessment_', 'isolation_', 'source_', 'attempt_')):
+                return reason
+    return None
+
+
+def _run_progress(store, assessment):
+    pending, blockers, seen = [], [], set()
+    for trial, job in _run_jobs(store, assessment):
+        seen.add(trial['trial_id'])
+        blocker = _trial_blocker(store, job)
+        if blocker: blockers.append({'job_id': job['job_id'], 'reason': blocker})
+        if trial['trial_id'] not in assessment['receipts']: pending.append(job['job_id'])
+    next_trial = next((t['trial_id'] for t in assessment['trials'] if t['trial_id'] not in seen), None)
+    return {'assessment_id': assessment['assessment_id'], 'state': assessment['authorization']['state'],
+            'pending_jobs': pending, 'blockers': blockers,
+            'next_trial_id': next_trial if not pending and not blockers and assessment['authorization']['state'] == 'authorized' else None}
+
+
+def _defer_run_job(store, job, state):
+    """Called under the run lock; only definitely unsubmitted reservations may be freed."""
+    if job['attempt_id']:
+        attempt = store.attempt(job['attempt_id'])
+        if attempt['state'] != 'reserved' or attempt['data'].get('submitted_at'): return
+        if not store.transition(attempt['attempt_id'], attempt['generation'], 'reserved', 'released', {}): return
+    elif job['status'] != 'waiting': return
+    with store.db(write=True) as db:
+        db.execute("UPDATE jobs SET status=?,reason=?,attempt_id=NULL WHERE job_id=? AND status IN ('waiting','reserved')",
+                   ('waiting' if state == 'paused' else 'failed', 'assessment_' + state, job['job_id']))
+
+
+def control_assessment(state_dir, assessment_id, action):
+    from .worker import ownership, reconcile_attempts, launch
+    if action not in ('pause', 'stop', 'resume'): raise ValueError('invalid_assessment_control')
+    store = Store(state_dir)
+    if action == 'resume': reconcile_attempts(state_dir, assessment_id=assessment_id)
+    with ownership(store, 'plugin-update') as maintenance:
+        if not maintenance: raise ValueError('assessment_busy')
+        with ownership(store, 'assessment-' + assessment_id) as owned:
+            if not owned: raise ValueError('assessment_busy')
+            assessment = _assessment(state_dir, assessment_id)
+            if assessment.get('schema_version') != 1: raise ValueError('assessment_run_required')
+            auth = assessment['authorization']
+            if action == 'resume':
+                if auth['state'] in ('stopped', 'invalidated', 'draft'): raise ValueError('assessment_' + auth['state'])
+                if auth['state'] != 'complete':
+                    try: _check_run_bindings(state_dir, assessment, check_runtime=True)
+                    except (ValueError, OSError):
+                        auth['state'] = 'invalidated'
+                        atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
+                        raise
+                    auth['state'] = 'paused' if _run_progress(store, assessment)['blockers'] else 'authorized'
+            elif auth['state'] not in ('stopped', 'invalidated', 'complete'):
+                if action == 'pause' and auth['state'] == 'draft': raise ValueError('assessment_consent_required')
+                auth['state'] = 'paused' if action == 'pause' else 'stopped'
+            if auth['state'] in ('paused', 'stopped', 'invalidated'):
+                for _, job in _run_jobs(store, assessment): _defer_run_job(store, job, auth['state'])
+            elif auth['state'] == 'authorized':
+                with store.db(write=True) as db:
+                    db.execute("UPDATE jobs SET reason='waiting_for_slot' WHERE chat=? AND status='waiting' AND reason='assessment_paused'",
+                               ('assessment-' + assessment_id,))
+            atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
+    reconcile_attempts(state_dir, assessment_id=assessment_id)
+    for trial, job in _run_jobs(store, assessment):
+        if (trial['trial_id'] not in assessment['receipts'] and job['status'] in ('accepted', 'failed', 'fallback_required')
+                and job['attempt_id'] and store.attempt(job['attempt_id'])['state'] == 'complete'
+                and not _trial_blocker(store, job)):
+            record_trial(state_dir, assessment_id, {'trial_id': trial['trial_id'], 'job_id': job['job_id']})
+    assessment = _assessment(state_dir, assessment_id)
+    progress = _run_progress(store, assessment)
+    if action == 'resume' and progress['state'] == 'authorized': launch(state_dir, 'scheduler', 'queue')
+    return progress
+
+
+def require_assessments_paused(state_dir):
+    for path in (Path(state_dir) / 'assessments').glob('*/assessment.json'):
+        assessment = _assessment(state_dir, path.parent.name)
+        if assessment.get('schema_version') == 1 and assessment['authorization']['state'] == 'authorized':
+            raise ValueError('assessments_must_be_paused')
 
 
 def record_outcome(state_dir, job_id, receipt):

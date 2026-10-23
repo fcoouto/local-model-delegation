@@ -1,6 +1,8 @@
 """Standalone assessments use disposable, unapproved profiles and fake inference."""
 import copy
 import json
+import threading
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -228,3 +230,158 @@ class AssessmentRuns(Fixture):
             assessment.authorize_assessment(self.state, record['trials'][1]['brief'], permit, purpose='verify', job=job)
         with self.assertRaisesRegex(ValueError, 'assessment_scope_mismatch'):
             assessment.authorize_assessment(self.state, trial['brief'], permit, purpose='verify', job={**job, 'attempt_id': None})
+
+    def queued_run(self):
+        from local_model_delegation.store import Store
+        prepared, record, _ = self.saved_run()
+        self.consent(prepared)
+        with patch('local_model_delegation.worker.launch'):
+            job = assessment.submit_trial(self.state, prepared['assessment_id'], record['trials'][0]['trial_id'])
+        return prepared, record, Store(self.state), job
+
+    def admit(self, store, job):
+        from tests.test_scheduler import Scheduler
+        return store.admit(job['job_id'], self.candidate,
+                           {**self.loaded(), 'endpoint': self.server.endpoint}, Scheduler.resources(self))
+
+    def control(self, prepared, action):
+        self.assertTrue(hasattr(assessment, 'control_assessment'), 'control_assessment must exist')
+        return assessment.control_assessment(self.state, prepared['assessment_id'], action)
+
+    def test_submission_is_idempotent_and_second_trial_waits(self):
+        prepared, record, store, job = self.queued_run()
+        with patch('local_model_delegation.worker.launch') as launch:
+            repeated = assessment.submit_trial(self.state, prepared['assessment_id'], record['trials'][0]['trial_id'])
+            self.assertEqual(repeated['job_id'], job['job_id'])
+            launch.assert_not_called()
+            with self.assertRaisesRegex(ValueError, 'assessment_trial_pending'):
+                assessment.submit_trial(self.state, prepared['assessment_id'], record['trials'][1]['trial_id'])
+        reserved = self.admit(store, job)
+        from local_model_delegation.worker import run_local_attempt
+        run_local_attempt(self.state, reserved['attempt_id'])
+        run_local_attempt(self.state, reserved['attempt_id'])
+        self.assertEqual(self.server.calls.count(('POST', '/api/v1/chat')), 1)
+        with self.assertRaisesRegex(ValueError, 'assessment_has_no_native_fallback'):
+            store.claim_fallback(job['job_id'])
+
+    def test_pause_defers_reservation_and_explicit_resume_reuses_job(self):
+        from local_model_delegation.scheduler import schedule_once
+        prepared, record, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        self.assertEqual(self.control(prepared, 'pause')['state'], 'paused')
+        self.assertEqual(store.attempt(reserved['attempt_id'])['state'], 'released')
+        self.assertEqual(store.job(job['job_id'])['status'], 'waiting')
+        with patch('local_model_delegation.worker.start_worker') as start:
+            schedule_once(self.state)
+            start.assert_not_called()
+        with patch('local_model_delegation.worker.launch'):
+            self.assertEqual(self.control(prepared, 'resume')['state'], 'authorized')
+        self.assertEqual(self.admit(store, job)['job_id'], job['job_id'])
+
+    def test_stop_is_terminal_and_cannot_be_renewed(self):
+        prepared = self.prepare()
+        self.assertEqual(self.control(prepared, 'stop')['state'], 'stopped')
+        with self.assertRaisesRegex(ValueError, 'assessment_stopped'):
+            self.control(prepared, 'resume')
+        with self.assertRaisesRegex(ValueError, 'assessment_stopped'):
+            self.consent(prepared)
+
+    def test_stop_before_commitment_prevents_post(self):
+        from local_model_delegation.worker import run_local_attempt
+        prepared, _, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        entered, release = threading.Event(), threading.Event()
+        def barrier(*args):
+            entered.set()
+            if not release.wait(5): raise RuntimeError('test barrier timeout')
+            return True
+        with patch('local_model_delegation.store.Store.submission_resources_available', side_effect=barrier):
+            thread = threading.Thread(target=run_local_attempt, args=(self.state, reserved['attempt_id']))
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                self.assertEqual(self.control(prepared, 'stop')['state'], 'stopped')
+            finally:
+                release.set(); thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(any(method == 'POST' for method, _ in self.server.calls))
+
+    def test_stop_after_commitment_preserves_attempt_and_allows_observation(self):
+        from local_model_delegation.worker import run_local_attempt
+        prepared, _, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        entered, release = threading.Event(), threading.Event()
+        def barrier(*args):
+            entered.set()
+            if not release.wait(5): raise RuntimeError('test barrier timeout')
+        with patch('local_model_delegation.habblaud.ensure_observer', side_effect=barrier):
+            thread = threading.Thread(target=run_local_attempt, args=(self.state, reserved['attempt_id']))
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(5))
+                self.control(prepared, 'stop')
+                self.assertEqual(store.attempt(reserved['attempt_id'])['state'], 'submitting')
+            finally:
+                release.set(); thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(self.server.calls.count(('POST', '/api/v1/chat')), 1)
+        self.assertEqual(store.attempt(reserved['attempt_id'])['state'], 'complete')
+
+    def test_lost_worker_never_replays_committed_attempt(self):
+        prepared, _, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        attempt = store.attempt(reserved['attempt_id'])
+        store.transition(attempt['attempt_id'], attempt['generation'], 'reserved', 'submitting',
+                         {'submitted_at': time.time(), 'request_settings': self.candidate['request_settings']})
+        with patch('local_model_delegation.recovery.request_recovery'), patch('local_model_delegation.worker.start_worker') as start:
+            first = self.control(prepared, 'resume')
+            second = self.control(prepared, 'resume')
+            self.assertEqual(first['state'], 'paused')
+            self.assertIsNone(second['next_trial_id'])
+            self.assertEqual(store.attempt(attempt['attempt_id'])['state'], 'uncertain')
+            start.assert_not_called()
+        self.assertFalse(any(method == 'POST' for method, _ in self.server.calls))
+
+    def test_active_run_permission_blocks_maintenance_without_jobs(self):
+        from local_model_delegation.updates import _disabled
+        from local_model_delegation.package import prepare_uninstall
+        prepared = self.prepare()
+        self.consent(prepared)
+        for check in (_disabled, prepare_uninstall):
+            with self.assertRaisesRegex(ValueError, 'assessments_must_be_paused'):
+                check(self.state)
+        self.control(prepared, 'pause')
+        _disabled(self.state)
+
+    def test_changed_identity_invalidates_new_work(self):
+        prepared, record, _ = self.saved_run()
+        self.consent(prepared)
+        self.candidate['request_settings']['temperature'] = .2
+        atomic_json(self.state / 'profiles/fictional.json', self.candidate)
+        with self.assertRaisesRegex(ValueError, 'assessment_identity_changed'):
+            assessment.submit_trial(self.state, prepared['assessment_id'], record['trials'][0]['trial_id'])
+        self.assertEqual(assessment._assessment(self.state, prepared['assessment_id'])['authorization']['state'], 'invalidated')
+        self.assertFalse(any(method == 'POST' for method, _ in self.server.calls))
+
+    def test_worker_run_lock_contention_is_retryable(self):
+        from local_model_delegation.worker import ownership, run_local_attempt
+        prepared, _, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        with ownership(store, 'assessment-' + prepared['assessment_id']):
+            self.assertEqual(run_local_attempt(self.state, reserved['attempt_id']), 0)
+        self.assertEqual(store.attempt(reserved['attempt_id'])['state'], 'reserved')
+        self.assertEqual(store.job(job['job_id'])['status'], 'reserved')
+        self.assertFalse(any(method == 'POST' for method, _ in self.server.calls))
+
+    def test_terminal_model_failure_allows_next_trial_but_never_repeats(self):
+        from local_model_delegation.worker import run_local_attempt
+        prepared, record, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        self.server.output_tokens = self.candidate['request_settings']['max_output_tokens']
+        run_local_attempt(self.state, reserved['attempt_id'])
+        with patch('local_model_delegation.worker.launch'):
+            progress = self.control(prepared, 'resume')
+            repeated = assessment.submit_trial(self.state, prepared['assessment_id'], record['trials'][0]['trial_id'])
+        self.assertEqual(progress['next_trial_id'], record['trials'][1]['trial_id'])
+        self.assertEqual(repeated['job_id'], job['job_id'])
+        self.assertEqual(self.server.calls.count(('POST', '/api/v1/chat')), 1)
