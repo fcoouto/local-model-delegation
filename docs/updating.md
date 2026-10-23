@@ -12,6 +12,26 @@ If no numbered release is published, report that fact. Do not silently install `
 
 ## 2. Prepare without losing state
 
+Assessment dependencies and temporary check workspaces belong outside the selected
+plugin state directory. `assessment storage` reports the supported external paths;
+its default is a private sibling named `<state-directory-name>-assessment-workspaces`.
+Use the staged target helper if the installed version lacks that command. Already
+qualified external runtimes remain valid at their existing locations.
+
+The updater never follows external runtime paths or backs them up. It still backs
+up reports, approvals, frozen inputs, dependency manifests/fingerprints and other
+durable state. External dependency preparation cannot invalidate that backup;
+changing durable assessment evidence or running inference still blocks verification.
+
+`assessment_runtime_in_state:RELATIVE_PATH` identifies misplaced `node_modules`,
+`.venv` or `venv` trees before observer shutdown, runtime pinning or backup creation.
+Do not delete the tree or exempt it from preservation to bypass this error. Ask
+the owning assessment chat about active writers and future replay, then relocate
+with a verified copy, preserved original evidence and a private rollback archive.
+Do not leave a symlink in state. Follow the assessment
+[storage procedure](../skills/assess-my-model/references/operations.md#runtime-storage-and-plugin-updates).
+Unrecognized symlinks remain an `unsafe_update_file` error requiring inspection.
+
 Inspect live helper drivers and durable jobs, attempts, fallback dispatches and model operations. Do not duplicate work, resubmit an ambiguous attempt or clear a slot to bypass an update. Active work must settle using its existing pinned helper. If that helper cannot reconcile an uncertain external runtime, separately authorized [verified reset recovery](model-loading.md#recover-an-uncertain-inference-slot) may use a newer tested source before installation; this is recovery work, not an update test. A completed rejected synthetic trial is settled only when its assessment permit, brief and canonical outcome receipt match and it has no native dispatch.
 
 Before changing configuration, save an owner-only copy of the selected state's configuration under `STATE/updates/`, together with the state path, target package identity and any explicit request to remain paused. This records the original `routing_enabled`, assessment admission, `visibility_enabled`, and complete agent representation configuration, retaining its existing stored namespace. Associate it with the preparation receipt when available. On resuming an interrupted update, reuse this original record; the already-paused configuration and preparation backup do not establish the owner's prior operational state.

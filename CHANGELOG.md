@@ -6,6 +6,12 @@
 - Preserve existing stored configuration, bindings, observer receipts and locks without rewriting job identities. Reject ambiguous or unsafe namespaces.
 - Describe publishing as operational state and retain its configured state through verified updates.
 
+## 0.3.16 — 2026-10-23
+
+- Separate assessment runtimes and temporary reference checks from plugin state with the read-only `assessment storage` command.
+- Detect misplaced dependency trees before update preparation changes observers or creates backups; retain evidence preservation and active-work gates.
+- Document coordinated runtime relocation, dependency restoration and historical replay limits without deleting evidence or regenerating model responses.
+
 ## 0.3.15 — 2026-10-23
 
 - Adopt Coordinated Loop as the official plugin icon and logo, bundled with the package and displayed in the README.

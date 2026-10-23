@@ -103,6 +103,13 @@ Delegation follows the coordinator's active project instructions, skills and per
 
 ## Shared state and updates
 
+Keep framework dependencies and temporary assessment workspaces separate from
+plugin state. `assessment storage` reports the supported external directories
+without creating them. Existing external qualified runtimes remain where they are;
+reports, approvals and frozen evidence retain their existing backup protection.
+Never delete a resumable assessment's dependencies to unblock an update. See the
+[storage and relocation procedure](skills/assess-my-model/references/operations.md#runtime-storage-and-plugin-updates).
+
 All projects use `~/.local/state/local-model-delegation` by default. Override `--state-dir` deliberately, such as for disposable fixtures or an existing installation. All participating projects must select the same state directory. Schema 2 separates `config.json` from `profiles/<profile_id>.json`. Profiles, approvals, database, model results and receipts stay private; weights remain where the runtime manages them.
 
 Only current schema-2 configuration, profiles, queues and task briefs are supported. Obsolete directory detection, task aliases, worker script aliases and schema conversion commands have been removed. Unsupported state is rejected without rewriting its evidence. Custom directories remain explicit; do not move saved state or create a second active queue for the same runtime.

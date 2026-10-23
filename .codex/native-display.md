@@ -165,10 +165,13 @@ The observation uses actual Unix-second timestamps and exact native identities:
   "observed_label": "Tester",
   "observer_started_at": 1000.0,
   "observed_at": 1010.0,
-  "source": "representation",
+  "source": "habblaud",
   "snapshot": "/private/update/actual-api-or-ui-snapshot.json"
 }
 ```
+
+The `source` value belongs to Vibe Setup's external qualification schema; preserve
+that protocol value independently of the plugin's public command names.
 
 Retain the bounded actual API/UI snapshot. Python validates correlation, timing
 and artifact hashes; it does not independently attest the external observation.
