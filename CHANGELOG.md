@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.11 — 2026-10-23 (unpublished local build)
+
+- Resolve Bionic hub aliases to their exact concrete model inventory and bind alias files to identity.
+- Normalize catalog safetensors format to runtime MLX while retaining exact approval and metadata checks.
+
 ## 0.3.10 (unpublished local package)
 
 - Add **Assess my Model** as a dedicated action, defaulting to one focused ability with an explicit all-abilities option.
