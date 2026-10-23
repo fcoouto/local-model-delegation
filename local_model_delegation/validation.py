@@ -321,12 +321,18 @@ def parse_proposal(text, brief):
     return value
 
 
+class InvalidProposal(ValueError):
+    """Invalid model output, distinct from corrupted state or unavailable verification."""
+
+
 def _proposal(store, job):
     path = Path(job['result_path'])
     if path.is_symlink() or not path.resolve().is_relative_to(store.root / 'jobs' / job['job_id']): raise ValueError('unsafe_result')
     artifact = load_json(path.read_text())
     if text_hash(artifact['text']) != artifact['sha256']: raise ValueError('candidate_hash_mismatch')
-    return parse_proposal(artifact['text'], job['brief']), artifact['sha256']
+    try: proposal = parse_proposal(artifact['text'], job['brief'])
+    except ValueError as error: raise InvalidProposal(str(error)) from error
+    return proposal, artifact['sha256']
 
 
 def _verification_binding(job, candidate_hash):
@@ -343,8 +349,7 @@ def prepare_verification(state_dir, job_id):
         job = store.job(job_id)
         if job['status'] in ('candidate_ready', 'checking') and str(error) != 'verification_busy':
             from .measurements import collect_verdict
-            from json import JSONDecodeError
-            category = 'format' if isinstance(error,JSONDecodeError) or str(error) in ('invalid_candidate','invalid_citation','unsafe_path','candidate_path_not_allowed','oversized_answer') else 'verification'
+            category = 'format' if isinstance(error, InvalidProposal) else 'verification'
             if str(error)=='source_changed': category='source_changed'
             receipt = {'accepted': False, 'error': type(error).__name__, 'category': category, 'reason': str(error)}
             atomic_json(store.root / 'jobs' / job_id / 'check-failure.json', receipt)

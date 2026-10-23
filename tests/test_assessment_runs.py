@@ -637,6 +637,26 @@ class AssessmentRuns(Fixture):
             self.assertEqual(self.control(prepared, 'resume')['state'], 'authorized')
         self.assertEqual(self.admit(store, job)['status'], 'reserved')
 
+    def test_pause_during_early_worker_rejection_keeps_job_resumable(self):
+        from local_model_delegation.worker import run_local_attempt
+        for target in ('local_model_delegation.store.Store.submission_resources_available',
+                       'local_model_delegation.worker.context_fits'):
+            with self.subTest(target=target):
+                prepared, _, store, job = self.queued_run()
+                reserved = self.admit(store, job)
+                def pause_then_reject(*args, **kwargs):
+                    self.control(prepared, 'pause')
+                    return False
+                with patch(target, side_effect=pause_then_reject):
+                    run_local_attempt(self.state, reserved['attempt_id'])
+                self.assertEqual(store.job(job['job_id'])['status'], 'waiting')
+                self.assertEqual(store.attempt(reserved['attempt_id'])['state'], 'released')
+                with patch('local_model_delegation.worker.launch'):
+                    self.assertEqual(self.control(prepared, 'resume')['state'], 'authorized')
+                self.assertEqual(self.admit(store, job)['status'], 'reserved')
+                self.control(prepared, 'stop')
+        self.assertFalse(any(method == 'POST' for method, _ in self.server.calls))
+
     def test_native_checker_change_stays_unresolved_after_checker_returns(self):
         from local_model_delegation.worker import run_local_attempt
         from local_model_delegation.validation import prepare_verification
@@ -658,7 +678,9 @@ class AssessmentRuns(Fixture):
     def test_invalid_model_proposals_are_evaluated_failures(self):
         from local_model_delegation.worker import run_local_attempt
         from local_model_delegation.validation import prepare_verification
-        for answer in ('not JSON', json.dumps({'summary': 'proposal', 'files': {'outside.txt': 'wrong path'}})):
+        for answer in ('not JSON', '{"summary":"first","summary":"second","files":{}}',
+                       '{"summary":"proposal","files":NaN}',
+                       json.dumps({'summary': 'proposal', 'files': {'outside.txt': 'wrong path'}})):
             with self.subTest(answer=answer):
                 prepared, _, store, job = self.queued_run()
                 self.server.answer = answer
@@ -670,3 +692,19 @@ class AssessmentRuns(Fixture):
                 self.assertEqual(report['counts']['failed'], 1)
                 self.assertEqual(report['counts']['evaluated'], 1)
                 self.assertEqual(report['counts']['unresolved'], 0)
+
+    def test_corrupt_saved_candidate_is_not_a_model_failure(self):
+        from local_model_delegation.worker import run_local_attempt
+        from local_model_delegation.validation import prepare_verification
+        for content in ('{', '{"text":"first","text":"second","sha256":"invalid"}'):
+            with self.subTest(content=content):
+                prepared, _, store, job = self.queued_run()
+                reserved = self.admit(store, job)
+                run_local_attempt(self.state, reserved['attempt_id'])
+                Path(store.job(job['job_id'])['result_path']).write_text(content)
+                with self.assertRaises(ValueError): prepare_verification(self.state, job['job_id'])
+                with patch('local_model_delegation.worker.launch'):
+                    self.assertEqual(self.control(prepared, 'resume')['state'], 'paused')
+                report = assessment.assessment_report(self.state, prepared['assessment_id'])
+                self.assertEqual(report['counts']['evaluated'], 0)
+                self.assertEqual(report['counts']['unresolved'], 1)

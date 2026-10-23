@@ -121,13 +121,14 @@ def run_local_attempt(state_dir, attempt_id):
             store.transition(attempt_id, generation, "reserved", "released", {})
             store.select_fallback(job["job_id"], "approval_changed")
             return 1
+        rejection = None
         if not context_fits(job['brief'], current, store.instance(attempt['instance_key'])['data']):
+            rejection = 'context_budget_exceeded'
+        elif not store.submission_resources_available(job):
+            rejection = 'resources_changed_before_post'
+        if rejection and not standalone:
             store.transition(attempt_id, generation, "reserved", "released", {})
-            store.select_fallback(job['job_id'], "context_budget_exceeded")
-            return 1
-        if not store.submission_resources_available(job):
-            store.transition(attempt_id, generation, "reserved", "released", {})
-            store.select_fallback(job["job_id"], "resources_changed_before_post")
+            store.select_fallback(job["job_id"], rejection)
             return 1
         settings = generation_settings(job['brief'], current)
         with ownership(store, 'assessment-' + permit['assessment_id']) if standalone else nullcontext(True) as owned:
@@ -144,9 +145,11 @@ def run_local_attempt(state_dir, attempt_id):
                     _defer_run_job(store, store.job(job['job_id']), run['authorization']['state'])
                     return 1
                 # Binding and runtime checks can outlast the earlier pressure sample.
-                if not store.submission_resources_available(job):
+                if not rejection and not store.submission_resources_available(job):
+                    rejection = 'resources_changed_before_post'
+                if rejection:
                     store.transition(attempt_id, generation, 'reserved', 'released', {})
-                    store.select_fallback(job['job_id'], 'resources_changed_before_post')
+                    store.select_fallback(job['job_id'], rejection)
                     return 1
             if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time(), "submitted_at": time.time(), 'request_settings':settings}): return 0
         from .habblaud import ensure_observer
