@@ -50,6 +50,8 @@ Verified budget exhaustion records terminal identity, token counts and an answer
 
 Code output is `{files, summary}` with complete replacement text for allowed paths only. Summary output is `{summary, claims}`; each claim has `text`, `path`, `sha256`, `start_line` and `end_line`. Summary briefs have no editable paths or executable checks.
 
+Candidate output may be plain JSON or one complete Markdown block fenced with three backticks, with an optional lowercase `json` label. No surrounding prose, multiple documents or partial extraction is accepted. The original byte limit, strict JSON decoder and all proposal checks still apply; saved state and receipts require plain JSON.
+
 `verify prepare --job ID` returns a private staging path and session binding: `session_token`, `job_id`, `attempt_id`, `native_task_id`, `candidate_hash`, `source_hash`, `acceptance_hash`. `verify checks --job ID` executes declared commands in qualified macOS isolation, with credentials cleared and resource/time bounds. Native Codex independently reviews semantics and records an object containing those seven binding fields plus `criteria` (booleans in order), `checks` (ID to boolean), and `claims` (booleans in order). Every required item must be true. `verify record --job ID --receipt FILE` rechecks identity, source and attempt. This trusts native review; it does not prove semantic quality cryptographically.
 
 Wait decisions are `{action:"extend", until:EPOCH_SECONDS, reason:TEXT}` or `{action:"fallback", reason:TEXT}`. Extensions preserve original queue age. Expiry pauses admission for native judgment; it does not cancel peers or automatically POST.
