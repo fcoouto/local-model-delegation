@@ -575,3 +575,98 @@ class AssessmentRuns(Fixture):
         self.assertEqual(len(report['groups']), 6)
         self.assertEqual(self.server.calls.count(('POST', '/api/v1/chat')), 36)
         self.assertTrue(all(t['reason'] == 'output_budget_exhausted' for t in report['trials']))
+
+    def test_pause_uses_current_reservation_when_waiting_snapshot_is_stale(self):
+        from local_model_delegation.worker import ownership
+        prepared, _, store, job = self.queued_run()
+        stale = store.job(job['job_id'])
+        reserved = self.admit(store, job)
+        with ownership(store, 'assessment-' + prepared['assessment_id']):
+            assessment._defer_run_job(store, stale, 'paused')
+        self.assertEqual(store.attempt(reserved['attempt_id'])['state'], 'released')
+        self.assertEqual(store.job(job['job_id'])['status'], 'waiting')
+        self.assertIsNone(store.job(job['job_id'])['attempt_id'])
+
+    def test_pause_during_scheduler_authorization_keeps_job_resumable(self):
+        from local_model_delegation.scheduler import schedule_once
+        prepared, _, store, job = self.queued_run()
+        authorize = assessment.authorize_assessment
+        paused = False
+        def pause_then_authorize(*args, **kwargs):
+            nonlocal paused
+            if not paused:
+                paused = True
+                self.control(prepared, 'pause')
+            return authorize(*args, **kwargs)
+        with patch.object(assessment, 'authorize_assessment', side_effect=pause_then_authorize):
+            schedule_once(self.state)
+        self.assertEqual(store.job(job['job_id'])['status'], 'waiting')
+        with patch('local_model_delegation.worker.launch'):
+            self.assertEqual(self.control(prepared, 'resume')['state'], 'authorized')
+        self.assertEqual(self.admit(store, job)['status'], 'reserved')
+
+    def test_pressure_is_sampled_again_after_slow_final_binding_checks(self):
+        from local_model_delegation.worker import run_local_attempt
+        prepared, _, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        check = assessment._check_run_bindings
+        critical = False
+        def changed_pressure(*args, **kwargs):
+            nonlocal critical
+            result = check(*args, **kwargs)
+            critical = True
+            return result
+        with patch.object(assessment, '_check_run_bindings', side_effect=changed_pressure), \
+                patch('local_model_delegation.store.Store.submission_resources_available', side_effect=lambda job: not critical):
+            run_local_attempt(self.state, reserved['attempt_id'])
+        self.assertFalse(any(method == 'POST' for method, _ in self.server.calls))
+        self.assertFalse(store.attempt(reserved['attempt_id'])['data'].get('submitted_at'))
+
+    def test_pause_during_scheduler_admission_keeps_job_resumable(self):
+        from local_model_delegation.scheduler import schedule_once
+        from local_model_delegation.store import Store
+        prepared, _, store, job = self.queued_run()
+        admit = Store.admit
+        def pause_then_admit(current, *args, **kwargs):
+            self.control(prepared, 'pause')
+            return admit(current, *args, **kwargs)
+        with patch.object(Store, 'admit', autospec=True, side_effect=pause_then_admit):
+            schedule_once(self.state)
+        self.assertEqual(store.job(job['job_id'])['status'], 'waiting')
+        with patch('local_model_delegation.worker.launch'):
+            self.assertEqual(self.control(prepared, 'resume')['state'], 'authorized')
+        self.assertEqual(self.admit(store, job)['status'], 'reserved')
+
+    def test_native_checker_change_stays_unresolved_after_checker_returns(self):
+        from local_model_delegation.worker import run_local_attempt
+        from local_model_delegation.validation import prepare_verification
+        prepared, _, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        run_local_attempt(self.state, reserved['attempt_id'])
+        with patch.object(assessment, '_verification_snapshot', return_value={}):
+            with self.assertRaisesRegex(ValueError, 'assessment_checker_changed'):
+                prepare_verification(self.state, job['job_id'])
+        with patch('local_model_delegation.worker.launch'):
+            progress = self.control(prepared, 'resume')
+        report = assessment.assessment_report(self.state, prepared['assessment_id'])
+        self.assertEqual(progress['state'], 'paused')
+        self.assertIsNone(progress['next_trial_id'])
+        self.assertEqual(report['counts']['failed'], 0)
+        self.assertEqual(report['counts']['evaluated'], 0)
+        self.assertEqual(report['counts']['unresolved'], 1)
+
+    def test_invalid_model_proposals_are_evaluated_failures(self):
+        from local_model_delegation.worker import run_local_attempt
+        from local_model_delegation.validation import prepare_verification
+        for answer in ('not JSON', json.dumps({'summary': 'proposal', 'files': {'outside.txt': 'wrong path'}})):
+            with self.subTest(answer=answer):
+                prepared, _, store, job = self.queued_run()
+                self.server.answer = answer
+                reserved = self.admit(store, job)
+                run_local_attempt(self.state, reserved['attempt_id'])
+                with self.assertRaises(ValueError): prepare_verification(self.state, job['job_id'])
+                with patch('local_model_delegation.worker.launch'): self.control(prepared, 'resume')
+                report = assessment.assessment_report(self.state, prepared['assessment_id'])
+                self.assertEqual(report['counts']['failed'], 1)
+                self.assertEqual(report['counts']['evaluated'], 1)
+                self.assertEqual(report['counts']['unresolved'], 0)

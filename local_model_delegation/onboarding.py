@@ -577,9 +577,10 @@ def _trial_blocker(store, job):
         if job['reason'] == 'verification_unsupported': return 'verification_unsupported'
         failure = store.root / 'jobs' / job['job_id'] / 'check-failure.json'
         if failure.exists():
-            reason = load_json(failure.read_text()).get('reason', '')
-            if reason.startswith(('assessment_', 'isolation_', 'source_', 'attempt_')):
-                return reason
+            receipt = load_json(failure.read_text())
+            reason = receipt.get('reason', '')
+            if receipt.get('category') == 'verification' or reason.startswith(('assessment_', 'isolation_', 'source_', 'attempt_')):
+                return reason or 'verification_unavailable'
     return None
 
 
@@ -598,12 +599,13 @@ def _run_progress(store, assessment):
 
 def _defer_run_job(store, job, state):
     """Called under the run lock; only definitely unsubmitted reservations may be freed."""
-    if job['attempt_id']:
-        attempt = store.attempt(job['attempt_id'])
-        if attempt['state'] != 'reserved' or attempt['data'].get('submitted_at'): return
-        if not store.transition(attempt['attempt_id'], attempt['generation'], 'reserved', 'released', {}): return
-    elif job['status'] != 'waiting': return
     with store.db(write=True) as db:
+        job = store._job(db.execute('SELECT * FROM jobs WHERE job_id=?', (job['job_id'],)).fetchone())
+        if job['status'] not in ('waiting', 'reserved'): return
+        if job['attempt_id']:
+            attempt = db.execute('SELECT * FROM attempts WHERE attempt_id=?', (job['attempt_id'],)).fetchone()
+            if not attempt or attempt['state'] != 'reserved' or load_json(attempt['data']).get('submitted_at'): return
+            if not store.transition(attempt['attempt_id'], attempt['generation'], 'reserved', 'released', {}, db=db): return
         db.execute("UPDATE jobs SET status=?,reason=?,attempt_id=NULL WHERE job_id=? AND status IN ('waiting','reserved')",
                    ('waiting' if state == 'paused' else 'failed', 'assessment_' + state, job['job_id']))
 

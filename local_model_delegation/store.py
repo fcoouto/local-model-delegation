@@ -1,10 +1,12 @@
 """Transactional reservations and durable attempts. No network inside transactions."""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager, nullcontext
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import stat
+import tempfile
 import time
 import uuid
 from typing import Any
@@ -43,6 +45,46 @@ def atomic_json(path: Path, value: Any) -> None:
         temp.unlink(missing_ok=True)
 
 
+def _database_stamp(path):
+    try: stamp = path.lstat()
+    except FileNotFoundError: return None
+    if stamp.st_uid != os.getuid() or stamp.st_mode & 0o077 or not stat.S_ISREG(stamp.st_mode):
+        raise ValueError('unsafe_database')
+    return stamp.st_dev, stamp.st_ino, stamp.st_size, stamp.st_mtime_ns, stamp.st_ctime_ns
+
+
+def _read_only_snapshot(path):
+    # SQLite mode=ro can write WAL sidecars; copy a stable DB/WAL pair before opening it.
+    sources = (path, Path(str(path) + '-wal'))
+    for _ in range(3):
+        before = [_database_stamp(source) for source in sources]
+        if before[0] is None: raise FileNotFoundError(path)
+        with tempfile.TemporaryDirectory(prefix='local-model-report-') as directory:
+            target = Path(directory) / path.name
+            try:
+                for source, stamp in zip(sources, before):
+                    if stamp is None: continue
+                    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+                    with os.fdopen(fd, 'rb') as stream:
+                        copied = Path(directory) / source.name
+                        output = os.open(copied, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                        with os.fdopen(output, 'wb') as destination: shutil.copyfileobj(stream, destination)
+            except FileNotFoundError:
+                continue
+            if before != [_database_stamp(source) for source in sources]: continue
+            memory = sqlite3.connect(':memory:', isolation_level=None)
+            try:
+                with closing(sqlite3.connect(target.as_uri() + '?mode=ro', uri=True, timeout=0.25)) as snapshot:
+                    snapshot.backup(memory)
+                memory.row_factory = sqlite3.Row
+                memory.execute('PRAGMA query_only=ON')
+                return memory
+            except BaseException:
+                memory.close()
+                raise
+    raise ValueError('state_snapshot_busy')
+
+
 class Store:
     def __init__(self, state_dir: Path, *, read_only=False):
         self.read_only = read_only
@@ -56,15 +98,13 @@ class Store:
         else: self.root = private_dir(root)
         self.path = self.root / "state.sqlite3"
         for suffix in ("", "-wal", "-shm"):
-            path = Path(str(self.path) + suffix)
-            try: stamp = path.lstat()
-            except FileNotFoundError: continue
-            if stamp.st_uid != os.getuid() or stamp.st_mode & 0o077 or not stat.S_ISREG(stamp.st_mode):
-                raise ValueError("unsafe_database")
+            _database_stamp(Path(str(self.path) + suffix))
         if read_only:
-            if not self.path.exists(): raise FileNotFoundError(self.path)
+            self._snapshot = _read_only_snapshot(self.path)
             with self.db() as db:
-                if db.execute('PRAGMA user_version').fetchone()[0] != 2: raise ValueError('unsupported_state_version')
+                if db.execute('PRAGMA user_version').fetchone()[0] != 2:
+                    self._snapshot.close()
+                    raise ValueError('unsupported_state_version')
             return
         try:
             fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
@@ -114,8 +154,10 @@ class Store:
     @contextmanager
     def db(self, write=False):
         if self.read_only and write: raise ValueError('read_only_state')
-        db = sqlite3.connect(self.path.as_uri() + '?mode=ro' if self.read_only else self.path,
-                             uri=self.read_only, timeout=0.25, isolation_level=None)
+        if self.read_only:
+            yield self._snapshot
+            return
+        db = sqlite3.connect(self.path, timeout=0.25, isolation_level=None)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
         try:
@@ -230,11 +272,11 @@ class Store:
             if row is None: raise ValueError("unknown_instance")
             return {**dict(row), "data": load_json(row["data"])}
 
-    def transition(self, attempt_id, generation, expected, target, fields):
+    def transition(self, attempt_id, generation, expected, target, fields, *, db=None):
         allowed = {"reserved": {"submitting", "released", "uncertain"}, "submitting": {"streaming", "uncertain"},
                    "streaming": {"complete", "uncertain"}, "complete": {"released"}, "uncertain": {"released"}}
         if target not in allowed.get(expected, set()): return False
-        with self.db(write=True) as db:
+        with self.db(write=True) if db is None else nullcontext(db) as db:
             row = db.execute("SELECT a.*,i.generation AS current_generation FROM attempts a JOIN instances i USING(instance_key) WHERE attempt_id=?", (attempt_id,)).fetchone()
             if row is None or row["generation"] != generation or row["current_generation"] != generation or row["state"] != expected:
                 return False

@@ -192,7 +192,7 @@ Add run-permission checks to the existing update/uninstall prerequisites. Reuse 
 
 **Interfaces:**
 
-- Extend `Store(state_dir: Path, *, read_only: bool = False)`. Read-only mode validates existing state and opens SQLite with `mode=ro`; it never creates directories/databases, initializes schema, changes journal mode, or permits `db(write=True)`. Default behavior is unchanged.
+- Extend `Store(state_dir: Path, *, read_only: bool = False)`. Read-only mode validates existing state and reads a stable snapshot of the database and committed WAL. SQLite opens only a disposable private copy, then reads from memory; it never creates or changes files in saved state, initializes schema, changes its journal mode, or permits `db(write=True)`. Reject a repeatedly changing snapshot instead of dropping WAL commits. Default behavior is unchanged. Independent review established that opening saved state directly with `mode=ro` can create or modify sidecars, so the snapshot replaces that original implementation choice.
 - Extract `onboarding._assessment_buckets(assessment: dict) -> list[dict]` from the existing reporter, retaining its grouping/coverage rules.
 - Extend `onboarding.assessment_report(state_dir, assessment_id, *, check_current: bool = False) -> dict`. Legacy records retain their original live-binding/approval-report semantics; the flag adds optional current checking only for new runs. New records return the standalone report below from snapshots, receipts, and read-only saved jobs.
 - Keep `record_trial` as the evidence writer. Extend its stored receipt with observed disposition/reason/timing when available; preserve the existing `trial_id`, `job_id`, `passed`, and `status` keys consumed by update checks.

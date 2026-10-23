@@ -143,6 +143,11 @@ def run_local_attempt(state_dir, attempt_id):
                         atomic_json(store.root / 'assessments' / run['assessment_id'] / 'assessment.json', run)
                     _defer_run_job(store, store.job(job['job_id']), run['authorization']['state'])
                     return 1
+                # Binding and runtime checks can outlast the earlier pressure sample.
+                if not store.submission_resources_available(job):
+                    store.transition(attempt_id, generation, 'reserved', 'released', {})
+                    store.select_fallback(job['job_id'], 'resources_changed_before_post')
+                    return 1
             if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time(), "submitted_at": time.time(), 'request_settings':settings}): return 0
         from .habblaud import ensure_observer
         ensure_observer(state_dir, job["job_id"])
