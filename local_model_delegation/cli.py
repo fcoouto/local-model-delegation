@@ -118,13 +118,14 @@ def main(argv=None):
     p.add_argument('--instance-key')
     p.add_argument('--operation-id')
     p = commands.add_parser("assessment")
-    p.add_argument("action", choices=["choices", "project-preview", "prepare", "consent", "pause", "stop", "resume", "begin", "report", "trial", "submit", "capacity", "approve"])
+    p.add_argument("action", choices=["choices", "project-preview", "advance", "prepare", "consent", "pause", "stop", "resume", "begin", "report", "trial", "submit", "capacity", "approve"])
     p.add_argument("--profile-id")
     p.add_argument("--assessment-id")
     p.add_argument("--owner-reference")
     p.add_argument("--receipt", type=Path)
     p.add_argument("--scope", type=Path)
     p.add_argument("--trial-id")
+    p.add_argument("--job")
     p.add_argument('--selection', type=Path)
     p.add_argument('--project', type=Path)
     p.add_argument('--source-profile-id')
@@ -231,23 +232,26 @@ def main(argv=None):
         elif args.command == "assessment":
             from .onboarding import (begin_assessment, assessment_report, record_trial, approve_assessment, submit_trial,
                                      record_capacity, assessment_choices, prepare_assessment, consent_assessment, control_assessment)
-            required = {'project-preview': {'project', 'selection', 'owner_reference'}, 'choices': set(), 'prepare': {'profile_id', 'selection'},
+            required = {'advance': {'assessment_id', 'job'}, 'project-preview': {'project', 'selection', 'owner_reference'}, 'choices': set(), 'prepare': {'profile_id', 'selection'},
                         'consent': {'assessment_id', 'preview_digest', 'owner_reference'},
                         'pause': {'assessment_id'}, 'stop': {'assessment_id'}, 'resume': {'assessment_id'},
                         'begin': {'profile_id', 'owner_reference'}, 'report': {'assessment_id'},
                         'trial': {'assessment_id', 'receipt'}, 'submit': {'assessment_id', 'trial_id'},
                         'capacity': {'assessment_id', 'receipt'}, 'approve': {'assessment_id', 'owner_reference', 'scope'}}
             fields = {'profile_id', 'assessment_id', 'owner_reference', 'receipt', 'scope', 'trial_id',
-                      'selection', 'project', 'source_profile_id', 'preview_digest', 'check_current'}
+                      'selection', 'project', 'job', 'source_profile_id', 'preview_digest', 'check_current'}
             supplied = {k for k in fields if getattr(args, k) is not None and getattr(args, k) is not False}
-            optional = {'prepare': {'source_profile_id'}, 'report': {'check_current'}}.get(args.action, set())
+            optional = {'prepare': {'source_profile_id', 'project', 'owner_reference'}, 'report': {'check_current'}}.get(args.action, set())
             if not required[args.action] <= supplied or not supplied <= required[args.action] | optional:
                 raise ValueError('invalid_assessment_arguments')
-            if args.action == 'project-preview':
+            if args.action == 'advance':
+                from .project_runs import advance_cycle
+                result = advance_cycle(args.state_dir, args.assessment_id, args.job)
+            elif args.action == 'project-preview':
                 from .project_assessment import project_preview
                 result = project_preview(args.project, read_input(args.selection), args.owner_reference)
             elif args.action == 'choices': result = assessment_choices()
-            elif args.action == 'prepare': result = prepare_assessment(args.state_dir, args.profile_id, read_input(args.selection), source_profile_id=args.source_profile_id)
+            elif args.action == 'prepare': result = prepare_assessment(args.state_dir, args.profile_id, read_input(args.selection), source_profile_id=args.source_profile_id, project_root=args.project, owner_reference=args.owner_reference)
             elif args.action == 'consent': result = consent_assessment(args.state_dir, args.assessment_id, args.preview_digest, args.owner_reference)
             elif args.action in ('pause', 'stop', 'resume'): result = control_assessment(args.state_dir, args.assessment_id, args.action)
             elif args.action == "begin": result = begin_assessment(args.state_dir, args.profile_id, args.owner_reference)

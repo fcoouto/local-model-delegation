@@ -418,6 +418,12 @@ def _prepare_verification(state_dir, job_id):
 
 
 def record_verification(state_dir, job_id, receipt):
+    from .project_runs import verification_lock
+    with verification_lock(state_dir, job_id):
+        return _record_verification(state_dir, job_id, receipt)
+
+
+def _record_verification(state_dir, job_id, receipt):
     from .worker import ownership
     store = Store(state_dir)
     with ownership(store, 'check-' + job_id) as owned:
@@ -463,9 +469,17 @@ def record_verification(state_dir, job_id, receipt):
 
 
 def run_native_checks(state_dir, job_id):
+    from .project_runs import verification_lock
+    with verification_lock(state_dir, job_id):
+        return _run_native_checks(state_dir, job_id)
+
+
+def _run_native_checks(state_dir, job_id):
     """Run only predeclared native commands, inside the qualified sandbox, with no credentials."""
     session = prepare_verification(state_dir, job_id)
     root = Path(session['stage'])
+    from .project_runs import prepare_hidden_checks
+    prepare_hidden_checks(state_dir, Store(state_dir).job(job_id), session)
     outcomes = {}
     for check in session['acceptance']['checks']:
         executable = Path(check['argv'][0])

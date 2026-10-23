@@ -447,10 +447,10 @@ class Store:
                 if route.get('assessment'):
                     from .onboarding import _assessment
                     assessment = _assessment(self.root, route['assessment']['assessment_id'])
-                    if assessment.get('schema_version') == 1:
+                    if assessment.get('schema_version') in (1, 2):
                         if any(load_json(r['data']).get('submitted_at') for r in db.execute('SELECT data FROM attempts WHERE job_id=?', (job_id,))):
                             raise ValueError('assessment_already_submitted')
-                        if any(r['task_key'] not in assessment['receipts'] for r in db.execute(
+                        if any(r['task_key'] not in (set(assessment['receipts']) | set(assessment.get('cycle_receipts', {}))) for r in db.execute(
                                 'SELECT task_key FROM jobs WHERE chat=? AND job_id!=?', (job['chat'], job_id))):
                             db.execute("UPDATE jobs SET reason='assessment_trial_pending' WHERE job_id=?", (job_id,))
                             return envelope(self._job(db.execute('SELECT * FROM jobs WHERE job_id=?', (job_id,)).fetchone()))

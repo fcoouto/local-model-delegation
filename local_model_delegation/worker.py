@@ -112,7 +112,7 @@ def run_local_attempt(state_dir, attempt_id):
         permit = job.get('route_data', {}).get('assessment')
         from .onboarding import _assessment, _check_run_bindings, _defer_run_job
         run = _assessment(state_dir, permit['assessment_id']) if permit else None
-        standalone = run is not None and run.get('schema_version') == 1
+        standalone = run is not None and run.get('schema_version') in (1, 2)
         try:
             current = job['profile'] if standalone else authorize_job(store, job)
             if current["approval"] != job["profile"]["approval"]:
@@ -159,7 +159,10 @@ def run_local_attempt(state_dir, attempt_id):
         runtime = Runtime(job["profile"]["endpoint"], token_env=job["profile"].get("token_env"))
         watch = ActivityWatch(job["profile"]["stale_tolerance_seconds"], time.monotonic())
         progress = ProgressWatch({**settings, "require_completion_metadata": True})
-        stopped, stale = threading.Event(), threading.Event()
+        stopped, stale, expired = threading.Event(), threading.Event(), threading.Event()
+        from .project_runs import execution_deadline
+        deadline_seconds = execution_deadline(state_dir, job)
+        inference_started = time.monotonic()
         counts = {}
         last_event_at = time.time()
 
@@ -167,6 +170,10 @@ def run_local_attempt(state_dir, attempt_id):
             heartbeat = 0
             while not stopped.wait(.25):
                 now = time.monotonic()
+                if deadline_seconds is not None and now - inference_started >= deadline_seconds:
+                    expired.set()
+                    runtime.abort()
+                    continue
                 if watch.is_stale(now):
                     stale.set()
                     runtime.abort()
@@ -180,10 +187,12 @@ def run_local_attempt(state_dir, attempt_id):
         thread = threading.Thread(target=monitor, daemon=True)
         thread.start()
         answer, total, complete = [], 0, False
-        inference_started = time.monotonic()
         try:
             body = build_model_request(job["brief"], job["profile"], store.instance(attempt["instance_key"])["data"]["instance_id"])
             for event, data in runtime.stream(body):
+                if deadline_seconds is not None and time.monotonic() - inference_started >= deadline_seconds:
+                    expired.set()
+                if expired.is_set(): raise ValueError('assessment_deadline_exceeded')
                 if stale.is_set(): raise ValueError("stale")
                 counts[event] = counts.get(event, 0) + 1
                 if event == "chat.start":
@@ -239,7 +248,7 @@ def run_local_attempt(state_dir, attempt_id):
             current_state = store.attempt(attempt_id)["state"]
             if current_state in ("submitting", "streaming"):
                 store.transition(attempt_id, generation, current_state, "uncertain", {"error": type(error).__name__})
-            store.select_fallback(job["job_id"], "stale" if stale.is_set() else progress.reason or "local_request_uncertain")
+            store.select_fallback(job["job_id"], "assessment_deadline_exceeded" if expired.is_set() else "stale" if stale.is_set() else progress.reason or "local_request_uncertain")
             from .recovery import close_instance, request_recovery
             close_instance(store, attempt["instance_key"])
             request_recovery(state_dir, attempt["instance_key"])
@@ -283,7 +292,7 @@ def reconcile_attempts(state_dir, *, assessment_id=None):
                     with ownership(store, 'assessment-' + permit['assessment_id']) as run_owned:
                         if not run_owned: continue
                         run = _assessment(state_dir, permit['assessment_id'])
-                        if run.get('schema_version') == 1 and run['authorization']['state'] != 'authorized':
+                        if run.get('schema_version') in (1, 2) and run['authorization']['state'] != 'authorized':
                             _defer_run_job(store, job, run['authorization']['state'])
                             continue
                 if store.instance(attempt["instance_key"])["state"] != "ready" or store.job(attempt["job_id"])["status"] != "reserved":
