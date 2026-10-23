@@ -1,6 +1,6 @@
 # Project-specific local model assessment
 
-Date: 2026-10-23. Status: independently reviewed design, awaiting owner approval.
+Date: 2026-10-23. Status: reviewed design with the owner's project-scope clarification incorporated; awaiting owner approval.
 
 ## Purpose
 
@@ -15,6 +15,29 @@ A model need not handle everything to be useful. Evidence of a useful subset is 
 The owner replaced the generic specialty benchmark with project-specific qualification. Every assignment must originate in actual project work or be generated directly from that project's concrete code, requirements and maintenance patterns. A synthetic assignment means a constructed scenario grounded in the selected project, never an unrelated generic exercise. Results apply to the tested project and conditions, not to all projects or the model in general.
 
 This is a design, not authorization to execute a campaign. Existing approvals, routing, saved results and native settings remain intact. No product code or local model assessment generation is part of this document change.
+
+## What an assessment and approval mean
+
+Keep the existing role, specialty and task-scope concepts, and add the project in which the evidence was established. Do not introduce a separate user-facing “task contract” concept or a blanket “approved for this project” permission.
+
+The report should make this statement concrete:
+
+> For Project A, this model demonstrated regression-test writing in the Tester role, for bounded Python changes at moderate difficulty and the recorded context limits, with native verification.
+
+This is an illustrative format, not a claim about any currently assessed model. Record:
+
+| Dimension | Meaning |
+| --- | --- |
+| Project | The specific project this evidence and any resulting approval apply to. |
+| Model | Exact artifact, runtime and effective settings used. |
+| Role | Assigned responsibility, such as Builder or Tester; a role label alone does not establish competence. |
+| Specialty and task scope | The concrete work demonstrated, including capability and language or domain. |
+| Demonstrated level | Tested difficulty, context bounds and allowed assistance, supported by the individual outcomes. |
+| Verification | Required independent checks and the evidence supporting each conclusion. |
+
+“Level” is a readable account of the existing difficulty and scope evidence, not an additional universal rank. A model may qualify for moderate test-writing and only simple code changes in the same project. Passing one specialty never qualifies every responsibility associated with its role. Unsupported responsibilities remain not assessed.
+
+Assessment records what was demonstrated. Approval separately permits the owner-selected subset of that scope for this project. Ordinary tasks remain independently verified. Keep one model identity/profile with separately identifiable project approval grants; do not duplicate model identity or invent a new role system merely to add project context. Temporary unapproved assessment profiles remain part of the existing assessment workflow.
 
 ## Approach and user experience
 
@@ -89,7 +112,11 @@ Task coverage and native-effort savings are different. Estimate native effort av
 
 Bind evidence to existing project identity, snapshot/task hashes, model artifact and runtime, effective settings, toolchains, assignment version, allowed assistance and verification version. Reuse `projects.py::resolve_project_identity` and existing private measurement records where suitable; do not create a parallel project registry. Sibling projects do not share approval through similar names, languages or a shared model.
 
-New recommendations and resulting approvals must carry the selected project and tested scope through eligibility checks. Ordinary routing must verify those bindings plus existing approval, capacity and native verification requirements. Do not silently convert existing model-global approvals into project qualification, revoke them, or expand them. Preserve their legacy provenance explicitly. Historical reports and replayed responses remain immutable and readable; they do not acquire project evidence retroactively.
+New recommendations and resulting approvals must carry the selected project and existing tested task scope through eligibility checks. Ordinary routing must verify the requesting project, allowed scope, current approval, capacity and native verification requirements. Role and specialty labels remain descriptive metadata linked to evidence; they cannot bypass capability, difficulty or context checks.
+
+A Project A approval never automatically authorizes Project B. Relevant evidence may be reused when preparing Project B's assessment, after checking its compatibility and identifying gaps, but Project B still needs its own explicit approval. Ordinary worktrees of the same project follow the existing canonical project identity rules; a matching language or model name is not project identity.
+
+Do not silently convert existing model-global approvals into project qualification, revoke them, or expand them. Preserve their legacy provenance explicitly. Offer project-specific replacement only through an explicit owner-authorized migration; this design leaves that migration opt-in rather than changing existing permissions. Historical reports and replayed responses remain immutable and readable; they do not acquire project evidence retroactively.
 
 A project revision change alone need not invalidate all evidence. Reuse requires matching relevant task contracts, dependencies, checker environment and context assumptions. A changed artifact/runtime or material project assumptions requires review before evidence can justify new scope. If current compatibility cannot be established, mark the recommendation stale; do not silently reuse it. Exact invalidation checks belong in the implementation plan.
 
@@ -97,7 +124,7 @@ Source facts inspected on 2026-10-23 at `f065e8c771732e7ca83b4b069398854298acfee
 
 Extend both skill entry points and their operations, current assessment preparation/selection/reporting, project-bound approval and eligibility, versioned manifests/receipts and worker lifecycle. Reuse queue ownership, native verification and comparison helpers. Keep production delivery measurements separate from replay or constructed scenarios. No second runner service, unrestricted shell, new provider or automatic cross-project routing is part of this design.
 
-Required implementation proof covers permission/project selection in both entry points; source-grounded task provenance; reference and real-framework validation; representative weights and honest coverage denominators; cross-project eligibility rejection for new scoped approvals with unchanged legacy state; frozen consent; cycle lineage; hidden-check isolation; timeout and ambiguous cancellation recovery; capability independent of speed; comparison asymmetry; and unchanged historical reports. Run focused tests, the repository's offline suite and `git diff --check`. Offline tests do not establish real runtime termination, large-output support or model reliability.
+Required implementation proof covers permission/project selection in both entry points; source-grounded task provenance; reference and real-framework validation; representative weights and honest coverage denominators; cross-project eligibility rejection for new scoped approvals with unchanged legacy state; distinct project grants for the same model; role labels unable to bypass tested scope; frozen consent; cycle lineage; hidden-check isolation; timeout and ambiguous cancellation recovery; capability independent of speed; comparison asymmetry; and unchanged historical reports. Run focused tests, the repository's offline suite and `git diff --check`. Offline tests do not establish real runtime termination, large-output support or model reliability.
 
 ## Delivery and remaining decisions
 
@@ -106,3 +133,5 @@ This document supersedes fixed specialty quotas and generic synthetic assignment
 After independent design review and owner approval, write the implementation plan. No product implementation, installation, changed approvals or local assessment execution has occurred in this design phase.
 
 Independent builder review on 2026-10-23 found no consequential planning gaps. It checked project identity, existing approval/scheduler contracts, source-grounded task selection, coverage denominators, sparse-evidence limits and capability/speed separation. This was a design review, not runtime qualification.
+
+The owner's subsequent clarification adds project context to existing role, specialty, difficulty and context evidence. The coordinator checked the document for consistent report wording, project-specific approval boundaries, evidence reuse and opt-in legacy migration. This clarification changed documentation only.
