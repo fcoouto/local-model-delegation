@@ -28,9 +28,9 @@ def reconcile_native(store, job_id, native_tasks):
     return envelope(store.job(job_id))
 
 
-def read_input(path):
+def read_input(path, *, max_bytes=MAX_ANSWER_BYTES):
     path = Path(path)
-    if path.is_symlink() or path.stat().st_size > MAX_ANSWER_BYTES: raise ValueError("unsafe_input")
+    if path.is_symlink() or path.stat().st_size > max_bytes: raise ValueError("unsafe_input")
     return load_json(path.read_text())
 
 
@@ -257,10 +257,13 @@ def main(argv=None):
                 from .project_runs import advance_cycle
                 result = advance_cycle(args.state_dir, args.assessment_id, args.job)
             elif args.action == 'project-preview':
-                from .project_assessment import project_preview
-                result = project_preview(args.project, read_input(args.selection), args.owner_reference)
+                from .project_assessment import project_preview, MAX_PROJECT_PACK_BYTES
+                result = project_preview(args.project, read_input(args.selection, max_bytes=MAX_PROJECT_PACK_BYTES), args.owner_reference)
             elif args.action == 'choices': result = assessment_choices()
-            elif args.action == 'prepare': result = prepare_assessment(args.state_dir, args.profile_id, read_input(args.selection), source_profile_id=args.source_profile_id, project_root=args.project, owner_reference=args.owner_reference)
+            elif args.action == 'prepare':
+                from .project_assessment import MAX_PROJECT_PACK_BYTES
+                selection = read_input(args.selection, max_bytes=MAX_PROJECT_PACK_BYTES if args.project else MAX_ANSWER_BYTES)
+                result = prepare_assessment(args.state_dir, args.profile_id, selection, source_profile_id=args.source_profile_id, project_root=args.project, owner_reference=args.owner_reference)
             elif args.action == 'consent': result = consent_assessment(args.state_dir, args.assessment_id, args.preview_digest, args.owner_reference)
             elif args.action in ('pause', 'stop', 'resume'): result = control_assessment(args.state_dir, args.assessment_id, args.action)
             elif args.action == "begin": result = begin_assessment(args.state_dir, args.profile_id, args.owner_reference)

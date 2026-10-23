@@ -137,3 +137,47 @@ class ProjectPreparation(Fixture):
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(out.getvalue())['assignment_count'], 8)
         self.assertFalse(self.state.exists())
+
+    def test_repository_metadata_pack_exceeds_answer_limit_without_inference(self):
+        from local_model_delegation.cli import main, read_input
+        from local_model_delegation.contracts import canonical, digest, MAX_ANSWER_BYTES
+        pack = self.pack()
+        files = {f'package/module_{i:04d}.py': {'size': 123, 'sha256': 'a'*64} for i in range(3000)}
+        descriptor = {'root': str(self.project), 'manifest': {
+            'schema_version': 1, 'files': files, 'digest': digest(files)}}
+        for task in pack['domains'][0]['assignments']:
+            task['execution'] = {'schema_version': 2, 'source': descriptor}
+        self.assertGreater(len(canonical(pack).encode()), MAX_ANSWER_BYTES)
+        self.assertEqual(project.project_preview(self.project, pack, 'owner')['assignment_count'], 8)
+        path = self.root/'repository-pack.json'
+        path.write_text(canonical(pack))
+        with self.assertRaisesRegex(ValueError, 'unsafe_input'):
+            read_input(path)
+        out = io.StringIO()
+        with redirect_stdout(out), patch('local_model_delegation.lmstudio.Runtime', side_effect=AssertionError('no inference')):
+            result = main(['--state-dir', str(self.state), 'assessment', 'project-preview',
+                           '--project', str(self.project), '--selection', str(path), '--owner-reference', 'owner'])
+        self.assertEqual(result, 0)
+        self.assertFalse(json.loads(out.getvalue())['ready_for_assessment'])
+        self.assertFalse(self.state.exists())
+        for project_args, reason in [(['--project', str(self.project), '--owner-reference', 'owner'], 'unknown_profile'),
+                                     ([], 'unsafe_input')]:
+            out = io.StringIO()
+            with redirect_stdout(out), patch('local_model_delegation.lmstudio.Runtime', side_effect=AssertionError('no inference')):
+                result = main(['--state-dir', str(self.state), 'assessment', 'prepare',
+                               '--profile-id', 'unconfigured', '--selection', str(path), *project_args])
+            self.assertNotEqual(result, 0)
+            self.assertIn(reason, out.getvalue())
+            self.assertFalse(self.state.exists())
+
+    def test_repository_metadata_does_not_expand_inline_or_total_pack_limits(self):
+        from local_model_delegation.contracts import MAX_ANSWER_BYTES
+        pack = self.pack()
+        tasks = pack['domains'][0]['assignments']
+        tasks[0]['execution'] = {'schema_version': 2, 'source': {}}
+        tasks[1]['execution'] = {'files': {'huge.py': 'x'*MAX_ANSWER_BYTES}}
+        with self.assertRaisesRegex(ValueError, 'oversized_project_pack'):
+            project.project_preview(self.project, pack, 'owner')
+        tasks[1]['execution'] = {'schema_version': 2, 'source': {'padding': 'x'*(32*1024*1024)}}
+        with self.assertRaisesRegex(ValueError, 'oversized_project_pack'):
+            project.project_preview(self.project, pack, 'owner')

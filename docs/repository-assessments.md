@@ -18,6 +18,8 @@ Each check has exactly `id`, `argv`, `timeout_seconds`, `expected_tests`, and `s
 
 Use the existing `assessment project-preview` and `assessment prepare` commands. Preparation validates every reference and requires a meaningful held-out base failure. It pins source, assets, Docker executable/engine/images, model/settings and helper identity. Consent binds the returned preview. Docker dependency acquisition happens separately during authorized preparation; checks never pull images or install packages.
 
+Project selection files and canonical packs are bounded to 32 MiB to accommodate repository descriptor metadata across assignments. Task descriptions and legacy inline execution content together retain the 2 MiB limit; only schema-2 repository execution descriptors use the additional allowance. A draft preview does not validate executable descriptors or authorize inference: preparation still verifies every snapshot, execution contract and reference.
+
 ## Bounded source and edit protocol
 
 The model receives the task, edit allowlist, workspace digest, initial paginated source index and remaining context allowance. It can return one of:

@@ -11,6 +11,7 @@ from .projects import assessment_projects, resolve_project_identity
 
 DIFFICULTIES = COMPLEXITIES
 ROLES = {'Coordinator', 'Scout', 'Builder', 'Tester', 'Reviewer', 'Scribe', 'Investigator'}
+MAX_PROJECT_PACK_BYTES = 32 * 1024 * 1024
 
 
 def difficulty_distribution(count):
@@ -83,7 +84,8 @@ def project_preview(project_root, pack, owner_reference):
         raise ValueError('invalid_project_pack')
     if pack['project'] != identity:
         raise ValueError('project_identity_mismatch')
-    if len(canonical(pack).encode()) > MAX_ANSWER_BYTES:
+    inline_bytes = len(canonical(pack).encode())
+    if inline_bytes > MAX_PROJECT_PACK_BYTES:
         raise ValueError('oversized_project_pack')
     domains = pack['domains']
     if not isinstance(domains, list) or not 1 <= len(domains) <= 16:
@@ -126,12 +128,19 @@ def project_preview(project_root, pack, owner_reference):
                 raise ValueError('missing_historical_revision')
             if task['execution'] is not None and not isinstance(task['execution'], dict):
                 raise ValueError('invalid_project_execution')
+            execution = task['execution']
+            if (isinstance(execution, dict) and type(execution.get('schema_version')) is int
+                    and execution['schema_version'] == 2):
+                # Repository descriptors are metadata; legacy inline content keeps its original cap.
+                inline_bytes -= len(canonical(execution).encode()) - len('null')
         if counts != expected:
             raise ValueError('project_difficulty_distribution')
         reports.append({'id': domain['id'], 'specialty': domain['specialty'], 'role': domain['role'],
                         'capability': domain['capability'], 'language': domain['language'],
                         'weight': domain['weight'], 'difficulty_counts': counts,
                         'assignments': [{k: v for k, v in t.items() if k != 'execution'} for t in tasks]})
+    if inline_bytes > MAX_ANSWER_BYTES:
+        raise ValueError('oversized_project_pack')
     workload = pack['workload']
     _fields(workload, 'owner_reference basis unassessed_weight', 'invalid_project_workload')
     weights = [d['weight'] for d in domains] + [workload['unassessed_weight']]
