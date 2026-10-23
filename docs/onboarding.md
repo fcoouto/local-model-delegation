@@ -41,11 +41,13 @@ The setup skill is the source of truth for the remaining procedure:
 | Decision | What it authorizes |
 |---|---|
 | Install and initialize | Make the plugin available and prepare private state |
-| Optional standing assessment consent | Run package-owned synthetic assessments; consent is revocable |
+| Consent for one assessment run | Run its frozen synthetic trials; pause/resume and terminal stop apply only to that run |
 | Exact-model approval | Approve the exact model/settings and a bounded provisional operating scope |
 | Routing activation | Allow eligible project tasks to use approved local models |
 
 Setup grants none of the later decisions. If the owner declines synthetic assessments, do not run them. Offer the practical representative-task path only if useful; it still needs explicit exact-model provisional approval. Declining all model use leaves new profiles unapproved. Offer a resume step without repeating the consent request. A successful assessment does not authorize activation.
+
+For assessment without onboarding, use [Assess my Model](../skills/assess-my-model/SKILL.md). Start with one focused ability; all supported abilities is explicit. Setup reuses that run's valid evidence only when the owner requests onboarding. Existing unversioned standing-consent assessments remain a compatibility path, not permission for new runs.
 
 ### 5. Verify and hand back a checkpoint
 

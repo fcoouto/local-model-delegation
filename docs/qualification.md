@@ -2,6 +2,8 @@
 
 Start with a few useful tasks, one slot, native verification and explicit fallback. A mandatory synthetic campaign is unnecessary. Model approval is permission for a provisional operating scope, not proof of quality or savings.
 
+To assess without project-use approval, use [Assess my Model](../skills/assess-my-model/SKILL.md). It offers focused synthetic coverage by default, optional full coverage and consent for each frozen run. Its unapproved profile, one-slot trials and offline report reuse Setup's core. Synthetic trials cannot use native fallback; a failure remains evidence. Existing approvals stay unchanged, and onboarding requires an explicit request.
+
 1. Verify the exact local artifact, runtime identity, loaded settings and available context. Preserve runtime guardrails and native authentication. No automatic load or lifecycle operation is implied.
 2. Explain the proposed capabilities, limitations and operating budget. Obtain any missing owner approval for that exact model/settings/scope and routing activation. Reuse existing authorization. A normal starting input budget is 65,536 UTF-8 bytes of serialized supplied context; choose a smaller budget when runtime context or the task requires it. This is an operational limit, not a measured model ceiling. Changing it requires explicit owner authorization.
 3. Select a small bounded set of actual project tasks: a cited multi-file summary, a test addition, and a small code change only when a real requirement exists. Supply relevant instructions, related files, acceptance criteria and protected paths. Avoid manufactured bugs, irrelevant padding and automatic trial repetition. Test-writing permission must be explicit even when code changes were approved earlier.

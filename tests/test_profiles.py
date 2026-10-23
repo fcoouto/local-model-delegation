@@ -111,6 +111,88 @@ class Profiles(Fixture):
         with self.assertRaises(ValueError): model_identity(profile)
 
 
+class BionicProfiles(Fixture):
+    def virtual_profile(self):
+        profile = self.profile()
+        path = self.root / "runtime-catalog.json"
+        concrete = json.loads(path.read_text())["models"][0]
+        concrete.update(format="safetensors", originalIndexedModelIdentifier="test/fictional-model")
+        alias_root = self.root / "hub"
+        alias_root.mkdir()
+        (alias_root / "model.yaml").write_text("model: test/fictional-model\n")
+        alias = {**concrete, "defaultIdentifier": "publisher/alias",
+                 "indexedModelIdentifier": "publisher/alias", "user": "publisher",
+                 "containingDirAbsolutePath": str(alias_root),
+                 "allFiles": [{"absPath": str(alias_root / "model.yaml")}],
+                 "virtual": {"concreteModelIndexedModelIdentifier": "test/fictional-model"}}
+        catalog = {"models": [alias, concrete], "conflicts": [], "errors": []}
+        path.write_text(json.dumps(catalog))
+        profile["model_id"] = "publisher/alias"
+        return profile, path, catalog
+
+    def test_virtual_model_uses_concrete_weights_and_alias_runtime_metadata(self):
+        from local_model_delegation.profiles import model_identity
+        from local_model_delegation.lmstudio import select_loaded
+        profile, _, _ = self.virtual_profile()
+        binding = model_identity(profile)
+        self.assertEqual(binding["files"], [str(self.artifact / "weights.bin")])
+        self.assertEqual(binding["metadata"]["format"], "mlx")
+        self.assertEqual(binding["metadata"]["publisher"], "publisher")
+        snapshot = {"models": [{"key": "publisher/alias", "type": "llm",
+                    "format": "mlx", "architecture": "fictional", "publisher": "publisher",
+                    "params_string": "1B", "quantization": {"name": "4bit", "bits_per_weight": 4},
+                    "loaded_instances": [{"id": "alias-instance", "config": {"parallel": 4, "context_length": 8192}}]}]}
+        self.assertEqual(select_loaded(snapshot, profile, binding)["instance_id"], "alias-instance")
+        snapshot["models"][0]["quantization"]["bits_per_weight"] = 8
+        with self.assertRaisesRegex(ValueError, "runtime_binding_mismatch"):
+            select_loaded(snapshot, profile, binding)
+
+    def test_direct_concrete_identifier_is_not_ambiguous_with_alias_origin(self):
+        from local_model_delegation.profiles import model_identity
+        profile, _, _ = self.virtual_profile()
+        profile["model_id"] = "test/fictional-model"
+        self.assertEqual(model_identity(profile)["metadata"]["publisher"], "test")
+
+    def test_virtual_mapping_rejects_missing_ambiguous_or_wrong_concrete_inventory(self):
+        from local_model_delegation.profiles import model_identity
+        profile, path, original = self.virtual_profile()
+        for failure in ["missing", "duplicate", "root", "inventory", "chain", "format"]:
+            catalog = copy.deepcopy(original)
+            concrete = catalog["models"][1]
+            if failure == "missing": catalog["models"].pop()
+            elif failure == "duplicate": catalog["models"].append(copy.deepcopy(concrete))
+            elif failure == "root": concrete["concreteModelDirAbsolutePath"] = str(self.project)
+            elif failure == "inventory": concrete["allFiles"] = []
+            elif failure == "chain": concrete["virtual"] = {"concreteModelIndexedModelIdentifier": "publisher/alias"}
+            elif failure == "format": concrete["format"] = "gguf"
+            path.write_text(json.dumps(catalog))
+            with self.subTest(failure=failure), self.assertRaises(ValueError): model_identity(profile)
+
+    def test_alias_file_changes_revoke_approval_without_changing_weights(self):
+        from local_model_delegation.profiles import model_identity
+        profile, _, _ = self.virtual_profile()
+        profile["approval"]["model_identity"] = model_identity(profile)
+        identity = fingerprint_artifact(self.artifact, ["weights.bin"])
+        self.assertTrue(eligible(profile, identity, "python_code_change"))
+        (self.root / "hub/model.yaml").write_text("model: another-model\n")
+        self.assertFalse(eligible(profile, identity, "python_code_change"))
+
+    def test_alias_files_cannot_escape_or_follow_symlinks(self):
+        from local_model_delegation.profiles import model_identity
+        profile, path, original = self.virtual_profile()
+        outside = self.root / "outside.yaml"
+        outside.write_text("outside")
+        catalog = copy.deepcopy(original)
+        catalog["models"][0]["allFiles"] = [{"absPath": str(outside)}]
+        path.write_text(json.dumps(catalog))
+        with self.assertRaises(ValueError): model_identity(profile)
+        path.write_text(json.dumps(original))
+        alias_file = self.root / "hub/model.yaml"
+        alias_file.unlink()
+        alias_file.symlink_to(outside)
+        with self.assertRaises(ValueError): model_identity(profile)
+
+
 class VersionedProfiles(Fixture):
     def api(self, name):
         from local_model_delegation import profiles

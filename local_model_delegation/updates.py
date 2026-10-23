@@ -97,6 +97,8 @@ def _settled_assessments(store, db):
 
 
 def _disabled(root):
+    from .onboarding import require_assessments_paused
+    require_assessments_paused(root)
     config = read_config(root)
     if config.get('routing_enabled') is not False or config.get('assessment_policy', {}).get('enabled', False) is not False:
         raise ValueError('admission_must_be_disabled')

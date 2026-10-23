@@ -51,20 +51,40 @@ def model_identity(profile):
             raise ValueError("runtime_binding_unavailable")
         matches = [entry for entry in catalog["models"] if profile["model_id"] in
                    [entry.get("defaultIdentifier"), entry.get("indexedModelIdentifier"),
-                    entry.get("originalIndexedModelIdentifier"), *entry.get("autoIdentifiers", [])]]
+                    *entry.get("autoIdentifiers", [])]]
+        if not matches:
+            matches = [entry for entry in catalog["models"]
+                       if profile["model_id"] == entry.get("originalIndexedModelIdentifier")]
         if len(matches) != 1: raise ValueError("runtime_binding_unavailable")
         entry = matches[0]
+        concrete = entry
+        virtual_binding = {}
+        if "virtual" in entry:
+            target = entry["virtual"]["concreteModelIndexedModelIdentifier"]
+            candidates = [item for item in catalog["models"] if item["indexedModelIdentifier"] == target]
+            if len(candidates) != 1 or "virtual" in candidates[0]:
+                raise ValueError("runtime_binding_unavailable")
+            concrete = candidates[0]
+            if any(entry[key] != concrete[key] for key in ("concreteModelDirAbsolutePath", "format", "arch", "quant")):
+                raise ValueError("runtime_binding_mismatch")
+            # Hub files control alias behavior; bind their bytes as well as the concrete weights.
+            alias_root = Path(entry["containingDirAbsolutePath"])
+            alias_files = [str(Path(item["absPath"]).relative_to(alias_root)) for item in entry["allFiles"]]
+            virtual_binding = {"virtual_model": {"concrete_identifier": target,
+                               "mapping_digest": digest(entry["virtual"]), "root": str(alias_root),
+                               "artifact": fingerprint_artifact(alias_root, alias_files)}}
         root = Path(profile["artifact"]["root"])
         expected = sorted(str(safe_path(root, name)) for name in profile["artifact"]["files"])
-        files = sorted(item["absPath"] for item in entry["allFiles"])
-        if entry["concreteModelDirAbsolutePath"] != str(root) or files != expected:
+        files = sorted(item["absPath"] for item in concrete["allFiles"])
+        if concrete["concreteModelDirAbsolutePath"] != str(root) or files != expected:
             raise ValueError("runtime_binding_mismatch")
-        metadata = {"format": entry["format"], "architecture": entry["arch"], "publisher": entry["user"],
+        metadata = {"format": "mlx" if entry["format"] == "safetensors" else entry["format"],
+                    "architecture": entry["arch"], "publisher": entry["user"],
                     "params_string": entry["params"],
                     "quantization": {"name": entry["quant"]["name"], "bits_per_weight": entry["quant"]["bits"]}}
         return {"endpoint": profile["endpoint"], "adapter": profile["adapter"], "model_id": profile["model_id"],
                 "runtime_catalog": str(path), "indexed_identifier": entry["indexedModelIdentifier"],
-                "artifact_root": str(root), "files": files, "metadata": metadata}
+                "artifact_root": str(root), "files": files, "metadata": metadata, **virtual_binding}
     except (OSError, KeyError, TypeError, AttributeError):
         raise ValueError("runtime_binding_unavailable") from None
 
@@ -93,7 +113,7 @@ def eligible(profile: dict[str, Any], identity: dict[str, Any], capability: str)
                 and profile.get("schema_version") == 2 and approval.get("scope") == profile.get("scope"))
 
 
-def validate_profile(p, capability):
+def validate_profile_fields(p, capability):
     try:
         settings, fallback = p["request_settings"], p["fallback"]
         if (p.get("schema_version") != 2 or not re.fullmatch(r"[A-Za-z0-9_-]+", p["profile_id"])
@@ -113,6 +133,14 @@ def validate_profile(p, capability):
         endpoint = urlsplit(p["endpoint"])
         if endpoint.scheme != "http" or endpoint.hostname not in ("127.0.0.1", "::1") or endpoint.username or endpoint.password or endpoint.path not in ("", "/") or endpoint.query or endpoint.fragment:
             raise ValueError("unsupported_endpoint")
+    except (KeyError, TypeError, OSError):
+        raise ValueError("invalid_profile") from None
+    return p
+
+
+def validate_profile(p, capability):
+    validate_profile_fields(p, capability)
+    try:
         identity = fingerprint_artifact(Path(p["artifact"]["root"]), p["artifact"]["files"])
         if not eligible(p, identity, capability):
             raise ValueError("model_not_approved")
@@ -160,7 +188,7 @@ def read_profile_by_id(state_dir, profile_id, capability):
     return validate_profile(profile, capability)
 
 
-def authorize_job(store, job):
+def authorize_job(store, job, *, purpose='submit'):
     if job["brief"].get("schema_version") != 2: raise ValueError("invalid_brief")
     if job.get("native_task_id") and not job["profile"]:
         from .contracts import validate_fallback
@@ -168,7 +196,7 @@ def authorize_job(store, job):
         return {}
     if job.get("route_data", {}).get("assessment"):
         from .onboarding import authorize_assessment
-        current = authorize_assessment(store.root, job["brief"], job["route_data"]["assessment"])
+        current = authorize_assessment(store.root, job["brief"], job["route_data"]["assessment"], purpose=purpose, job=job)
         if current["profile_id"] != job["profile"]["profile_id"]: raise ValueError("assessment_scope_mismatch")
         return current
     profile = job["profile"]

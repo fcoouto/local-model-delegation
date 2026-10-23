@@ -41,7 +41,47 @@ def _binding(profile):
 
 def _assessment(state_dir, identifier):
     if not isinstance(identifier, str) or not re.fullmatch('[a-f0-9]{32}', identifier): raise ValueError('invalid_assessment_id')
-    return load_json((Path(state_dir) / 'assessments' / identifier / 'assessment.json').read_text())
+    record = load_json((Path(state_dir) / 'assessments' / identifier / 'assessment.json').read_text())
+    if not isinstance(record, dict): raise ValueError('invalid_assessment_record')
+    new_fields = {'authorization', 'preview', 'preview_digest', 'profile_snapshot', 'source_profile'}
+    if 'schema_version' not in record:
+        if new_fields & record.keys(): raise ValueError('invalid_assessment_record')
+        return record
+    try:
+        preview, auth = record['preview'], record['authorization']
+        trials = record['trials']
+        if (type(record['schema_version']) is not int or record['schema_version'] != 1
+                or record['assessment_id'] != identifier or auth['mode'] != 'run'
+                or auth['state'] not in ('draft', 'authorized', 'paused', 'stopped', 'invalidated', 'complete')
+                or set(auth) != {'mode', 'state', 'owner_reference', 'timestamp', 'preview_digest'}
+                or digest(preview) != record['preview_digest'] or auth['preview_digest'] != record['preview_digest']
+                or preview['profile_digest'] != digest(record['profile_snapshot'])
+                or preview['profile_id'] != record['profile_id'] or record['profile_snapshot']['profile_id'] != record['profile_id']
+                or preview['binding'] != record['binding'] or preview['source_profile'] != record['source_profile']
+                or preview['fixture_digest'] != record['fixture_digest'] or record['capacity_target'] != 1
+                or preview['max_submissions'] != len(trials) or not trials
+                or len({t['trial_id'] for t in trials}) != len(trials)
+                or not isinstance(record['receipts'], dict)
+                or not set(record['receipts']) <= {t['trial_id'] for t in trials}):
+            raise ValueError('invalid_assessment_record')
+        from .profiles import generation_settings
+        frozen = []
+        for trial in trials:
+            brief = trial['brief']
+            validate_brief(brief)
+            if (digest(brief) != trial['brief_hash'] or brief['task_key'] != trial['trial_id']
+                    or brief['origin_chat_id'] != 'assessment-' + identifier): raise ValueError('invalid_assessment_record')
+            frozen.append({'trial_id': trial['trial_id'], 'brief_hash': trial['brief_hash'],
+                           'settings': generation_settings(brief, record['profile_snapshot'])})
+        if frozen != preview['trials']: raise ValueError('invalid_assessment_record')
+        if auth['state'] == 'draft':
+            if auth['owner_reference'] is not None or auth['timestamp'] is not None: raise ValueError('invalid_assessment_record')
+        elif auth['state'] in ('authorized', 'paused', 'complete'):
+            if not all(isinstance(auth[k], str) and auth[k].strip() for k in ('owner_reference', 'timestamp')):
+                raise ValueError('invalid_assessment_record')
+    except (KeyError, TypeError, AttributeError, ValueError):
+        raise ValueError('invalid_assessment_record') from None
+    return record
 
 
 def _policy(state_dir, owner_reference):
@@ -57,11 +97,22 @@ def begin_assessment(state_dir, profile_id, owner_reference):
     binding = _binding(profile)
     manifest = load_json(fixtures_path().read_text())
     identifier = uuid.uuid4().hex
+    trials = _build_trials(state_dir, identifier, profile, manifest)
+    assessment = {'assessment_id': identifier, 'permit_token': uuid.uuid4().hex + uuid.uuid4().hex,
+                  'profile_id': profile_id, 'owner_reference': owner_reference, 'binding': binding,
+                  'fixture_digest': digest(manifest), 'capacity_target':1, 'trials': trials, 'receipts': {}}
+    atomic_json(Path(state_dir) / 'assessments' / identifier / 'assessment.json', assessment)
+    return assessment
+
+
+def _build_trials(state_dir, assessment_id, profile, manifest, *, groups=None):
+    identifier = assessment_id
     root = private_dir(Path(state_dir) / 'assessments' / identifier)
     target=1
     trials = []
     for case in manifest['cases']:
-        if case['capability'] in PYTHON_CHANGE_CAPABILITIES and case['capability'] not in profile['capabilities']:
+        if groups is not None and _case_group(case) not in groups: continue
+        if groups is None and case['capability'] in PYTHON_CHANGE_CAPABILITIES and case['capability'] not in profile['capabilities']:
             compatible = next((c for c in profile['capabilities'] if c in PYTHON_CHANGE_CAPABILITIES), None)
             if compatible: case = {**case, 'capability':compatible}
         if case['capability'] not in profile['capabilities']: continue
@@ -85,23 +136,194 @@ def begin_assessment(state_dir, profile_id, owner_reference):
                 # Native coordinator must also verify semantics; syntax alone never qualifies a trial.
                 import shutil
                 executable = str(Path(sys.executable).resolve()) if case['language']=='python' else shutil.which('node')
-                if not executable: continue
+                if not executable:
+                    if groups is not None: raise ValueError('assessment_checker_unavailable')
+                    continue
                 argv = [executable, '-m', 'compileall', '-q', '.'] if case['language']=='python' else [str(Path(executable).resolve()), '--check', 'helper.js']
                 brief['acceptance']['checks'] = [{'id':'syntax','argv':argv,'cwd':'.','timeout_seconds':30}]
             validate_brief(brief)
             trials.append({'trial_id': trial_id, 'case_id': case['id'], 'brief': brief, 'brief_hash': digest(brief)})
     if not trials: raise ValueError('assessment_scope_unsupported')
-    assessment = {'assessment_id': identifier, 'permit_token': uuid.uuid4().hex + uuid.uuid4().hex,
-                  'profile_id': profile_id, 'owner_reference': owner_reference, 'binding': binding,
-                  'fixture_digest': digest(manifest), 'capacity_target':target, 'trials': trials, 'receipts': {}}
-    atomic_json(root / 'assessment.json', assessment)
-    return assessment
+    return trials
 
 
-def authorize_assessment(state_dir, brief, permit):
+def _case_group(case):
+    return {k: case[k] for k in ('capability', 'language', 'complexity', 'context_bucket')}
+
+
+def assessment_choices():
+    groups = []
+    for case in load_json(fixtures_path().read_text())['cases']:
+        group = _case_group(case)
+        match = next((g for g in groups if _case_group(g) == group), None)
+        if match is None:
+            match = {**group, 'distinct_cases': 0, 'trials': 0}
+            groups.append(match)
+        match['distinct_cases'] += 1
+        match['trials'] += 2
+    return {'groups': groups, 'total_trials': sum(g['trials'] for g in groups)}
+
+
+def _verification_snapshot(trials):
+    executables = {str(Path(sys.executable).resolve())}
+    executables.update(check['argv'][0] for t in trials for check in t['brief']['acceptance']['checks'])
+    return {name: fingerprint_artifact(Path(name).parent, [Path(name).name]) for name in sorted(executables)}
+
+
+def prepare_assessment(state_dir, profile_id, selection, *, source_profile_id=None):
+    from .lmstudio import Runtime, select_loaded
+    from .profiles import validate_profile_fields, generation_settings
+    from .validation import _qualified_isolation
+    from .worker import context_fits
+    from .package import pin_runtime_bundle
+    choices = assessment_choices()['groups']
+    all_groups = [_case_group(g) for g in choices]
+    if isinstance(selection, dict) and set(selection) == {'all'} and selection['all'] is True:
+        groups = all_groups
+    elif (isinstance(selection, dict) and set(selection) == {'groups'}
+          and isinstance(selection['groups'], list) and len(selection['groups']) == 1
+          and selection['groups'][0] in all_groups):
+        groups = selection['groups']
+    else: raise ValueError('invalid_assessment_selection')
+    profile = _profile(state_dir, profile_id)
+    if profile.get('approval') is not None or profile.get('scope') or profile.get('qualification_status') != 'needs_assessment':
+        raise ValueError('assessment_requires_unapproved_profile')
+    for group in groups:
+        validate_profile_fields(profile, group['capability'])
+        if group['capability'] not in profile['capabilities']: raise ValueError('assessment_scope_unsupported')
+    binding = _binding(profile)
+    if binding['runtime']['metadata']['format'] not in ('gguf', 'mlx', 'splash'):
+        raise ValueError('assessment_model_unsupported')
+    source_profile = None
+    if source_profile_id is not None:
+        source = _profile(state_dir, source_profile_id)
+        source_binding = _binding(source)
+        if source_profile_id == profile_id or any(source_binding[k] != binding[k] for k in ('artifact', 'runtime')):
+            raise ValueError('assessment_source_mismatch')
+        source_profile = {'profile_id': source_profile_id, 'binding': source_binding,
+                          'approval_at_preparation': source.get('approval')}
+    runtime = Runtime(profile['endpoint'], token_env=profile.get('token_env'))
+    loaded = select_loaded(runtime.list_models(), profile, binding['runtime'])
+    if loaded is None: raise ValueError('assessment_model_unavailable')
+    if any(g['capability'] != 'file_summary' for g in groups) and not _qualified_isolation():
+        raise ValueError('isolation_unsupported')
+    identifier = uuid.uuid4().hex
+    manifest = load_json(fixtures_path().read_text())
+    trials = _build_trials(state_dir, identifier, profile, manifest, groups=groups)
+    if any(not context_fits(t['brief'], profile, loaded) for t in trials):
+        raise ValueError('assessment_context_unfit')
+    bundle = pin_runtime_bundle(state_dir)
+    package_manifest = Path(__file__).resolve().parents[1] / 'plugin.json'
+    package = load_json(package_manifest.read_text()) if package_manifest.is_file() else {}
+    preview = {'profile_id': profile_id, 'binding': binding, 'source_profile': source_profile,
+               'profile_digest': digest(profile),
+               'prepared_at': datetime.now(timezone.utc).isoformat(),
+               'package': {k: package.get(k) for k in ('name', 'version')},
+               'groups': groups, 'distinct_cases': len({t['case_id'] for t in trials}),
+               'max_submissions': len(trials), 'concurrency': 1, 'loaded_config': loaded['config'],
+               'fixture_digest': digest(manifest), 'runtime_bundle': bundle.name,
+               'verification': _verification_snapshot(trials),
+               'trials': [{'trial_id': t['trial_id'], 'brief_hash': t['brief_hash'],
+                           'settings': generation_settings(t['brief'], profile)} for t in trials]}
+    preview_digest = digest(preview)
+    record = {'schema_version': 1, 'assessment_id': identifier,
+              'permit_token': uuid.uuid4().hex + uuid.uuid4().hex, 'profile_id': profile_id,
+              'binding': binding, 'fixture_digest': digest(manifest), 'capacity_target': 1,
+              'trials': trials, 'receipts': {}, 'preview': preview, 'preview_digest': preview_digest,
+              'profile_snapshot': profile, 'source_profile': source_profile,
+              'authorization': {'mode': 'run', 'state': 'draft', 'owner_reference': None,
+                                'timestamp': None, 'preview_digest': preview_digest}}
+    atomic_json(Path(state_dir) / 'assessments' / identifier / 'assessment.json', record)
+    _refresh_report(state_dir, identifier)
+    return {'assessment_id': identifier, 'state': 'draft', 'preview': preview, 'preview_digest': preview_digest}
+
+
+def _check_run_bindings(state_dir, assessment, *, check_runtime=False):
+    from .package import runtime_contents, validate_bundle
+    preview = assessment['preview']
+    profile = _profile(state_dir, assessment['profile_id'])
+    if digest(profile) != preview['profile_digest'] or _binding(profile) != assessment['binding']:
+        raise ValueError('assessment_identity_changed')
+    if digest(load_json(fixtures_path().read_text())) != assessment['fixture_digest']:
+        raise ValueError('assessment_scope_mismatch')
+    bundle = Path(state_dir).resolve() / 'runtimes' / preview['runtime_bundle']
+    validate_bundle(bundle, preview['runtime_bundle'])
+    source = Path(__file__).resolve().parents[1]
+    running_digest = source.name if source == bundle else digest(runtime_contents(source)[1])
+    if running_digest != preview['runtime_bundle']: raise ValueError('assessment_helper_changed')
+    if _verification_snapshot(assessment['trials']) != preview['verification']:
+        raise ValueError('assessment_checker_changed')
+    if check_runtime:
+        from .lmstudio import Runtime, select_loaded
+        from .worker import context_fits
+        from .validation import _qualified_isolation
+        loaded = select_loaded(Runtime(profile['endpoint'], token_env=profile.get('token_env')).list_models(),
+                               profile, assessment['binding']['runtime'])
+        if loaded is None: raise ValueError('assessment_model_unavailable')
+        if loaded['config'] != preview['loaded_config']: raise ValueError('assessment_runtime_changed')
+        if any(not context_fits(t['brief'], profile, loaded) for t in assessment['trials']):
+            raise ValueError('assessment_context_unfit')
+        if any(t['brief']['capability'] != 'file_summary' for t in assessment['trials']) and not _qualified_isolation():
+            raise ValueError('isolation_unsupported')
+    return profile
+
+
+def consent_assessment(state_dir, assessment_id, preview_digest, owner_reference):
+    from .worker import ownership
+    if not isinstance(owner_reference, str) or not owner_reference.strip(): raise ValueError('owner_confirmation_required')
+    store = Store(state_dir)
+    with ownership(store, 'plugin-update') as maintenance:
+        if not maintenance: raise ValueError('assessment_busy')
+        with ownership(store, 'assessment-' + assessment_id) as owned:
+            if not owned: raise ValueError('assessment_busy')
+            record = _assessment(state_dir, assessment_id)
+            if record.get('schema_version') != 1: raise ValueError('assessment_run_required')
+            auth = record['authorization']
+            if preview_digest != record['preview_digest']: raise ValueError('assessment_preview_mismatch')
+            if auth['state'] not in ('draft', 'authorized'): raise ValueError('assessment_' + auth['state'])
+            if auth['state'] == 'authorized' and auth['owner_reference'] != owner_reference:
+                raise ValueError('assessment_consent_conflict')
+            _check_run_bindings(state_dir, record, check_runtime=True)
+            if auth['state'] == 'draft':
+                auth.update(state='authorized', owner_reference=owner_reference, timestamp=datetime.now(timezone.utc).isoformat())
+                atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', record)
+            _refresh_report(state_dir, assessment_id)
+            return {'assessment_id': assessment_id, 'state': auth['state']}
+
+
+def authorize_assessment(state_dir, brief, permit, *, purpose='submit', job=None):
+    if purpose not in ('submit', 'verify'): raise ValueError('invalid_authorization_purpose')
+    if not isinstance(permit, dict) or set(permit) != {'assessment_id', 'permit_token'}: raise ValueError('assessment_scope_mismatch')
     assessment = _assessment(state_dir, permit['assessment_id'])
-    _policy(state_dir, assessment['owner_reference'])
     if permit.get('permit_token') != assessment['permit_token']: raise ValueError('assessment_scope_mismatch')
+    if assessment.get('schema_version') == 1:
+        if not any(digest(brief) == trial['brief_hash'] for trial in assessment['trials']):
+            raise ValueError('assessment_scope_mismatch')
+        if purpose == 'submit':
+            state = assessment['authorization']['state']
+            if state != 'authorized': raise ValueError('assessment_consent_required' if state == 'draft' else 'assessment_' + state)
+            profile = _check_run_bindings(state_dir, assessment)
+        else:
+            profile = assessment['profile_snapshot']
+            if (not job or not job.get('attempt_id') or job.get('native_task_id')
+                    or job.get('route_data', {}).get('assessment') != permit
+                    or job.get('profile') != profile or job.get('brief') != brief):
+                raise ValueError('assessment_scope_mismatch')
+            store = Store(state_dir, read_only=True)
+            persisted = store.job(job['job_id'])
+            attempt = store.attempt(job['attempt_id'])
+            from .profiles import generation_settings
+            if (any(persisted[k] != job[k] for k in ('job_id', 'brief', 'profile', 'attempt_id', 'native_task_id'))
+                    or persisted.get('route_data', {}).get('assessment') != permit or attempt['job_id'] != job['job_id']
+                    or not attempt['data'].get('submitted_at')
+                    or attempt['data'].get('request_settings') != generation_settings(brief, profile)):
+                raise ValueError('assessment_scope_mismatch')
+            if _verification_snapshot(assessment['trials']) != assessment['preview']['verification']:
+                raise ValueError('assessment_checker_changed')
+        from .validation import source_matches
+        if not source_matches(brief): raise ValueError('assessment_scope_mismatch')
+        return profile
+    _policy(state_dir, assessment['owner_reference'])
     profile = _profile(state_dir, assessment['profile_id'])
     if _binding(profile) != assessment['binding']: raise ValueError('assessment_identity_changed')
     if (digest(load_json(fixtures_path().read_text())) != assessment['fixture_digest']
@@ -122,10 +344,11 @@ def record_trial(state_dir, assessment_id, receipt):
         trial = next((t for t in assessment['trials'] if t['trial_id']==receipt['trial_id']), None)
         job = store.job(receipt['job_id'])
         permit = {'assessment_id': assessment_id, 'permit_token': assessment['permit_token']}
-        authorize_assessment(state_dir, job['brief'], permit)
+        authorize_assessment(state_dir, job['brief'], permit, purpose='verify', job=job)
         if not trial or digest(job['brief']) != trial['brief_hash'] or job.get('route_data', {}).get('assessment') != permit:
             raise ValueError('assessment_scope_mismatch')
         if job['status'] not in ('accepted','failed','fallback_required'): raise ValueError('trial_not_complete')
+        if assessment.get('schema_version') == 1 and _trial_blocker(store, job): raise ValueError('trial_unresolved')
         value = {k:receipt[k] for k in ('trial_id','job_id')}
         value.update(passed=job['status']=='accepted' and not job['native_task_id'],status=job['status'])
         if 'memory_samples' in receipt:
@@ -138,18 +361,23 @@ def record_trial(state_dir, assessment_id, receipt):
                     or receipt['memory_samples'][-1]['observed_at']<timing.get('finished_at',float('inf'))):
                 raise ValueError('memory_samples_incomplete')
         previous = assessment['receipts'].get(receipt['trial_id'])
+        if assessment.get('schema_version') == 1:
+            if previous:
+                if any(previous.get(k) != v for k, v in value.items()): raise ValueError('trial_conflict')
+                value = previous
+            else: value.update(_trial_observation(store, job))
         if previous and previous != value: raise ValueError('trial_conflict')
         if 'memory_samples' in receipt:
             atomic_json(store.root/'assessments'/assessment_id/(receipt['trial_id']+'-memory.json'),receipt['memory_samples'])
         assessment['receipts'][receipt['trial_id']] = value
+        if (assessment.get('schema_version') == 1 and len(assessment['receipts']) == len(assessment['trials'])
+                and assessment['authorization']['state'] in ('authorized', 'paused')):
+            assessment['authorization']['state'] = 'complete'
         atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
-    return assessment_report(state_dir, assessment_id)
+    return _refresh_report(state_dir, assessment_id)
 
 
-def assessment_report(state_dir, assessment_id):
-    assessment = _assessment(state_dir, assessment_id)
-    profile = _profile(state_dir, assessment['profile_id'])
-    current = _binding(profile) == assessment['binding']
+def _assessment_buckets(assessment):
     buckets = {}
     for trial in assessment['trials']:
         brief = trial['brief']
@@ -161,7 +389,95 @@ def assessment_report(state_dir, assessment_id):
         bucket['trials'] += 1
         bucket['cases'].add(trial['case_id'])
         bucket['passed'] += assessment['receipts'].get(trial['trial_id'], {}).get('passed') is True
-    qualified = [b['scope'] for b in buckets.values() if current and b['trials'] >= 6 and b['passed']==b['trials'] and len(b['cases'])>=3]
+    return list(buckets.values())
+
+
+def _trial_observation(store, job):
+    attempt = store.attempt(job['attempt_id']) if job['attempt_id'] else None
+    data = attempt['data'] if attempt else {}
+    stats = data.get('stats', data.get('terminal', {}).get('stats', {}))
+    return {'submitted': bool(data.get('submitted_at')), 'reason': job['reason'],
+            'submitted_at': data.get('submitted_at'), 'finished_at': data.get('finished_at'),
+            'inference_seconds': data.get('inference_seconds'),
+            **{k: stats.get(k) for k in ('input_tokens', 'total_output_tokens', 'reasoning_output_tokens')}}
+
+
+def _refresh_report(state_dir, assessment_id):
+    report = assessment_report(state_dir, assessment_id)
+    if report.get('schema_version') == 1:
+        atomic_json(Path(state_dir) / 'assessments' / assessment_id / 'report.json', report)
+    return report
+
+
+def assessment_report(state_dir, assessment_id, *, check_current=False):
+    assessment = _assessment(state_dir, assessment_id)
+    buckets = _assessment_buckets(assessment)
+    if assessment.get('schema_version') == 1:
+        store = Store(state_dir, read_only=True) if (Path(state_dir) / 'state.sqlite3').exists() else None
+        jobs = {t['trial_id']: job for t, job in _run_jobs(store, assessment)} if store else {}
+        counts = dict.fromkeys(('planned', 'submitted', 'passed', 'failed', 'evaluated', 'awaiting_verification', 'unresolved', 'not_run'), 0)
+        results = []
+        for trial in assessment['trials']:
+            receipt = assessment['receipts'].get(trial['trial_id'])
+            job = jobs.get(trial['trial_id'])
+            observed = ({k: v for k, v in receipt.items() if k not in ('trial_id', 'passed', 'status', 'memory')}
+                        if receipt else _trial_observation(store, job) if job else {
+                            'submitted': False, **dict.fromkeys(('reason', 'submitted_at', 'finished_at', 'inference_seconds',
+                                                               'input_tokens', 'total_output_tokens', 'reasoning_output_tokens'))})
+            blocker = _trial_blocker(store, job) if job and not receipt else None
+            if receipt: disposition = 'passed' if receipt['passed'] else 'failed'
+            elif not observed['submitted']: disposition = 'not_run'
+            elif blocker: disposition = 'unresolved'
+            elif job['status'] in ('candidate_ready', 'checking'): disposition = 'awaiting_verification'
+            else: disposition = 'unresolved'
+            counts['planned'] += 1
+            counts['submitted'] += observed['submitted']
+            counts[disposition] += 1
+            results.append({'trial_id': trial['trial_id'], 'case_id': trial['case_id'],
+                            'group': _case_group({**trial['brief']['task_requirements'], 'capability': trial['brief']['capability']}),
+                            'job_id': job['job_id'] if job else observed.get('job_id'), 'disposition': disposition,
+                            'infrastructure_blocker': blocker, **observed})
+        counts['evaluated'] = counts['passed'] + counts['failed']
+        freshness = 'unverified'
+        if check_current:
+            try: _check_run_bindings(state_dir, assessment, check_runtime=True)
+            except OSError: freshness = 'unverified'
+            except ValueError as error:
+                freshness = 'unverified' if str(error) in ('unknown_profile', 'assessment_model_unavailable', 'runtime_binding_unavailable', 'isolation_unsupported') else 'stale'
+            else: freshness = 'current'
+        source = assessment['source_profile']
+        operating = {'candidate': {'status': 'unavailable'}, 'source_profile': None}
+        try: operating['routing_enabled'] = read_config(state_dir).get('routing_enabled') is True
+        except (ValueError, OSError): operating['routing_enabled'] = None
+        for key, identifier in [('candidate', assessment['profile_id']), ('source_profile', source['profile_id'] if source else None)]:
+            if identifier is None: continue
+            try: current = _profile(state_dir, identifier)
+            except (ValueError, OSError): operating[key] = {'status': 'unavailable'}
+            else:
+                expected = assessment['profile_snapshot']['approval'] if key == 'candidate' else source['approval_at_preparation']
+                binding = assessment['binding'] if key == 'candidate' else source['binding']
+                same = (current.get('approval') == expected and current.get('request_settings') == binding['settings']
+                        and current.get('artifact', {}).get('digest') == binding['artifact']['digest']
+                        and all(current.get(k) == binding['runtime'][k] for k in ('model_id', 'endpoint', 'adapter', 'runtime_catalog')))
+                operating[key] = {'status': 'unchanged' if same else 'changed', 'recorded_approval': current.get('approval')}
+        return {'schema_version': 1, 'assessment_id': assessment_id, 'state': assessment['authorization']['state'],
+                'profile': assessment['profile_snapshot'], 'source_profile': source, 'operating_state': operating,
+                'provenance': {k: assessment['preview'][k] for k in ('binding', 'fixture_digest', 'runtime_bundle', 'verification', 'prepared_at', 'loaded_config', 'package')},
+                'consented_at': assessment['authorization']['timestamp'],
+                'evidence_paths': {'assessment': str(Path(state_dir) / 'assessments' / assessment_id / 'assessment.json'),
+                                   'report': str(Path(state_dir) / 'assessments' / assessment_id / 'report.json')},
+                'groups': [{'scope': b['scope'], 'planned': b['trials'], 'passed': b['passed'], 'distinct_cases': len(b['cases']),
+                            'evaluated': sum(r['disposition'] in ('passed', 'failed') for r in results if r['group'] == _case_group(b['scope'])),
+                            'failed': sum(r['disposition'] == 'failed' for r in results if r['group'] == _case_group(b['scope'])),
+                            'provisional_synthetic_evidence': b['trials'] >= 6 and b['passed'] == b['trials'] and len(b['cases']) >= 3} for b in buckets],
+                'counts': counts, 'trials': results, 'freshness': freshness,
+                'limitations': ['Synthetic evidence does not approve a model or enable routing.',
+                                'Results do not establish project reliability, specialist competence, higher concurrency, or subscription savings.',
+                                'Python code-change paths are overlapping verification paths, not independent abilities.',
+                                'Missing observations remain unknown; recorded approval is not a fresh runtime qualification.']}
+    profile = _profile(state_dir, assessment['profile_id'])
+    current = _binding(profile) == assessment['binding']
+    qualified = [b['scope'] for b in buckets if current and b['trials'] >= 6 and b['passed']==b['trials'] and len(b['cases'])>=3]
     capacity = profile.get('capacity_evidence', {})
     benefit = profile.get('benefit_evidence') or {}
     ready = bool(qualified)
@@ -177,6 +493,7 @@ def assessment_report(state_dir, assessment_id):
 
 
 def approve_assessment(state_dir, assessment_id, owner_reference, scope):
+    if _assessment(state_dir, assessment_id).get('schema_version') == 1: raise ValueError('explicit_setup_onboarding_required')
     if not isinstance(owner_reference, str) or not owner_reference.strip(): raise ValueError('owner_confirmation_required')
     report = assessment_report(state_dir, assessment_id)
     if report['recommendation'] != 'approve_provisional_scope' or scope != report['tested_scope']: raise ValueError('assessment_incomplete')
@@ -210,16 +527,138 @@ def approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_t
 
 
 def submit_trial(state_dir, assessment_id, trial_id):
-    assessment=_assessment(state_dir,assessment_id)
-    trial=next((t for t in assessment['trials'] if t['trial_id']==trial_id),None)
-    if trial is None:raise ValueError('unknown_trial')
-    permit={'assessment_id':assessment_id,'permit_token':assessment['permit_token']}
-    authorize_assessment(state_dir,trial['brief'],permit)
-    store=Store(state_dir)
-    result=store.enqueue(trial['brief'],trial['brief']['fallback'],assessment=permit)
-    from .worker import launch
-    launch(state_dir,'scheduler','queue')
+    from .worker import ownership, launch
+    from .contracts import envelope
+    store = Store(state_dir)
+    with ownership(store, 'assessment-' + assessment_id) as owned:
+        if not owned: raise ValueError('assessment_busy')
+        assessment = _assessment(state_dir, assessment_id)
+        trial = next((t for t in assessment['trials'] if t['trial_id'] == trial_id), None)
+        if trial is None: raise ValueError('unknown_trial')
+        if assessment.get('schema_version') == 1:
+            existing = store.lookup(trial['brief']['origin_chat_id'], trial_id)
+            if existing:
+                job = store.job(existing['job_id'])
+                if digest(job['brief']) != trial['brief_hash'] or job['route_data'].get('assessment') != {
+                        'assessment_id': assessment_id, 'permit_token': assessment['permit_token']}:
+                    raise ValueError('assessment_scope_mismatch')
+                return envelope(job)
+            progress = _run_progress(store, assessment)
+            if progress['pending_jobs'] or progress['blockers']: raise ValueError('assessment_trial_pending')
+        permit = {'assessment_id': assessment_id, 'permit_token': assessment['permit_token']}
+        try: authorize_assessment(state_dir, trial['brief'], permit)
+        except (ValueError, OSError):
+            if assessment.get('schema_version') == 1 and assessment['authorization']['state'] == 'authorized':
+                assessment['authorization']['state'] = 'invalidated'
+                atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
+            raise
+        result = store.enqueue(trial['brief'], trial['brief']['fallback'], assessment=permit)
+    launch(state_dir, 'scheduler', 'queue')
     return result
+
+
+def _run_jobs(store, assessment):
+    jobs = []
+    for trial in assessment['trials']:
+        found = store.lookup(trial['brief']['origin_chat_id'], trial['trial_id'])
+        if found: jobs.append((trial, store.job(found['job_id'])))
+    return jobs
+
+
+def _trial_blocker(store, job):
+    if job['attempt_id']:
+        attempt = store.attempt(job['attempt_id'])
+        if attempt['state'] == 'uncertain': return 'request_uncertain'
+    if job['status'] == 'needs_reassessment': return job['reason'] or 'needs_reassessment'
+    if job['status'] in ('fallback_required', 'failed'):
+        if not job['attempt_id'] or not store.attempt(job['attempt_id'])['data'].get('submitted_at'):
+            return job['reason'] or 'not_submitted'
+        if store.attempt(job['attempt_id'])['state'] != 'complete': return job['reason'] or 'request_unresolved'
+        if job['reason'] == 'verification_unsupported': return 'verification_unsupported'
+        failure = store.root / 'jobs' / job['job_id'] / 'check-failure.json'
+        if failure.exists():
+            receipt = load_json(failure.read_text())
+            reason = receipt.get('reason', '')
+            if receipt.get('category') == 'verification' or reason.startswith(('assessment_', 'isolation_', 'source_', 'attempt_')):
+                return reason or 'verification_unavailable'
+    return None
+
+
+def _run_progress(store, assessment):
+    pending, blockers, seen = [], [], set()
+    for trial, job in _run_jobs(store, assessment):
+        seen.add(trial['trial_id'])
+        blocker = _trial_blocker(store, job)
+        if blocker: blockers.append({'job_id': job['job_id'], 'reason': blocker})
+        if trial['trial_id'] not in assessment['receipts']: pending.append(job['job_id'])
+    next_trial = next((t['trial_id'] for t in assessment['trials'] if t['trial_id'] not in seen), None)
+    return {'assessment_id': assessment['assessment_id'], 'state': assessment['authorization']['state'],
+            'pending_jobs': pending, 'blockers': blockers,
+            'next_trial_id': next_trial if not pending and not blockers and assessment['authorization']['state'] == 'authorized' else None}
+
+
+def _defer_run_job(store, job, state):
+    """Called under the run lock; only definitely unsubmitted reservations may be freed."""
+    with store.db(write=True) as db:
+        job = store._job(db.execute('SELECT * FROM jobs WHERE job_id=?', (job['job_id'],)).fetchone())
+        if job['status'] not in ('waiting', 'reserved'): return
+        if job['attempt_id']:
+            attempt = db.execute('SELECT * FROM attempts WHERE attempt_id=?', (job['attempt_id'],)).fetchone()
+            if not attempt or attempt['state'] != 'reserved' or load_json(attempt['data']).get('submitted_at'): return
+            if not store.transition(attempt['attempt_id'], attempt['generation'], 'reserved', 'released', {}, db=db): return
+        db.execute("UPDATE jobs SET status=?,reason=?,attempt_id=NULL WHERE job_id=? AND status IN ('waiting','reserved')",
+                   ('waiting' if state == 'paused' else 'failed', 'assessment_' + state, job['job_id']))
+
+
+def control_assessment(state_dir, assessment_id, action):
+    from .worker import ownership, reconcile_attempts, launch
+    if action not in ('pause', 'stop', 'resume'): raise ValueError('invalid_assessment_control')
+    store = Store(state_dir)
+    if action == 'resume': reconcile_attempts(state_dir, assessment_id=assessment_id)
+    with ownership(store, 'plugin-update') as maintenance:
+        if not maintenance: raise ValueError('assessment_busy')
+        with ownership(store, 'assessment-' + assessment_id) as owned:
+            if not owned: raise ValueError('assessment_busy')
+            assessment = _assessment(state_dir, assessment_id)
+            if assessment.get('schema_version') != 1: raise ValueError('assessment_run_required')
+            auth = assessment['authorization']
+            if action == 'resume':
+                if auth['state'] in ('stopped', 'invalidated', 'draft'): raise ValueError('assessment_' + auth['state'])
+                if auth['state'] != 'complete':
+                    try: _check_run_bindings(state_dir, assessment, check_runtime=True)
+                    except (ValueError, OSError):
+                        auth['state'] = 'invalidated'
+                        atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
+                        raise
+                    auth['state'] = 'paused' if _run_progress(store, assessment)['blockers'] else 'authorized'
+            elif auth['state'] not in ('stopped', 'invalidated', 'complete'):
+                if action == 'pause' and auth['state'] == 'draft': raise ValueError('assessment_consent_required')
+                auth['state'] = 'paused' if action == 'pause' else 'stopped'
+            if auth['state'] in ('paused', 'stopped', 'invalidated'):
+                for _, job in _run_jobs(store, assessment): _defer_run_job(store, job, auth['state'])
+            elif auth['state'] == 'authorized':
+                with store.db(write=True) as db:
+                    db.execute("UPDATE jobs SET reason='waiting_for_slot' WHERE chat=? AND status='waiting' AND reason='assessment_paused'",
+                               ('assessment-' + assessment_id,))
+            atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
+    reconcile_attempts(state_dir, assessment_id=assessment_id)
+    for trial, job in _run_jobs(store, assessment):
+        if (trial['trial_id'] not in assessment['receipts'] and job['status'] in ('accepted', 'failed', 'fallback_required')
+                and job['attempt_id'] and store.attempt(job['attempt_id'])['state'] == 'complete'
+                and not _trial_blocker(store, job)):
+            record_trial(state_dir, assessment_id, {'trial_id': trial['trial_id'], 'job_id': job['job_id']})
+    assessment = _assessment(state_dir, assessment_id)
+    progress = _run_progress(store, assessment)
+    _refresh_report(state_dir, assessment_id)
+    if action == 'resume' and progress['state'] == 'authorized': launch(state_dir, 'scheduler', 'queue')
+    return progress
+
+
+def require_assessments_paused(state_dir):
+    for path in (Path(state_dir) / 'assessments').glob('*/assessment.json'):
+        assessment = _assessment(state_dir, path.parent.name)
+        if assessment.get('schema_version') == 1 and assessment['authorization']['state'] == 'authorized':
+            raise ValueError('assessments_must_be_paused')
 
 
 def record_outcome(state_dir, job_id, receipt):
@@ -243,6 +682,9 @@ def record_outcome(state_dir, job_id, receipt):
             job=store._job(db.execute('SELECT * FROM jobs WHERE job_id=?',(job_id,)).fetchone())
             if job['status'] not in ('accepted','failed'):raise ValueError('outcome_not_final')
             route=job.get('route_data',{})
+            permit = route.get('assessment')
+            if permit and _assessment(state_dir, permit['assessment_id']).get('schema_version') == 1:
+                raise ValueError('assessment_has_no_global_outcome')
             previous=route.get('outcome')
             if previous and previous!=receipt:raise ValueError('outcome_conflict')
             route['outcome']=receipt
@@ -281,6 +723,7 @@ def record_outcome(state_dir, job_id, receipt):
 
 
 def record_capacity(state_dir, assessment_id, receipt):
+    if _assessment(state_dir, assessment_id).get('schema_version') == 1: raise ValueError('assessment_single_slot_only')
     from .capacity import qualify_measurements, available_budget, machine_snapshot
     if (not isinstance(receipt,dict) or set(receipt)!={'context_length','resources','batches'}
             or not isinstance(receipt['batches'],list) or not isinstance(receipt['resources'],dict)):

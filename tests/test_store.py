@@ -17,6 +17,37 @@ class Slots(Fixture):
         super().setUp()
         self.store = Store(self.state)
 
+    def test_read_only_checkpointed_database_creates_no_sidecars(self):
+        before = {p.name: p.read_bytes() for p in self.state.iterdir() if p.is_file()}
+        self.assertEqual(set(before), {'state.sqlite3'})
+        readonly = Store(self.state, read_only=True)
+        with readonly.db() as db: self.assertEqual(db.execute('SELECT count(*) FROM jobs').fetchone()[0], 0)
+        self.assertEqual({p.name: p.read_bytes() for p in self.state.iterdir() if p.is_file()}, before)
+
+    def test_read_only_live_wal_includes_commits_without_mutating_source(self):
+        import sqlite3
+        with self.store.db() as writer:
+            writer.execute("INSERT INTO profiles VALUES ('wal-observation','{}')")
+            before = {p.name: p.read_bytes() for p in self.state.iterdir() if p.is_file()}
+            self.assertIn('state.sqlite3-wal', before)
+            readonly = Store(self.state, read_only=True)
+            with readonly.db() as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM profiles').fetchone()[0], 1)
+                with self.assertRaises(sqlite3.OperationalError): db.execute('DELETE FROM profiles')
+            self.assertEqual({p.name: p.read_bytes() for p in self.state.iterdir() if p.is_file()}, before)
+
+    def test_read_only_snapshot_rejects_concurrent_changes(self):
+        import shutil
+        from unittest.mock import patch
+        copy_file = shutil.copyfileobj
+        with self.store.db() as writer:
+            def concurrent_commit(source, destination):
+                copy_file(source, destination)
+                writer.execute("INSERT OR REPLACE INTO profiles VALUES ('changing', ?)", (str(time.time_ns()),))
+            with patch('local_model_delegation.store.shutil.copyfileobj', side_effect=concurrent_commit):
+                with self.assertRaisesRegex(ValueError, 'state_snapshot_busy'):
+                    Store(self.state, read_only=True)
+
     def test_cross_project_capacity_one(self):
         p, loaded = self.profile(), self.loaded()
         context = multiprocessing.get_context("fork")

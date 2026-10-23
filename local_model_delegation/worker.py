@@ -1,5 +1,5 @@
 """Detached observers. Conversation context never owns a request's stale clock."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import fcntl
 import os
 import sqlite3
@@ -109,24 +109,51 @@ def run_local_attempt(state_dir, attempt_id):
         job = store.job(attempt["job_id"])
         generation = attempt["generation"]
         if attempt["state"] != "reserved": return 0
+        permit = job.get('route_data', {}).get('assessment')
+        from .onboarding import _assessment, _check_run_bindings, _defer_run_job
+        run = _assessment(state_dir, permit['assessment_id']) if permit else None
+        standalone = run is not None and run.get('schema_version') == 1
         try:
-            current = authorize_job(store, job)
+            current = job['profile'] if standalone else authorize_job(store, job)
             if current["approval"] != job["profile"]["approval"]:
                 raise ValueError("approval_changed")
         except (ValueError, OSError):
             store.transition(attempt_id, generation, "reserved", "released", {})
             store.select_fallback(job["job_id"], "approval_changed")
             return 1
+        rejection = None
         if not context_fits(job['brief'], current, store.instance(attempt['instance_key'])['data']):
+            rejection = 'context_budget_exceeded'
+        elif not store.submission_resources_available(job):
+            rejection = 'resources_changed_before_post'
+        if rejection and not standalone:
             store.transition(attempt_id, generation, "reserved", "released", {})
-            store.select_fallback(job['job_id'], "context_budget_exceeded")
-            return 1
-        if not store.submission_resources_available(job):
-            store.transition(attempt_id, generation, "reserved", "released", {})
-            store.select_fallback(job["job_id"], "resources_changed_before_post")
+            store.select_fallback(job["job_id"], rejection)
             return 1
         settings = generation_settings(job['brief'], current)
-        if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time(), "submitted_at": time.time(), 'request_settings':settings}): return 0
+        with ownership(store, 'assessment-' + permit['assessment_id']) if standalone else nullcontext(True) as owned:
+            if not owned: return 0
+            if standalone:
+                current_job = store.job(job['job_id'])
+                if current_job['attempt_id'] != attempt_id or current_job['status'] != 'reserved': return 0
+                run = _assessment(state_dir, permit['assessment_id'])
+                try:
+                    authorize_job(store, job)
+                    _check_run_bindings(state_dir, run, check_runtime=True)
+                except (ValueError, OSError):
+                    if run['authorization']['state'] == 'authorized':
+                        run['authorization']['state'] = 'invalidated'
+                        atomic_json(store.root / 'assessments' / run['assessment_id'] / 'assessment.json', run)
+                    _defer_run_job(store, store.job(job['job_id']), run['authorization']['state'])
+                    return 1
+                # Binding and runtime checks can outlast the earlier pressure sample.
+                if not rejection and not store.submission_resources_available(job):
+                    rejection = 'resources_changed_before_post'
+                if rejection:
+                    if store.transition(attempt_id, generation, 'reserved', 'released', {}):
+                        store.select_fallback(job['job_id'], rejection)
+                    return 1
+            if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time(), "submitted_at": time.time(), 'request_settings':settings}): return 0
         from .habblaud import ensure_observer
         ensure_observer(state_dir, job["job_id"])
         runtime = Runtime(job["profile"]["endpoint"], token_env=job["profile"].get("token_env"))
@@ -197,6 +224,9 @@ def run_local_attempt(state_dir, attempt_id):
                         complete = True
                         return 1
                     if not text: raise ValueError('final_result_mismatch')
+                    stats = data['result'].get('stats', {})
+                    store.observe(attempt_id, {'stats': {k: stats[k] for k in ('input_tokens', 'total_output_tokens', 'reasoning_output_tokens')
+                                                        if type(stats.get(k)) is int and stats[k] >= 0}})
                     path = store.root / "jobs" / job["job_id"] / attempt_id / "candidate.json"
                     atomic_json(path, {"text": text, "sha256": text_hash(text), "counts": counts})
                     complete = store.publish_candidate(attempt_id, generation, path)
@@ -225,12 +255,17 @@ def run_local_attempt(state_dir, attempt_id):
             except (OSError,ValueError,sqlite3.Error): pass
 
 
-def reconcile_attempts(state_dir):
+def reconcile_attempts(state_dir, *, assessment_id=None):
     store = Store(state_dir)
     with store.db() as db:
         attempts = [dict(r) for r in db.execute("SELECT * FROM attempts WHERE state IN ('reserved','submitting','streaming')")]
     with store.db() as db:
         checking = [row["job_id"] for row in db.execute("SELECT job_id FROM jobs WHERE status='checking'")]
+    def belongs(job_id):
+        return store.job(job_id).get('route_data', {}).get('assessment', {}).get('assessment_id') == assessment_id
+    if assessment_id is not None:
+        attempts = [a for a in attempts if belongs(a['job_id'])]
+        checking = [j for j in checking if belongs(j)]
     for job_id in checking:
         with ownership(store, "check-" + job_id) as owned:
             if owned:
@@ -241,6 +276,16 @@ def reconcile_attempts(state_dir):
         with ownership(store, "attempt-" + attempt["attempt_id"]) as owned:
             if not owned: continue
             if attempt["state"] == "reserved":
+                job = store.job(attempt['job_id'])
+                permit = job.get('route_data', {}).get('assessment')
+                if permit:
+                    from .onboarding import _assessment, _defer_run_job
+                    with ownership(store, 'assessment-' + permit['assessment_id']) as run_owned:
+                        if not run_owned: continue
+                        run = _assessment(state_dir, permit['assessment_id'])
+                        if run.get('schema_version') == 1 and run['authorization']['state'] != 'authorized':
+                            _defer_run_job(store, job, run['authorization']['state'])
+                            continue
                 if store.instance(attempt["instance_key"])["state"] != "ready" or store.job(attempt["job_id"])["status"] != "reserved":
                     store.transition(attempt["attempt_id"], attempt["generation"], "reserved", "released", {})
                     store.select_fallback(attempt["job_id"], "instance_recovering")
@@ -255,6 +300,9 @@ def reconcile_attempts(state_dir):
     # Recovery ownership can be lost after every attempt has already become uncertain.
     with store.db() as db:
         closed = [row["instance_key"] for row in db.execute("SELECT instance_key FROM instances WHERE state IN ('closed','recovering')")]
+        if assessment_id is not None:
+            affected = {r['instance_key'] for r in db.execute('SELECT instance_key,job_id FROM attempts') if belongs(r['job_id'])}
+            closed = [key for key in closed if key in affected]
     from .recovery import request_recovery
     for key in closed:
         request_recovery(state_dir, key)

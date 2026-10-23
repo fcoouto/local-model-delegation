@@ -4,6 +4,7 @@ from functools import lru_cache
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -69,9 +70,15 @@ def python_test_methods(tree):
             for method in cls.body if isinstance(method, ast.FunctionDef) and method.name.startswith("test")}
 
 
-def parse_python_proposal(text, brief):
+def _candidate_json(text):
+    """Allow one whole JSON fence only at the model-output boundary."""
     if len(text.encode()) > MAX_ANSWER_BYTES: raise ValueError("oversized_answer")
-    value = load_json(text)
+    fenced = re.fullmatch(r"```(?:json)?[ \t]*\r?\n(.*)\r?\n```[ \t]*", text.strip(), re.DOTALL)
+    return load_json(fenced.group(1) if fenced else text)
+
+
+def parse_python_proposal(text, brief):
+    value = _candidate_json(text)
     if not isinstance(value, dict) or set(value) != {"files", "summary"} or not isinstance(value["summary"], str) or not isinstance(value["files"], dict) or not value["files"]:
         raise ValueError("invalid_candidate")
     files = value["files"]
@@ -230,14 +237,18 @@ def _verify_python_candidate(store, job_id):
         if not db.execute("UPDATE jobs SET status='checking' WHERE job_id=? AND status='candidate_ready'", (job_id,)).rowcount:
             return envelope(store.job(job_id))
     receipt = {}
+    category = 'verification'
     try:
-        current = authorize_job(store, job)
+        current = authorize_job(store, job, purpose='verify')
         if current.get("approval") != job["profile"].get("approval"): raise ValueError("approval_changed")
         path = Path(job["result_path"])
         if path.is_symlink() or not path.resolve().is_relative_to(store.root / "jobs" / job_id): raise ValueError("unsafe_result")
         artifact = load_json(path.read_text())
         if text_hash(artifact["text"]) != artifact["sha256"]: raise ValueError("candidate_hash_mismatch")
-        candidate = parse_python_proposal(artifact["text"], brief)
+        try: candidate = parse_python_proposal(artifact["text"], brief)
+        except (SyntaxError, ValueError, TypeError):
+            category = 'format'
+            raise
         if not python_isolation_supported(brief): raise ValueError("isolation_unsupported")
         original = {name: item["content"] for name, item in brief["files"].items()}
         changed = {**original, **candidate}
@@ -246,11 +257,16 @@ def _verify_python_candidate(store, job_id):
         source_only = {n: t for n, t in original.items() if n not in brief["supplied_tests"]}
         changed_source = {n: t for n, t in changed.items() if not Path(n).name.startswith("test_")}
         receipt["baseline"] = run_python_tests({**source_only, **brief["independent_tests"]}, oracle_modules)
+        if (receipt["baseline"].get("reason") or receipt["baseline"].get("failures", 0) < 1
+                or receipt["baseline"].get("errors", 0) or receipt["baseline"].get("skipped", 0)):
+            raise ValueError("baseline_verification_unavailable")
         receipt["independent"] = run_python_tests({**changed_source, **brief["independent_tests"]}, oracle_modules)
         test_modules = [Path(n).with_suffix("").as_posix().replace("/", ".") for n in brief["supplied_tests"]]
         # Unchanged methods can still be weakened by added setup code or global rebinding.
         receipt["protected"] = run_python_tests({**changed_source, **{n: original[n] for n in brief["supplied_tests"]}}, test_modules)
         receipt["submitted"] = run_python_tests(changed, test_modules)
+        if any(receipt[name].get("reason") for name in ("independent", "protected", "submitted")):
+            raise ValueError("candidate_verification_unavailable")
         effective = False
         added_count = 0
         for name in brief["supplied_tests"]:
@@ -258,13 +274,14 @@ def _verify_python_candidate(store, job_id):
             added_count += len(added)
             if added:
                 result = run_python_tests({**original, name: changed[name]}, [Path(name).stem], added)
+                if result.get("reason"): raise ValueError("regression_verification_unavailable")
                 effective |= result.get("failures", 0) > 0 and result.get("errors", 0) == 0
-        if (receipt["baseline"].get("failures", 0) < 1 or receipt["baseline"].get("errors", 0)
-                or not receipt["independent"].get("ok") or not receipt["protected"].get("ok")
+        if (not receipt["independent"].get("ok") or not receipt["protected"].get("ok")
                 or not receipt["submitted"].get("ok") or not added_count or not effective):
+            category = "semantic"
             raise ValueError("independent_checks_failed")
         if not source_matches(brief): raise ValueError("source_changed")
-        current = authorize_job(store, job)
+        current = authorize_job(store, job, purpose='verify')
         if current.get("approval") != job["profile"].get("approval"): raise ValueError("approval_changed")
         if job["attempt_id"] and not job["native_task_id"]:
             attempt = store.attempt(job["attempt_id"])
@@ -277,10 +294,10 @@ def _verify_python_candidate(store, job_id):
         with store.db(write=True) as db:
             db.execute("UPDATE jobs SET status='accepted',reason=NULL WHERE job_id=? AND status='checking'", (job_id,))
     except (OSError, SyntaxError, ValueError, KeyError, TypeError) as error:
-        receipt.update(accepted=False, reason=str(error) if isinstance(error, ValueError) else type(error).__name__)
+        receipt.update(accepted=False, category=category, reason=str(error) if isinstance(error, ValueError) else type(error).__name__)
         atomic_json(store.root / "jobs" / job_id / "check-failure.json", receipt)
         from .measurements import collect_verdict
-        collect_verdict(store.root,job_id,receipt,False,'source_changed' if str(error)=='source_changed' else 'verification')
+        collect_verdict(store.root,job_id,receipt,False,'source_changed' if str(error)=='source_changed' else category)
         if str(error) == "source_changed":
             with store.db(write=True) as db:
                 db.execute("UPDATE jobs SET status=?,reason='source_changed' WHERE job_id=? AND status='checking'",
@@ -293,8 +310,7 @@ def _verify_python_candidate(store, job_id):
 
 def parse_proposal(text, brief):
     """Structural checks only. Semantic acceptance belongs to the native coordinator."""
-    if len(text.encode()) > MAX_ANSWER_BYTES: raise ValueError('oversized_answer')
-    value = load_json(text)
+    value = _candidate_json(text)
     summary = brief['capability'] == 'file_summary'
     expected = {'summary', 'claims' if summary else 'files'}
     if not isinstance(value, dict) or set(value) != expected or not isinstance(value['summary'], str):
@@ -321,12 +337,18 @@ def parse_proposal(text, brief):
     return value
 
 
+class InvalidProposal(ValueError):
+    """Invalid model output, distinct from corrupted state or unavailable verification."""
+
+
 def _proposal(store, job):
     path = Path(job['result_path'])
     if path.is_symlink() or not path.resolve().is_relative_to(store.root / 'jobs' / job['job_id']): raise ValueError('unsafe_result')
     artifact = load_json(path.read_text())
     if text_hash(artifact['text']) != artifact['sha256']: raise ValueError('candidate_hash_mismatch')
-    return parse_proposal(artifact['text'], job['brief']), artifact['sha256']
+    try: proposal = parse_proposal(artifact['text'], job['brief'])
+    except ValueError as error: raise InvalidProposal(str(error)) from error
+    return proposal, artifact['sha256']
 
 
 def _verification_binding(job, candidate_hash):
@@ -343,10 +365,11 @@ def prepare_verification(state_dir, job_id):
         job = store.job(job_id)
         if job['status'] in ('candidate_ready', 'checking') and str(error) != 'verification_busy':
             from .measurements import collect_verdict
-            from json import JSONDecodeError
-            category = 'format' if isinstance(error,JSONDecodeError) or str(error) in ('invalid_candidate','invalid_citation','unsafe_path') else 'verification'
+            category = 'format' if isinstance(error, InvalidProposal) else 'verification'
             if str(error)=='source_changed': category='source_changed'
-            collect_verdict(store.root,job_id,{'accepted':False,'error':type(error).__name__,'category':category},False,category)
+            receipt = {'accepted': False, 'error': type(error).__name__, 'category': category, 'reason': str(error)}
+            atomic_json(store.root / 'jobs' / job_id / 'check-failure.json', receipt)
+            collect_verdict(store.root,job_id,receipt,False,category)
             if str(error) == 'source_changed' or job['native_task_id']:
                 with store.db(write=True) as db:
                     db.execute('UPDATE jobs SET status=?,reason=? WHERE job_id=?',
@@ -366,7 +389,7 @@ def _prepare_verification(state_dir, job_id):
         if job['status'] not in ('candidate_ready', 'checking'): raise ValueError('candidate_not_ready')
         validate_brief(job['brief'])
         if job['brief']['capability'] in PYTHON_CHANGE_CAPABILITIES: raise ValueError('use_python_checker')
-        authorize_job(store, job)
+        authorize_job(store, job, purpose='verify')
         if not source_matches(job['brief']): raise ValueError('source_changed')
         proposal, candidate_hash = _proposal(store, job)
         if job['brief']['capability'] != 'file_summary' and not _qualified_isolation():
@@ -412,7 +435,7 @@ def record_verification(state_dir, job_id, receipt):
             if receipt != load_json((store.root / 'jobs' / job_id / 'native-checks.json').read_text()):
                 raise ValueError('verification_mismatch')
             return envelope(job)
-        authorize_job(store, job)
+        authorize_job(store, job, purpose='verify')
         if not source_matches(job['brief']):
             with store.db(write=True) as db:
                 db.execute("UPDATE jobs SET status=?,reason='source_changed' WHERE job_id=? AND status='checking'",

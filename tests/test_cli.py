@@ -14,6 +14,21 @@ class CLI(Fixture):
         self.assertIn(result.returncode, (0, 2), result.stderr)
         return json.loads(result.stdout)
 
+    def test_assessment_choices_are_offline_and_do_not_create_state(self):
+        result = self.invoke('assessment', 'choices')
+        self.assertEqual(result['total_trials'], 36)
+        self.assertFalse(self.state.exists())
+
+    def test_assessment_arguments_reject_missing_and_unrelated_flags(self):
+        cases = [('prepare', '--profile-id', 'fictional'),
+                 ('consent', '--assessment-id', 'a' * 32),
+                 ('pause', '--assessment-id', 'a' * 32, '--profile-id', 'fictional'),
+                 ('choices', '--check-current'), ('report',)]
+        for args in cases:
+            with self.subTest(args=args):
+                self.assertEqual(self.invoke('assessment', *args)['reason'], 'invalid_assessment_arguments')
+                self.assertFalse(self.state.exists())
+
     def busy(self, fallback=None):
         server = FakeRuntime()
         self.addCleanup(server.close)
