@@ -1,10 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-10-24
 
 - Name delegated task and agent display consistently as agent representation across commands, modules, tests and documentation.
 - Preserve existing stored configuration, bindings, observer receipts and locks without rewriting job identities. Reject ambiguous or unsafe namespaces.
 - Describe publishing as operational state and retain its configured state through verified updates.
+- Add repository assessment contexts with bounded source browsing, exact edits, frozen inputs and isolated Django/PostgreSQL verification. This protocol is assessment-only and does not grant ordinary repository delegation approval.
+- Preserve complete repository pack metadata with a separate 32 MiB ceiling while retaining existing limits for ordinary inputs and model responses.
+
+Breaking command change: use `representation` for delegated task and agent display; the former command name is no longer accepted. Existing private configuration and evidence remain preserved.
 
 ## 0.3.16 — 2026-10-23
 
