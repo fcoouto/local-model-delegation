@@ -44,8 +44,16 @@ def atomic_json(path: Path, value: Any) -> None:
 
 
 class Store:
-    def __init__(self, state_dir: Path):
-        self.root = private_dir(Path(state_dir))
+    def __init__(self, state_dir: Path, *, read_only=False):
+        self.read_only = read_only
+        root = Path(state_dir)
+        if read_only:
+            stamp = root.lstat()
+            if (root.is_symlink() or any(p.is_symlink() for p in root.absolute().parents)
+                    or stamp.st_uid != os.getuid() or stamp.st_mode & 0o077 or not stat.S_ISDIR(stamp.st_mode)):
+                raise ValueError('unsafe_state')
+            self.root = root.resolve()
+        else: self.root = private_dir(root)
         self.path = self.root / "state.sqlite3"
         for suffix in ("", "-wal", "-shm"):
             path = Path(str(self.path) + suffix)
@@ -53,6 +61,11 @@ class Store:
             except FileNotFoundError: continue
             if stamp.st_uid != os.getuid() or stamp.st_mode & 0o077 or not stat.S_ISREG(stamp.st_mode):
                 raise ValueError("unsafe_database")
+        if read_only:
+            if not self.path.exists(): raise FileNotFoundError(self.path)
+            with self.db() as db:
+                if db.execute('PRAGMA user_version').fetchone()[0] != 2: raise ValueError('unsupported_state_version')
+            return
         try:
             fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         except FileExistsError:
@@ -100,7 +113,9 @@ class Store:
 
     @contextmanager
     def db(self, write=False):
-        db = sqlite3.connect(self.path, timeout=0.25, isolation_level=None)
+        if self.read_only and write: raise ValueError('read_only_state')
+        db = sqlite3.connect(self.path.as_uri() + '?mode=ro' if self.read_only else self.path,
+                             uri=self.read_only, timeout=0.25, isolation_level=None)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
         try:

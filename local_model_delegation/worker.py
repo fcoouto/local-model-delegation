@@ -214,6 +214,9 @@ def run_local_attempt(state_dir, attempt_id):
                         complete = True
                         return 1
                     if not text: raise ValueError('final_result_mismatch')
+                    stats = data['result'].get('stats', {})
+                    store.observe(attempt_id, {'stats': {k: stats[k] for k in ('input_tokens', 'total_output_tokens', 'reasoning_output_tokens')
+                                                        if type(stats.get(k)) is int and stats[k] >= 0}})
                     path = store.root / "jobs" / job["job_id"] / attempt_id / "candidate.json"
                     atomic_json(path, {"text": text, "sha256": text_hash(text), "counts": counts})
                     complete = store.publish_candidate(attempt_id, generation, path)

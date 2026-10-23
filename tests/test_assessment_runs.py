@@ -1,6 +1,7 @@
 """Standalone assessments use disposable, unapproved profiles and fake inference."""
 import copy
 import json
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -385,3 +386,116 @@ class AssessmentRuns(Fixture):
         self.assertEqual(progress['next_trial_id'], record['trials'][1]['trial_id'])
         self.assertEqual(repeated['job_id'], job['job_id'])
         self.assertEqual(self.server.calls.count(('POST', '/api/v1/chat')), 1)
+
+    def test_offline_report_survives_profile_artifact_and_database_removal(self):
+        from local_model_delegation.worker import run_local_attempt
+        prepared, record, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        self.server.output_tokens = self.candidate['request_settings']['max_output_tokens']
+        run_local_attempt(self.state, reserved['attempt_id'])
+        assessment.record_trial(self.state, prepared['assessment_id'], {'trial_id': record['trials'][0]['trial_id'], 'job_id': job['job_id']})
+        (self.state / 'profiles/fictional.json').unlink()
+        shutil.rmtree(self.artifact)
+        (self.state / 'state.sqlite3').unlink()
+        before = {p: p.read_bytes() for p in self.state.rglob('*') if p.is_file()}
+        before_calls = list(self.server.calls)
+        report = assessment.assessment_report(self.state, prepared['assessment_id'])
+        self.assertEqual(report['counts']['planned'], 6)
+        self.assertEqual(report['counts']['submitted'], 1)
+        self.assertEqual(report['counts']['failed'], 1)
+        self.assertEqual(report['counts']['not_run'], 5)
+        self.assertEqual(report['freshness'], 'unverified')
+        self.assertIsNone(report['profile']['approval'])
+        self.assertEqual(self.server.calls, before_calls)
+        self.assertEqual({p: p.read_bytes() for p in self.state.rglob('*') if p.is_file()}, before)
+
+    def test_report_distinguishes_pending_verification_from_failure(self):
+        from local_model_delegation.worker import run_local_attempt
+        prepared, _, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        run_local_attempt(self.state, reserved['attempt_id'])
+        report = assessment.assessment_report(self.state, prepared['assessment_id'])
+        self.assertEqual(report['counts']['awaiting_verification'], 1)
+        self.assertEqual(report['counts']['evaluated'], 0)
+        self.assertEqual(report['counts']['not_run'], 5)
+        self.assertEqual(report['trials'][0]['total_output_tokens'], 50)
+        self.assertNotIn('recommendation', report)
+
+    def test_reassessment_retains_source_profile_when_changed_or_deleted(self):
+        source = {**self.candidate, 'profile_id': 'source', 'approval': {'owner_reference': 'owner'}}
+        path = self.state / 'profiles/source.json'
+        atomic_json(path, source)
+        prepared = self.prepare(source_profile_id='source')
+        source['approval'] = None
+        atomic_json(path, source)
+        report = assessment.assessment_report(self.state, prepared['assessment_id'])
+        self.assertEqual(report['source_profile']['profile_id'], 'source')
+        self.assertEqual(report['source_profile']['approval_at_preparation'], {'owner_reference': 'owner'})
+        self.assertEqual(report['operating_state']['source_profile']['status'], 'changed')
+        path.unlink()
+        report = assessment.assessment_report(self.state, prepared['assessment_id'])
+        self.assertEqual(report['operating_state']['source_profile']['status'], 'unavailable')
+
+    def test_report_with_current_check_is_read_only_and_detects_stale_identity(self):
+        prepared = self.prepare()
+        report = assessment.assessment_report(self.state, prepared['assessment_id'], check_current=True)
+        self.assertEqual(report['freshness'], 'current')
+        self.candidate['request_settings']['temperature'] = .1
+        atomic_json(self.state / 'profiles/fictional.json', self.candidate)
+        report = assessment.assessment_report(self.state, prepared['assessment_id'], check_current=True)
+        self.assertEqual(report['freshness'], 'stale')
+        self.assertEqual(report['profile']['request_settings']['temperature'], 0)
+
+    def test_read_only_store_never_creates_state_or_permits_writes(self):
+        from local_model_delegation.store import Store
+        missing = self.root / 'missing'
+        with self.assertRaises(FileNotFoundError): Store(missing, read_only=True)
+        self.assertFalse(missing.exists())
+        prepared = self.prepare()
+        before = {p: p.read_bytes() for p in self.state.rglob('*') if p.is_file()}
+        store = Store(self.state, read_only=True)
+        with self.assertRaisesRegex(ValueError, 'read_only_state'):
+            with store.db(write=True): pass
+        assessment.assessment_report(self.state, prepared['assessment_id'])
+        self.assertEqual({p: p.read_bytes() for p in self.state.rglob('*') if p.is_file()}, before)
+
+    def test_report_uses_exact_jobs_beyond_recent_visibility_limit(self):
+        from local_model_delegation.worker import run_local_attempt
+        prepared, _, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        run_local_attempt(self.state, reserved['attempt_id'])
+        for number in range(105):
+            unrelated = store.reserve(self.brief('unrelated-' + str(number)), self.candidate, None)
+            with store.db(write=True) as db:
+                db.execute("UPDATE jobs SET status='failed' WHERE job_id=?", (unrelated['job_id'],))
+        report = assessment.assessment_report(self.state, prepared['assessment_id'])
+        self.assertEqual(report['counts']['submitted'], 1)
+        self.assertEqual(report['trials'][0]['job_id'], job['job_id'])
+
+    def test_unavailable_checks_are_not_recorded_as_model_failure(self):
+        from local_model_delegation.worker import run_local_attempt
+        prepared, record, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        run_local_attempt(self.state, reserved['attempt_id'])
+        store.select_fallback(job['job_id'], 'verification_unsupported')
+        with self.assertRaisesRegex(ValueError, 'trial_unresolved'):
+            assessment.record_trial(self.state, prepared['assessment_id'], {'trial_id': record['trials'][0]['trial_id'], 'job_id': job['job_id']})
+        report = assessment.assessment_report(self.state, prepared['assessment_id'])
+        self.assertEqual(report['counts']['failed'], 0)
+        self.assertEqual(report['counts']['unresolved'], 1)
+        self.assertEqual(report['trials'][0]['infrastructure_blocker'], 'verification_unsupported')
+
+    def test_assessment_outcome_cannot_change_model_global_evidence(self):
+        from local_model_delegation.worker import run_local_attempt
+        prepared, _, store, job = self.queued_run()
+        reserved = self.admit(store, job)
+        run_local_attempt(self.state, reserved['attempt_id'])
+        with store.db(write=True) as db:
+            db.execute("UPDATE jobs SET status='failed' WHERE job_id=?", (job['job_id'],))
+        before = (self.state / 'profiles/fictional.json').read_bytes()
+        with self.assertRaisesRegex(ValueError, 'assessment_has_no_global_outcome'):
+            assessment.record_outcome(self.state, job['job_id'], {
+                'native_usage': {'kind': 'unknown', 'value': None}, 'coordination_tokens': None,
+                'checking_tokens': None, 'fallback_tokens': None, 'native_baseline_tokens': None,
+                'onboarding_tokens': None, 'latency_seconds': 1, 'provenance': 'fictional test'})
+        self.assertEqual((self.state / 'profiles/fictional.json').read_bytes(), before)

@@ -215,6 +215,7 @@ def prepare_assessment(state_dir, profile_id, selection, *, source_profile_id=No
     bundle = pin_runtime_bundle(state_dir)
     preview = {'profile_id': profile_id, 'binding': binding, 'source_profile': source_profile,
                'profile_digest': digest(profile),
+               'prepared_at': datetime.now(timezone.utc).isoformat(),
                'groups': groups, 'distinct_cases': len({t['case_id'] for t in trials}),
                'max_submissions': len(trials), 'concurrency': 1, 'loaded_config': loaded['config'],
                'fixture_digest': digest(manifest), 'runtime_bundle': bundle.name,
@@ -230,6 +231,7 @@ def prepare_assessment(state_dir, profile_id, selection, *, source_profile_id=No
               'authorization': {'mode': 'run', 'state': 'draft', 'owner_reference': None,
                                 'timestamp': None, 'preview_digest': preview_digest}}
     atomic_json(Path(state_dir) / 'assessments' / identifier / 'assessment.json', record)
+    _refresh_report(state_dir, identifier)
     return {'assessment_id': identifier, 'state': 'draft', 'preview': preview, 'preview_digest': preview_digest}
 
 
@@ -282,6 +284,7 @@ def consent_assessment(state_dir, assessment_id, preview_digest, owner_reference
             if auth['state'] == 'draft':
                 auth.update(state='authorized', owner_reference=owner_reference, timestamp=datetime.now(timezone.utc).isoformat())
                 atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', record)
+            _refresh_report(state_dir, assessment_id)
             return {'assessment_id': assessment_id, 'state': auth['state']}
 
 
@@ -303,7 +306,7 @@ def authorize_assessment(state_dir, brief, permit, *, purpose='submit', job=None
                     or job.get('route_data', {}).get('assessment') != permit
                     or job.get('profile') != profile or job.get('brief') != brief):
                 raise ValueError('assessment_scope_mismatch')
-            store = Store(state_dir)
+            store = Store(state_dir, read_only=True)
             persisted = store.job(job['job_id'])
             attempt = store.attempt(job['attempt_id'])
             from .profiles import generation_settings
@@ -342,6 +345,7 @@ def record_trial(state_dir, assessment_id, receipt):
         if not trial or digest(job['brief']) != trial['brief_hash'] or job.get('route_data', {}).get('assessment') != permit:
             raise ValueError('assessment_scope_mismatch')
         if job['status'] not in ('accepted','failed','fallback_required'): raise ValueError('trial_not_complete')
+        if assessment.get('schema_version') == 1 and _trial_blocker(store, job): raise ValueError('trial_unresolved')
         value = {k:receipt[k] for k in ('trial_id','job_id')}
         value.update(passed=job['status']=='accepted' and not job['native_task_id'],status=job['status'])
         if 'memory_samples' in receipt:
@@ -354,18 +358,23 @@ def record_trial(state_dir, assessment_id, receipt):
                     or receipt['memory_samples'][-1]['observed_at']<timing.get('finished_at',float('inf'))):
                 raise ValueError('memory_samples_incomplete')
         previous = assessment['receipts'].get(receipt['trial_id'])
+        if assessment.get('schema_version') == 1:
+            if previous:
+                if any(previous.get(k) != v for k, v in value.items()): raise ValueError('trial_conflict')
+                value = previous
+            else: value.update(_trial_observation(store, job))
         if previous and previous != value: raise ValueError('trial_conflict')
         if 'memory_samples' in receipt:
             atomic_json(store.root/'assessments'/assessment_id/(receipt['trial_id']+'-memory.json'),receipt['memory_samples'])
         assessment['receipts'][receipt['trial_id']] = value
+        if (assessment.get('schema_version') == 1 and len(assessment['receipts']) == len(assessment['trials'])
+                and assessment['authorization']['state'] in ('authorized', 'paused')):
+            assessment['authorization']['state'] = 'complete'
         atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
-    return assessment_report(state_dir, assessment_id)
+    return _refresh_report(state_dir, assessment_id)
 
 
-def assessment_report(state_dir, assessment_id):
-    assessment = _assessment(state_dir, assessment_id)
-    profile = _profile(state_dir, assessment['profile_id'])
-    current = _binding(profile) == assessment['binding']
+def _assessment_buckets(assessment):
     buckets = {}
     for trial in assessment['trials']:
         brief = trial['brief']
@@ -377,7 +386,95 @@ def assessment_report(state_dir, assessment_id):
         bucket['trials'] += 1
         bucket['cases'].add(trial['case_id'])
         bucket['passed'] += assessment['receipts'].get(trial['trial_id'], {}).get('passed') is True
-    qualified = [b['scope'] for b in buckets.values() if current and b['trials'] >= 6 and b['passed']==b['trials'] and len(b['cases'])>=3]
+    return list(buckets.values())
+
+
+def _trial_observation(store, job):
+    attempt = store.attempt(job['attempt_id']) if job['attempt_id'] else None
+    data = attempt['data'] if attempt else {}
+    stats = data.get('stats', data.get('terminal', {}).get('stats', {}))
+    return {'submitted': bool(data.get('submitted_at')), 'reason': job['reason'],
+            'submitted_at': data.get('submitted_at'), 'finished_at': data.get('finished_at'),
+            'inference_seconds': data.get('inference_seconds'),
+            **{k: stats.get(k) for k in ('input_tokens', 'total_output_tokens', 'reasoning_output_tokens')}}
+
+
+def _refresh_report(state_dir, assessment_id):
+    report = assessment_report(state_dir, assessment_id)
+    if report.get('schema_version') == 1:
+        atomic_json(Path(state_dir) / 'assessments' / assessment_id / 'report.json', report)
+    return report
+
+
+def assessment_report(state_dir, assessment_id, *, check_current=False):
+    assessment = _assessment(state_dir, assessment_id)
+    buckets = _assessment_buckets(assessment)
+    if assessment.get('schema_version') == 1:
+        store = Store(state_dir, read_only=True) if (Path(state_dir) / 'state.sqlite3').exists() else None
+        jobs = {t['trial_id']: job for t, job in _run_jobs(store, assessment)} if store else {}
+        counts = dict.fromkeys(('planned', 'submitted', 'passed', 'failed', 'evaluated', 'awaiting_verification', 'unresolved', 'not_run'), 0)
+        results = []
+        for trial in assessment['trials']:
+            receipt = assessment['receipts'].get(trial['trial_id'])
+            job = jobs.get(trial['trial_id'])
+            observed = ({k: v for k, v in receipt.items() if k not in ('trial_id', 'passed', 'status', 'memory')}
+                        if receipt else _trial_observation(store, job) if job else {
+                            'submitted': False, **dict.fromkeys(('reason', 'submitted_at', 'finished_at', 'inference_seconds',
+                                                               'input_tokens', 'total_output_tokens', 'reasoning_output_tokens'))})
+            blocker = _trial_blocker(store, job) if job and not receipt else None
+            if receipt: disposition = 'passed' if receipt['passed'] else 'failed'
+            elif not observed['submitted']: disposition = 'not_run'
+            elif blocker: disposition = 'unresolved'
+            elif job['status'] in ('candidate_ready', 'checking'): disposition = 'awaiting_verification'
+            else: disposition = 'unresolved'
+            counts['planned'] += 1
+            counts['submitted'] += observed['submitted']
+            counts[disposition] += 1
+            results.append({'trial_id': trial['trial_id'], 'case_id': trial['case_id'],
+                            'group': _case_group({**trial['brief']['task_requirements'], 'capability': trial['brief']['capability']}),
+                            'job_id': job['job_id'] if job else observed.get('job_id'), 'disposition': disposition,
+                            'infrastructure_blocker': blocker, **observed})
+        counts['evaluated'] = counts['passed'] + counts['failed']
+        freshness = 'unverified'
+        if check_current:
+            try: _check_run_bindings(state_dir, assessment, check_runtime=True)
+            except OSError: freshness = 'unverified'
+            except ValueError as error:
+                freshness = 'unverified' if str(error) in ('unknown_profile', 'assessment_model_unavailable', 'runtime_binding_unavailable', 'isolation_unsupported') else 'stale'
+            else: freshness = 'current'
+        source = assessment['source_profile']
+        operating = {'candidate': {'status': 'unavailable'}, 'source_profile': None}
+        try: operating['routing_enabled'] = read_config(state_dir).get('routing_enabled') is True
+        except (ValueError, OSError): operating['routing_enabled'] = None
+        for key, identifier in [('candidate', assessment['profile_id']), ('source_profile', source['profile_id'] if source else None)]:
+            if identifier is None: continue
+            try: current = _profile(state_dir, identifier)
+            except (ValueError, OSError): operating[key] = {'status': 'unavailable'}
+            else:
+                expected = assessment['profile_snapshot']['approval'] if key == 'candidate' else source['approval_at_preparation']
+                binding = assessment['binding'] if key == 'candidate' else source['binding']
+                same = (current.get('approval') == expected and current.get('request_settings') == binding['settings']
+                        and current.get('artifact', {}).get('digest') == binding['artifact']['digest']
+                        and all(current.get(k) == binding['runtime'][k] for k in ('model_id', 'endpoint', 'adapter', 'runtime_catalog')))
+                operating[key] = {'status': 'unchanged' if same else 'changed', 'recorded_approval': current.get('approval')}
+        return {'schema_version': 1, 'assessment_id': assessment_id, 'state': assessment['authorization']['state'],
+                'profile': assessment['profile_snapshot'], 'source_profile': source, 'operating_state': operating,
+                'provenance': {k: assessment['preview'][k] for k in ('binding', 'fixture_digest', 'runtime_bundle', 'verification', 'prepared_at', 'loaded_config')},
+                'consented_at': assessment['authorization']['timestamp'],
+                'evidence_paths': {'assessment': str(Path(state_dir) / 'assessments' / assessment_id / 'assessment.json'),
+                                   'report': str(Path(state_dir) / 'assessments' / assessment_id / 'report.json')},
+                'groups': [{'scope': b['scope'], 'planned': b['trials'], 'passed': b['passed'], 'distinct_cases': len(b['cases']),
+                            'evaluated': sum(r['disposition'] in ('passed', 'failed') for r in results if r['group'] == _case_group(b['scope'])),
+                            'failed': sum(r['disposition'] == 'failed' for r in results if r['group'] == _case_group(b['scope'])),
+                            'provisional_synthetic_evidence': b['trials'] >= 6 and b['passed'] == b['trials'] and len(b['cases']) >= 3} for b in buckets],
+                'counts': counts, 'trials': results, 'freshness': freshness,
+                'limitations': ['Synthetic evidence does not approve a model or enable routing.',
+                                'Results do not establish project reliability, specialist competence, higher concurrency, or subscription savings.',
+                                'Python code-change paths are overlapping verification paths, not independent abilities.',
+                                'Missing observations remain unknown; recorded approval is not a fresh runtime qualification.']}
+    profile = _profile(state_dir, assessment['profile_id'])
+    current = _binding(profile) == assessment['binding']
+    qualified = [b['scope'] for b in buckets if current and b['trials'] >= 6 and b['passed']==b['trials'] and len(b['cases'])>=3]
     capacity = profile.get('capacity_evidence', {})
     benefit = profile.get('benefit_evidence') or {}
     ready = bool(qualified)
@@ -547,6 +644,7 @@ def control_assessment(state_dir, assessment_id, action):
             record_trial(state_dir, assessment_id, {'trial_id': trial['trial_id'], 'job_id': job['job_id']})
     assessment = _assessment(state_dir, assessment_id)
     progress = _run_progress(store, assessment)
+    _refresh_report(state_dir, assessment_id)
     if action == 'resume' and progress['state'] == 'authorized': launch(state_dir, 'scheduler', 'queue')
     return progress
 
