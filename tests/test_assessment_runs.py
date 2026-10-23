@@ -499,3 +499,79 @@ class AssessmentRuns(Fixture):
                 'checking_tokens': None, 'fallback_tokens': None, 'native_baseline_tokens': None,
                 'onboarding_tokens': None, 'latency_seconds': 1, 'provenance': 'fictional test'})
         self.assertEqual((self.state / 'profiles/fictional.json').read_bytes(), before)
+
+    def test_cli_prepare_consent_report_and_stop_share_the_run(self):
+        from tests.test_cli import CLI
+        selection = self.root / 'selection.json'
+        atomic_json(selection, {'groups': [self.group]})
+        prepared = CLI.invoke(self, 'assessment', 'prepare', '--profile-id', 'fictional', '--selection', str(selection))
+        identifier = prepared['assessment_id']
+        result = CLI.invoke(self, 'assessment', 'consent', '--assessment-id', identifier,
+                            '--preview-digest', prepared['preview_digest'], '--owner-reference', 'fixture-cli-consent')
+        self.assertEqual(result['state'], 'authorized')
+        self.assertEqual(CLI.invoke(self, 'assessment', 'pause', '--assessment-id', identifier)['state'], 'paused')
+        self.assertEqual(CLI.invoke(self, 'assessment', 'stop', '--assessment-id', identifier)['state'], 'stopped')
+        before_calls = list(self.server.calls)
+        report = CLI.invoke(self, 'assessment', 'report', '--assessment-id', identifier)
+        self.assertEqual(report['counts']['not_run'], 6)
+        self.assertEqual(before_calls, self.server.calls)
+        self.assertFalse(any(method == 'POST' for method, _ in self.server.calls))
+
+    def test_focused_run_completes_through_existing_native_verification(self):
+        from local_model_delegation.store import Store
+        from local_model_delegation.worker import run_local_attempt, wait_job
+        from local_model_delegation.validation import prepare_verification, run_native_checks, record_verification
+        prepared, record, _ = self.saved_run()
+        self.consent(prepared)
+        store = Store(self.state)
+        before = (self.state / 'profiles/fictional.json').read_bytes()
+        cases = [(' a ', 'a'), ('a', 'A'), ('a-b-c', 'abc')]
+        for trial in record['trials']:
+            argument, expected = cases[int(trial['case_id'][-1])]
+            test_source = ('import unittest\nfrom helper import transform\nclass Tests(unittest.TestCase):\n'
+                           f'    def test_contract(self):\n        self.assertEqual(transform({argument!r}), {expected!r})\n')
+            self.server.answer = json.dumps({'files': {'test_helper.py': test_source}, 'summary': 'Expose the stated difference'})
+            with patch('local_model_delegation.worker.launch'):
+                job = assessment.submit_trial(self.state, prepared['assessment_id'], trial['trial_id'])
+            reserved = self.admit(store, job)
+            self.assertEqual(run_local_attempt(self.state, reserved['attempt_id']), 0)
+            self.assertEqual(wait_job(self.state, job['job_id'], 0)['status'], 'candidate_ready')
+            session = prepare_verification(self.state, job['job_id'])
+            checks = run_native_checks(self.state, job['job_id'])
+            self.assertEqual(checks['checks'], {'syntax': True})
+            receipt = {k: session[k] for k in ('job_id', 'attempt_id', 'native_task_id', 'candidate_hash',
+                                              'source_hash', 'acceptance_hash', 'session_token')}
+            # The native fixture reviewer checks the exact expected boundary case, independently of syntax.
+            self.assertIn(f'transform({argument!r}), {expected!r}', test_source)
+            receipt.update(criteria=[True], checks=checks['checks'], claims=[])
+            self.assertEqual(record_verification(self.state, job['job_id'], receipt)['status'], 'accepted')
+            final = assessment.record_trial(self.state, prepared['assessment_id'], {'trial_id': trial['trial_id'], 'job_id': job['job_id']})
+        self.assertEqual(final['state'], 'complete')
+        self.assertEqual(final['counts']['passed'], 6)
+        self.assertEqual(final['counts']['evaluated'], 6)
+        self.assertEqual(final['counts']['not_run'], 0)
+        self.assertTrue(final['groups'][0]['provisional_synthetic_evidence'])
+        self.assertEqual(self.server.calls.count(('POST', '/api/v1/chat')), 6)
+        self.assertEqual((self.state / 'profiles/fictional.json').read_bytes(), before)
+        last_receipt = {'trial_id': trial['trial_id'], 'job_id': job['job_id']}
+        self.assertEqual(assessment.record_trial(self.state, prepared['assessment_id'], last_receipt), final)
+
+    def test_full_run_records_36_terminal_failures_without_retries(self):
+        from local_model_delegation.store import Store
+        from local_model_delegation.worker import run_local_attempt
+        prepared, record, _ = self.saved_run({'all': True})
+        self.consent(prepared)
+        store = Store(self.state)
+        self.server.output_tokens = self.candidate['request_settings']['max_output_tokens']
+        for trial in record['trials']:
+            with patch('local_model_delegation.worker.launch'):
+                job = assessment.submit_trial(self.state, prepared['assessment_id'], trial['trial_id'])
+            reserved = self.admit(store, job)
+            run_local_attempt(self.state, reserved['attempt_id'])
+            report = assessment.record_trial(self.state, prepared['assessment_id'], {'trial_id': trial['trial_id'], 'job_id': job['job_id']})
+        self.assertEqual(report['state'], 'complete')
+        self.assertEqual(report['counts']['failed'], 36)
+        self.assertEqual(report['counts']['submitted'], 36)
+        self.assertEqual(len(report['groups']), 6)
+        self.assertEqual(self.server.calls.count(('POST', '/api/v1/chat')), 36)
+        self.assertTrue(all(t['reason'] == 'output_budget_exhausted' for t in report['trials']))

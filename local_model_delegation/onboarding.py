@@ -213,9 +213,12 @@ def prepare_assessment(state_dir, profile_id, selection, *, source_profile_id=No
     if any(not context_fits(t['brief'], profile, loaded) for t in trials):
         raise ValueError('assessment_context_unfit')
     bundle = pin_runtime_bundle(state_dir)
+    package_manifest = Path(__file__).resolve().parents[1] / 'plugin.json'
+    package = load_json(package_manifest.read_text()) if package_manifest.is_file() else {}
     preview = {'profile_id': profile_id, 'binding': binding, 'source_profile': source_profile,
                'profile_digest': digest(profile),
                'prepared_at': datetime.now(timezone.utc).isoformat(),
+               'package': {k: package.get(k) for k in ('name', 'version')},
                'groups': groups, 'distinct_cases': len({t['case_id'] for t in trials}),
                'max_submissions': len(trials), 'concurrency': 1, 'loaded_config': loaded['config'],
                'fixture_digest': digest(manifest), 'runtime_bundle': bundle.name,
@@ -459,7 +462,7 @@ def assessment_report(state_dir, assessment_id, *, check_current=False):
                 operating[key] = {'status': 'unchanged' if same else 'changed', 'recorded_approval': current.get('approval')}
         return {'schema_version': 1, 'assessment_id': assessment_id, 'state': assessment['authorization']['state'],
                 'profile': assessment['profile_snapshot'], 'source_profile': source, 'operating_state': operating,
-                'provenance': {k: assessment['preview'][k] for k in ('binding', 'fixture_digest', 'runtime_bundle', 'verification', 'prepared_at', 'loaded_config')},
+                'provenance': {k: assessment['preview'][k] for k in ('binding', 'fixture_digest', 'runtime_bundle', 'verification', 'prepared_at', 'loaded_config', 'package')},
                 'consented_at': assessment['authorization']['timestamp'],
                 'evidence_paths': {'assessment': str(Path(state_dir) / 'assessments' / assessment_id / 'assessment.json'),
                                    'report': str(Path(state_dir) / 'assessments' / assessment_id / 'report.json')},

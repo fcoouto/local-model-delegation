@@ -28,7 +28,20 @@ class Plugin(Fixture):
         self.module();root=REPO_ROOT;manifest=json.loads((root/'plugin.json').read_text())
         self.assertEqual(manifest['name'],'local-model-delegation')
         self.assertTrue((root/manifest['extensions']['com.openai']['onboardingSkill']).is_file())
-        for name in ('setup','local-delegation'):self.assertTrue((root/'skills'/name/'SKILL.md').is_file())
+        for name in ('setup','local-delegation','assess-my-model'):self.assertTrue((root/'skills'/name/'SKILL.md').is_file())
+        self.assertEqual(manifest['extensions']['com.openai']['onboardingSkill'], './skills/setup/SKILL.md')
+        metadata = (root/'skills/assess-my-model/agents/openai.yaml').read_text()
+        self.assertIn('display_name: "Assess my Model"', metadata)
+
+    def test_pinned_runtime_has_assessment_choices_and_original_fixture(self):
+        import subprocess
+        import sys
+        bundle = self.module().pin_runtime_bundle(self.state)
+        result = subprocess.run([sys.executable, '-B', str(bundle/'delegate.py'),
+                                 '--state-dir', str(self.root/'missing'), 'assessment', 'choices'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['total_trials'], 36)
+        self.assertFalse((self.root/'missing').exists())
 
     def test_cache_refresh_keeps_running_job_bundle(self):
         module=self.module();module.initialize_state(self.state)

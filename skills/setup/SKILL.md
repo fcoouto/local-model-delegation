@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Use when onboarding, resuming setup, assessing models, updating or removing the Local Model Delegation plugin on macOS.
+description: Use when onboarding, resuming setup, explicitly approving local model use, updating or removing the Local Model Delegation plugin on macOS.
 ---
 
 # Set up Local Model Delegation
@@ -18,7 +18,7 @@ Example after detecting a missing runtime: “The plugin is installed; delegatio
 1. **Inspect.** Check macOS, Codex access, Python 3.11+, installed plugin location and existing state before changes. Use the packaged `../../delegate.py`; run read-only `doctor` first. Reuse verified observations. Preserve native model, provider, reasoning and authentication settings. If the plugin is absent, follow the [public onboarding guide](../../docs/onboarding.md) before invoking packaged commands.
 2. **Resume or initialize.** Reuse the selected state, endpoint, profiles and visibility preference. Only schema-2 state is supported; reject unsupported state without rewriting it. After authorized installation/setup, initialize missing private state with routing disabled. Read [Setup operations](references/operations.md) before executing this or later stages; it is the required technical procedure.
 3. **Connect.** If LM Studio is missing, offer help with that installation as the next decision. If present but stopped, guide one start-server action. Use the recorded endpoint; otherwise ask for the loopback URL shown by LM Studio. Discover read-only and prepare an unapproved profile. Resolve one missing prerequisite at a time.
-4. **Assess.** Follow the practical qualification runbook in the operations reference. Start with a few representative tasks at a realistic context budget, one slot and native verification. Reuse explicit consent; keep synthetic assessment consent separate. Report observed scope, failures and unknowns.
+4. **Assess if requested.** Reuse valid evidence from a supplied assessment ID. For a synthetic assessment, use **local-model-delegation:assess-my-model** and its [shared run procedure](../assess-my-model/references/operations.md): focused ability by default, optional all abilities, consent per frozen run, one slot and native verification. Never repeat completed trials merely because the entry point changed. The practical representative-task path remains available under explicit provisional approval; see the operations reference.
 5. **Approve, then activate.** Explicit owner permission permits a bounded provisional scope even when reliability and savings remain under assessment. Explain that limit and ask the owner to approve the exact model/settings and operating scope. Reuse explicit approval already granted. Routing activation is a separate decision; reuse it when already authorized. Verify both gates independently; a local task is verified only when its execution and native acceptance were observed. Do not fabricate benefit evidence to activate a model.
 
 ## Pauses and common mistakes

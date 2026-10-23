@@ -1,0 +1,4 @@
+interface:
+  display_name: "Assess my Model"
+  short_description: "Assess local abilities with consent for each run"
+  default_prompt: "Use $assess-my-model to assess one focused ability of my loaded local model."

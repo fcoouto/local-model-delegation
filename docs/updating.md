@@ -18,6 +18,8 @@ Before changing configuration, save an owner-only copy of the selected state's c
 
 Routing and assessment admission must both be disabled during preparation and verification. Pause new admission within the authorized update scope, preserve every other setting, and let active work settle before preparation. Do not disable or interrupt peer models. Previously disabled preferences remain disabled; an explicit owner request to remain paused takes precedence over restoration. Assessment admission is not automatically restarted by an update.
 
+For **Assess my Model**, use `assessment pause --assessment-id ID` for each authorized run, including runs without queued jobs. Global standing policy does not revoke per-run permission. Preparation refuses active run permission and malformed records. Preserve submitted/uncertain attempts and private evidence. Never restore per-run permission automatically; explicit resume rechecks frozen helper/fixture/model settings and rejects changed bindings. [Assessment operations](../skills/assess-my-model/references/operations.md) defines the controls.
+
 Use the staged target helper for preparation. This is the explicit bootstrap path when an older installed helper lacks the new update commands. In the commands below, `TARGET`, `INSTALLED`, `STATE` and `RECEIPT` stand for verified absolute paths; the agent supplies them, not the owner.
 
 ```sh

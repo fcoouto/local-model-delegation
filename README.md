@@ -38,6 +38,7 @@ Reopen Codex or start a fresh chat if the host needs to reload skills. The agent
 |---|---|---|
 | New to local delegation | Paste the prompt above | The agent checks prerequisites and guides installation and setup |
 | Partly configured | Paste the setup prompt | The agent resumes at the first unfinished step |
+| Want assessment without onboarding | Use **Assess my Model** | Choose a focused ability or all supported abilities, consent to one run, and receive a private report |
 | Want the latest plugin version | Paste the update prompt | The agent preserves state and verifies a numbered update |
 | Want to inspect the project first | [Clone and inspect](#clone-and-inspect) | Read the source and run a read-only check |
 | Want the technical details | [Shared state](#shared-state-and-updates) · [Contracts](#contracts-and-trust) | Review storage, approvals, verification and limits |
@@ -88,9 +89,11 @@ python3.11 -B delegate.py doctor
 
 Doctor is read-only and does not contact LM Studio unless `--inspect-runtime` is explicitly requested with a configured loopback endpoint. It does not install dependencies.
 
-The root [plugin manifest](plugin.json) packages the [setup skill](skills/setup/SKILL.md), [delegation workflow](skills/local-delegation/SKILL.md) and shared [delegation core](local_model_delegation/). The core is implemented in Python; that does not limit delegated tasks to Python. Use native Codex plugin installation controls when ready to install; no separate installer or daemon is provided. The package follows the [official plugin format](https://developers.openai.com/plugins/build/plugins). Public source availability is separate from plugin-directory publication or live qualification.
+The root [plugin manifest](plugin.json) packages [Setup](skills/setup/SKILL.md), [Assess my Model](skills/assess-my-model/SKILL.md), [Local Delegation](skills/local-delegation/SKILL.md) and the shared [delegation core](local_model_delegation/). The core is implemented in Python; that does not limit delegated tasks to Python. Use native Codex plugin installation controls when ready to install; no separate installer or daemon is provided. The package follows the [official plugin format](https://developers.openai.com/plugins/build/plugins). Public source availability is separate from plugin-directory publication or live qualification.
 
-After authorized installation, `setup` initializes disabled private state. Installation, standing assessment consent, exact-model approval and routing activation remain separate decisions. Current builds/tests do none of those on the developer's real machine.
+After authorized installation, `setup` initializes disabled private state. Installation, per-run assessment consent, exact-model approval and routing activation remain separate decisions. Current builds/tests do none of those on the developer's real machine.
+
+**Assess my Model** tests an already loaded local text model without onboarding it. Focused coverage is the default; all supported abilities is explicit. It reuses Setup's helpers, saves an unapproved candidate and private evidence, and leaves existing approvals/routing intact. Reports remain readable offline. Only an explicit request such as “onboard this model” hands the result to Setup. Legacy standing-consent assessments retain their original meaning.
 
 Approval records permission for an exact model, settings and practical operating scope; it does not certify reliability. Start with one slot and a few representative, natively verified tasks. Once the owner approves that provisional scope and enables routing, ordinary authorized tasks provide measurement evidence. Missing telemetry or comparable baselines keeps savings unknown. Known negative benefit and suspended scopes remain ineligible; measured benefit for the matching scope takes priority over unknown benefit.
 

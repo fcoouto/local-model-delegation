@@ -245,4 +245,4 @@ Plan self-review coverage: design entry/selection/preparation maps to Tasks 1 an
 
 Stop implementation when the source action, run-specific backend contracts, compatibility tests, scenario evaluation, and independent review pass. Report any desktop-discovery qualification as pending unless separately authorized and observed. Full source completion does not claim installation, model reliability, approval, activation, or savings.
 
-This document is an implementation plan only. The design is approved; implementation execution and its method have not yet been requested.
+The owner approved this implementation plan and inline execution with an independent final review on 2026-10-23. Implementation progress and exact checks are recorded in the task's private execution ledger. Publication, installation, model approval and live inference remain outside this task.
