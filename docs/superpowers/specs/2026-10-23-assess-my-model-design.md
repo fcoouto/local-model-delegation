@@ -1,6 +1,6 @@
 # Assess my Model
 
-Date: 2026-10-23. Status: design draft for owner review; not implemented.
+Date: 2026-10-23. Status: approved by the owner on 2026-10-23; not implemented.
 
 ## Purpose and agreed decisions
 
