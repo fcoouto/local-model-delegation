@@ -55,12 +55,19 @@ def check_release(root, tag):
 
 def _files(root):
     result = {}
-    for path in root.rglob('*'):
-        relative = path.relative_to(root)
-        if relative.parts[0] in ('updates', 'locks', 'state.sqlite3', 'state.sqlite3-wal', 'state.sqlite3-shm'): continue
-        if '__pycache__' in relative.parts: continue
-        if path.is_symlink(): raise ValueError('unsafe_update_file')
-        if path.is_file(): result[str(relative)] = _hash_file(path)
+    def walk_error(error): raise error
+    for directory, directories, files in os.walk(root, followlinks=False, onerror=walk_error):
+        for name in sorted(directories + files):
+            path = Path(directory)/name
+            relative = path.relative_to(root)
+            if (relative.parts[0] in ('updates', 'locks', 'state.sqlite3', 'state.sqlite3-wal', 'state.sqlite3-shm')
+                    or name == '__pycache__'):
+                if name in directories: directories.remove(name)
+                continue
+            if name in ('node_modules', '.venv', 'venv') and path.is_dir():
+                raise ValueError('assessment_runtime_in_state:' + str(relative))
+            if path.is_symlink(): raise ValueError('unsafe_update_file')
+            if path.is_file(): result[str(relative)] = _hash_file(path)
     return result
 
 
@@ -120,6 +127,8 @@ def prepare_update(state_dir, target_root=PACKAGE_ROOT, installed_root=PACKAGE_R
         with store.db() as db:
             settled = _settled_assessments(store, db)
             _quiescent(db, settled, allow_pending_admission=True)
+        # Refuse misplaced runtimes before changing observers, bundles or backups.
+        _files(store.root)
         from .habblaud import quiesce
         quiesce(store.root)
         bundle = pin_runtime_bundle(store.root, Path(installed_root))

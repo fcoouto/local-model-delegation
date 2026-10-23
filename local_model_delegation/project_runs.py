@@ -78,7 +78,8 @@ def verify_references(state_dir, task):
     from .validation import _qualified_isolation
     if (execution['public_checks'] or execution['private_checks']) and not _qualified_isolation():
         raise ValueError('isolation_unsupported')
-    parent = private_dir(Path(state_dir) / 'project-reference-checks')
+    from .assessment_storage import workspace_root
+    parent = private_dir(workspace_root(state_dir) / 'reference-checks')
     observations = {}
     for variant in ('base', 'reference'):
         with tempfile.TemporaryDirectory(dir=parent) as directory:

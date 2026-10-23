@@ -9,6 +9,12 @@ from tests.support import Fixture, FakeRuntime, REPO_ROOT, FIXED, SUPPLIED, ADDE
 
 
 class CLI(Fixture):
+    def test_assessment_storage_is_offline_and_does_not_create_state(self):
+        result = self.invoke('assessment', 'storage')
+        self.assertEqual(result['state_root'], str(self.state))
+        self.assertEqual(result['runtimes'], str(self.state.with_name('state-assessment-workspaces')/'runtimes'))
+        self.assertFalse(self.state.exists())
+
     def invoke(self, *args):
         result = subprocess.run([sys.executable, "-B", str(REPO_ROOT / "delegate.py"), "--state-dir", str(self.state), *args], capture_output=True, text=True)
         self.assertIn(result.returncode, (0, 2), result.stderr)
