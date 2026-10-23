@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.10 (unpublished local package)
+
+- Add **Assess my Model** as a dedicated action, defaulting to one focused ability with an explicit all-abilities option.
+- Reuse Setup's profile preparation, assessment fixtures, execution queue and native verification. Save unapproved profiles and assessment reports without onboarding or activating routing.
+- Bind consent to each frozen run; preserve pause, stop, resume and uncertain-attempt handling. Onboarding requires an explicit owner request.
+- Keep reports offline by default and distinguish model failures from unavailable verification. Preserve existing approvals and private history through updates.
+
 ## 0.3.9
 
 - Correct the guided update workflow to record routing and Habblaud preferences before pausing, restore previously enabled preferences after successful verification, and read back the final state.
