@@ -4,6 +4,7 @@ from functools import lru_cache
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -69,9 +70,15 @@ def python_test_methods(tree):
             for method in cls.body if isinstance(method, ast.FunctionDef) and method.name.startswith("test")}
 
 
-def parse_python_proposal(text, brief):
+def _candidate_json(text):
+    """Allow one whole JSON fence only at the model-output boundary."""
     if len(text.encode()) > MAX_ANSWER_BYTES: raise ValueError("oversized_answer")
-    value = load_json(text)
+    fenced = re.fullmatch(r"```(?:json)?[ \t]*\r?\n(.*)\r?\n```[ \t]*", text.strip(), re.DOTALL)
+    return load_json(fenced.group(1) if fenced else text)
+
+
+def parse_python_proposal(text, brief):
+    value = _candidate_json(text)
     if not isinstance(value, dict) or set(value) != {"files", "summary"} or not isinstance(value["summary"], str) or not isinstance(value["files"], dict) or not value["files"]:
         raise ValueError("invalid_candidate")
     files = value["files"]
@@ -293,8 +300,7 @@ def _verify_python_candidate(store, job_id):
 
 def parse_proposal(text, brief):
     """Structural checks only. Semantic acceptance belongs to the native coordinator."""
-    if len(text.encode()) > MAX_ANSWER_BYTES: raise ValueError('oversized_answer')
-    value = load_json(text)
+    value = _candidate_json(text)
     summary = brief['capability'] == 'file_summary'
     expected = {'summary', 'claims' if summary else 'files'}
     if not isinstance(value, dict) or set(value) != expected or not isinstance(value['summary'], str):

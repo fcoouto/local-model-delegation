@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.12 — 2026-10-23 (unpublished local build)
+
+- Accept a single complete Markdown JSON fence at the model-output boundary, preserving strict JSON, size limits and proposal checks.
+- Reject surrounding prose, multiple documents and malformed wrappers without changing saved state or receipt parsing.
+
 ## 0.3.11 — 2026-10-23 (unpublished local build)
 
 - Resolve Bionic hub aliases to their exact concrete model inventory and bind alias files to identity.
