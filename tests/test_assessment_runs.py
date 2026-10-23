@@ -232,9 +232,9 @@ class AssessmentRuns(Fixture):
         with self.assertRaisesRegex(ValueError, 'assessment_scope_mismatch'):
             assessment.authorize_assessment(self.state, trial['brief'], permit, purpose='verify', job={**job, 'attempt_id': None})
 
-    def queued_run(self):
+    def queued_run(self, selection=None):
         from local_model_delegation.store import Store
-        prepared, record, _ = self.saved_run()
+        prepared, record, _ = self.saved_run(selection)
         self.consent(prepared)
         with patch('local_model_delegation.worker.launch'):
             job = assessment.submit_trial(self.state, prepared['assessment_id'], record['trials'][0]['trial_id'])
@@ -729,3 +729,45 @@ class AssessmentRuns(Fixture):
                 report = assessment.assessment_report(self.state, prepared['assessment_id'])
                 self.assertEqual(report['counts']['evaluated'], 0)
                 self.assertEqual(report['counts']['unresolved'], 1)
+
+
+    def test_protected_python_verification_distinguishes_unresolved_from_model_failure(self):
+        from contextlib import nullcontext
+        from local_model_delegation.worker import run_local_attempt
+        from local_model_delegation.validation import verify_candidate
+        for case, evaluated in (('corrupt_artifact', False), ('runner_unavailable', False),
+                                ('baseline_invalid', False), ('candidate_runner_unavailable', False),
+                                ('invalid_json', True), ('invalid_python', True),
+                                ('wrong_answer', True), ('valid_answer', True)):
+            with self.subTest(case=case):
+                prepared, record, store, job = self.queued_run(
+                    {'groups': [{**self.group, 'capability': 'python_code_change'}]})
+                files = {n: item['content'] for n, item in record['trials'][0]['brief']['files'].items()}
+                files['helper.py'] = 'def transform(text):\n    return text.strip()\n'
+                files['test_helper.py'] += '\n    def test_regression(self):\n        self.assertEqual(transform(" a "), "a")\n'
+                if case == 'wrong_answer': files['helper.py'] = 'def transform(text):\n    return text\n'
+                if case == 'invalid_python': files['helper.py'] = 'def broken('
+                self.server.answer = 'not JSON' if case == 'invalid_json' else json.dumps({'summary': 'candidate', 'files': files})
+                reserved = self.admit(store, job)
+                run_local_attempt(self.state, reserved['attempt_id'])
+                if case == 'corrupt_artifact':
+                    Path(store.job(job['job_id'])['result_path']).write_text('{')
+                runner = nullcontext()
+                if case in ('runner_unavailable', 'baseline_invalid'):
+                    result = ({'ok': False, 'reason': 'check_runner_failed'} if case == 'runner_unavailable'
+                              else {'ok': True, 'run': 1, 'failures': 0, 'errors': 0, 'skipped': 0})
+                    runner = patch('local_model_delegation.validation.run_python_tests', return_value=result)
+                elif case == 'candidate_runner_unavailable':
+                    runner = patch('local_model_delegation.validation.run_python_tests', side_effect=[
+                        {'ok': False, 'run': 1, 'failures': 1, 'errors': 0, 'skipped': 0},
+                        *[{'ok': False, 'reason': 'check_runner_failed'}] * 4])
+                with runner: verify_candidate(self.state, job['job_id'])
+                with patch('local_model_delegation.worker.launch'):
+                    progress = self.control(prepared, 'resume')
+                report = assessment.assessment_report(self.state, prepared['assessment_id'])
+                self.assertEqual(report['counts']['evaluated'], int(evaluated))
+                self.assertEqual(report['counts']['unresolved'], int(not evaluated))
+                self.assertEqual(report['counts']['failed'], int(evaluated and case != 'valid_answer'))
+                if not evaluated:
+                    self.assertEqual(progress['state'], 'paused')
+                    self.assertIsNone(progress['next_trial_id'])

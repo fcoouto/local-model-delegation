@@ -237,6 +237,7 @@ def _verify_python_candidate(store, job_id):
         if not db.execute("UPDATE jobs SET status='checking' WHERE job_id=? AND status='candidate_ready'", (job_id,)).rowcount:
             return envelope(store.job(job_id))
     receipt = {}
+    category = 'verification'
     try:
         current = authorize_job(store, job, purpose='verify')
         if current.get("approval") != job["profile"].get("approval"): raise ValueError("approval_changed")
@@ -244,7 +245,10 @@ def _verify_python_candidate(store, job_id):
         if path.is_symlink() or not path.resolve().is_relative_to(store.root / "jobs" / job_id): raise ValueError("unsafe_result")
         artifact = load_json(path.read_text())
         if text_hash(artifact["text"]) != artifact["sha256"]: raise ValueError("candidate_hash_mismatch")
-        candidate = parse_python_proposal(artifact["text"], brief)
+        try: candidate = parse_python_proposal(artifact["text"], brief)
+        except (SyntaxError, ValueError, TypeError):
+            category = 'format'
+            raise
         if not python_isolation_supported(brief): raise ValueError("isolation_unsupported")
         original = {name: item["content"] for name, item in brief["files"].items()}
         changed = {**original, **candidate}
@@ -253,11 +257,16 @@ def _verify_python_candidate(store, job_id):
         source_only = {n: t for n, t in original.items() if n not in brief["supplied_tests"]}
         changed_source = {n: t for n, t in changed.items() if not Path(n).name.startswith("test_")}
         receipt["baseline"] = run_python_tests({**source_only, **brief["independent_tests"]}, oracle_modules)
+        if (receipt["baseline"].get("reason") or receipt["baseline"].get("failures", 0) < 1
+                or receipt["baseline"].get("errors", 0) or receipt["baseline"].get("skipped", 0)):
+            raise ValueError("baseline_verification_unavailable")
         receipt["independent"] = run_python_tests({**changed_source, **brief["independent_tests"]}, oracle_modules)
         test_modules = [Path(n).with_suffix("").as_posix().replace("/", ".") for n in brief["supplied_tests"]]
         # Unchanged methods can still be weakened by added setup code or global rebinding.
         receipt["protected"] = run_python_tests({**changed_source, **{n: original[n] for n in brief["supplied_tests"]}}, test_modules)
         receipt["submitted"] = run_python_tests(changed, test_modules)
+        if any(receipt[name].get("reason") for name in ("independent", "protected", "submitted")):
+            raise ValueError("candidate_verification_unavailable")
         effective = False
         added_count = 0
         for name in brief["supplied_tests"]:
@@ -265,10 +274,11 @@ def _verify_python_candidate(store, job_id):
             added_count += len(added)
             if added:
                 result = run_python_tests({**original, name: changed[name]}, [Path(name).stem], added)
+                if result.get("reason"): raise ValueError("regression_verification_unavailable")
                 effective |= result.get("failures", 0) > 0 and result.get("errors", 0) == 0
-        if (receipt["baseline"].get("failures", 0) < 1 or receipt["baseline"].get("errors", 0)
-                or not receipt["independent"].get("ok") or not receipt["protected"].get("ok")
+        if (not receipt["independent"].get("ok") or not receipt["protected"].get("ok")
                 or not receipt["submitted"].get("ok") or not added_count or not effective):
+            category = "semantic"
             raise ValueError("independent_checks_failed")
         if not source_matches(brief): raise ValueError("source_changed")
         current = authorize_job(store, job, purpose='verify')
@@ -284,10 +294,10 @@ def _verify_python_candidate(store, job_id):
         with store.db(write=True) as db:
             db.execute("UPDATE jobs SET status='accepted',reason=NULL WHERE job_id=? AND status='checking'", (job_id,))
     except (OSError, SyntaxError, ValueError, KeyError, TypeError) as error:
-        receipt.update(accepted=False, reason=str(error) if isinstance(error, ValueError) else type(error).__name__)
+        receipt.update(accepted=False, category=category, reason=str(error) if isinstance(error, ValueError) else type(error).__name__)
         atomic_json(store.root / "jobs" / job_id / "check-failure.json", receipt)
         from .measurements import collect_verdict
-        collect_verdict(store.root,job_id,receipt,False,'source_changed' if str(error)=='source_changed' else 'verification')
+        collect_verdict(store.root,job_id,receipt,False,'source_changed' if str(error)=='source_changed' else category)
         if str(error) == "source_changed":
             with store.db(write=True) as db:
                 db.execute("UPDATE jobs SET status=?,reason='source_changed' WHERE job_id=? AND status='checking'",

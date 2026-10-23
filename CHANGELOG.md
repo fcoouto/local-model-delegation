@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.13 — 2026-10-23
+
+- Publish the Assess my Model action with focused or all-ability assessment, explicit per-run consent, resumable execution, pause/stop controls and offline reports. Assessments do not grant model approval or activate routing.
+- Resolve Bionic virtual model aliases to their exact concrete inventory and normalize safetensors to the MLX runtime format while preserving exact identity checks.
+- Accept one complete Markdown JSON block for model proposals while preserving strict JSON decoding, size limits, paths, citations and native verification. Saved state and receipts remain strict plain JSON.
+- Keep corrupted protected-Python evidence and unavailable checkers unresolved instead of scoring them as model failures. Malformed proposals and failed behavioral checks still fail assessment.
+- Preserve worker fencing, assessment evidence and private state through pauses, verification failures and plugin updates.
+
+This release incorporates the unpublished 0.3.10–0.3.12 development builds below. Private model assessment reports and task-specific framework replay environments are not included.
+
 ## 0.3.12 — 2026-10-23 (unpublished local build)
 
 - Accept a single complete Markdown JSON fence at the model-output boundary, preserving strict JSON, size limits and proposal checks.
