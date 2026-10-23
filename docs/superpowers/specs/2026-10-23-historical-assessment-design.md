@@ -1,27 +1,27 @@
-# Historical project assessments
+# Mixed synthetic and historical project assessments
 
-Date: 2026-10-23. Status: independently reviewed design, awaiting owner approval.
+Date: 2026-10-23. Status: independently reviewed revised design, awaiting owner approval.
 
 ## Intent and agreed decisions
 
 Assess whether a local model can complete useful moderate and complex work, and separately measure how much slower or faster it is than a native model. Passing the existing small synthetic cases does not establish this broader scope.
 
-The owner selected 6–10 distinct real assignments per specialty, sourced from merged PRs and commits. Reviewed historical solutions provide references; fresh native attempts cover a subset. Use generous runtime-supported generation allowances, measured execution deadlines and multiple work cycles where needed. Speed never determines capability. A slow correct solution passes. An unfinished time-limited attempt is inconclusive, not evidence of inability.
+The owner selected eight distinct assignments per specialty: four synthetic assignments plus four real assignments sourced from merged PRs and commits. When suitable historical work is unavailable for a specialty, replace each missing historical assignment with a realistic synthetic assignment. Keep eight total and label every substitution. Reviewed historical solutions provide references; synthetic cases require independently verified reference solutions. Fresh native attempts cover a subset. Use generous runtime-supported generation allowances, measured execution deadlines and multiple work cycles where needed. Speed never determines capability. A slow correct solution passes. An unfinished time-limited attempt is inconclusive, not evidence of inability.
 
 This document designs the assessment upgrade only. It does not authorize inference, installation, loading, production approval, routing changes, publication of private project material or integration of candidate changes. Existing Qwen approvals remain intact. Campaign consent follows a concrete frozen preview.
 
 ## Approaches and scope
 
-The discussion considered expanding tiny synthetic tests, replaying curated historical work, and using an unrestricted repository agent. The owner chose historical work with reviewed references and selected fresh comparisons. More tiny cases would repeat the current evidence limit. An unrestricted agent would require a much larger tool and permission surface.
+The discussion considered expanding tiny synthetic tests, replaying only historical work, and using an unrestricted repository agent. The owner refined the selection to a mixed suite: four substantial synthetic assignments and four historical assignments, with realistic synthetic substitutes when history lacks coverage. This preserves comparable specialty coverage without depending on every repository containing every specialty. More tiny cases would repeat the current evidence limit. An unrestricted agent would require a much larger tool and permission surface.
 
-The proposed implementation is a coordinator-mediated historical runner. It reuses current proposal validation, queue ownership, isolated checks and native receipts. Multiple cycles add observed feedback and new candidate revisions; the model never gains an unrestricted shell. Existing synthetic assessments remain available with their original meaning.
+The proposed implementation is a coordinator-mediated assessment runner for both assignment origins. It reuses current proposal validation, queue ownership, isolated checks and native receipts. Multiple cycles add observed feedback and new candidate revisions; the model never gains an unrestricted shell. Existing synthetic assessments remain available with their original meaning.
 
 Coordinator proposals, open to correction during design approval:
 
-- Default to eight assignments per specialty: four moderate and four complex. Permit six to ten when source quality warrants it. Do not fill gaps with disguised synthetic cases.
-- Freeze two fresh native comparisons per specialty before observing candidate results: one moderate and one complex, chosen for representative constraints.
+- Keep exactly eight assignments per specialty. Propose two moderate and two complex assignments in each four-assignment group, preserving difficulty when a historical slot receives a synthetic substitute. Synthetic assignments must be substantial tasks, not repetitions of the current tiny cases.
+- Freeze two fresh native comparisons per specialty before observing candidate results: one moderate and one complex, covering both synthetic and historical origins when historical cases exist. When all historical slots require substitution, both comparisons are explicitly synthetic.
 - Permit at most three proposal cycles per assignment, including the first. Report first-cycle and final results separately. Do not count cycles as additional assignments.
-- Start curation with this plugin repository. Add another owner-selected repository only when the selected specialty lacks sufficient suitable history.
+- Start historical curation with this plugin repository. Use realistic synthetic substitutes for missing coverage; another owner-selected repository is optional, not a prerequisite.
 
 A specialty is a concrete capability and language/domain, with separate difficulty and context measurements. Protected and generic Python verification of the same case are not independent specialties or assignments. A custom specialty label never creates an approval.
 
@@ -55,19 +55,31 @@ For test-writing assignments, ask for tests against the appropriate production s
 
 For summary/documentation specialties, use historical documentation work only where the base sources support a substantive reconstruction. Verify citations and required claims independently. Do not invent six cases merely to fill that specialty.
 
-This repository offers candidate sources such as Bionic identity resolution (`3068c97`), strict Markdown JSON handling (`d5a34ed`) and update-preference preservation. These are not yet selected or certified moderate/complex. Curation may find fewer than six eligible cases for a specialty; report that shortage and request another repository rather than claiming complete coverage.
+This repository offers candidate sources such as Bionic identity resolution (`3068c97`), strict Markdown JSON handling (`d5a34ed`) and update-preference preservation. These are not yet selected or certified moderate/complex. Curation may find fewer than four eligible historical cases for a specialty. Fill the missing historical slots with realistic synthetic substitutes under the process below. Report the actual composition: for example, four planned synthetic, two historical and two synthetic substitutes. With no suitable history, report eight synthetic and zero historical assignments, not real-project evidence.
 
 Reusable packs are immutable and versioned, with explicit source/licensing provenance. Private pack content and results stay in private state. Publishing a public pack is a separate action. Reuse the same pack across models; tag potential training exposure and repeated assessment exposure as unknown or known. Reviewed historical code is a reference, not proof of unseen performance or a requirement to reproduce the same patch.
 
+## Realistic synthetic assignments and substitutions
+
+Create four distinct synthetic assignments per specialty regardless of available history. For each missing historical assignment, create one additional synthetic assignment targeting the uncovered specialty and the intended difficulty. Do not duplicate a case with renamed identifiers or count repair cycles as new assignments.
+
+Model synthetic tasks on realistic maintenance work: incomplete specifications resolved into observable requirements, interacting modules, existing APIs, regression constraints, meaningful edge cases and a runnable project fixture. Use relevant context rather than padding. Examples include a compatibility change that must preserve older callers, tests that distinguish a realistic regression, or a cross-file refactor with preserved behavior. The existing eight-file and verification limits still apply; do not claim unsupported specialties by inventing an unverifiable task.
+
+A native author prepares the requirements, starting snapshot, reference implementation and public checks. An independent native reviewer validates the requirements and reference, adds or reviews held-out edge cases, and confirms that plausible incorrect solutions are rejected. The assessed local model must not author or validate its own assessment. A fresh native comparison contestant must receive no author/reviewer context. Synthetic generation is preparation work with its own recorded model/settings and provenance; it is not a scored contestant attempt.
+
+For synthetic code changes, require the starting implementation to fail the targeted behavior and the verified reference to pass. For synthetic test-writing, require correct behavior to pass and realistic defect variants to fail through assertions. For summaries, independently validate required claims and citations against the supplied sources. Alternative valid solutions receive the same treatment as historical tasks. Reject ambiguous, contrived or unverifiable tasks instead of lowering acceptance standards.
+
+Freeze all eight assignments, references and actual origins before contestant execution. An unavailable verifier remains a coverage blocker; synthetic substitution cannot bypass missing language/runtime support. Pack revisions and subsequent reruns keep their own identity. Native-created synthetic references are verified references, never represented as merged or production-reviewed work.
+
 ## Data and evidence
 
-A versioned pack manifest binds assignment IDs, specialty, difficulty, source revisions, reviewer evidence, disclosure status, initial files, allowed working files, acceptance rubric, public feedback commands, private checks and pinned environment fingerprints. Record repository-relative paths and hashes without embedding credentials or machine-private source paths in distributable material.
+A versioned pack manifest binds assignment IDs, specialty, difficulty, planned slot (synthetic or historical), actual origin, substitution reason where applicable, source revisions when historical, synthetic authorship/provenance when generated, reference-review evidence, disclosure status, initial files, allowed working files, acceptance rubric, public feedback commands, private checks and pinned environment fingerprints. Synthetic assignments must not carry invented commit, merge or review provenance. Record repository-relative paths and hashes without embedding credentials or machine-private source paths in distributable material.
 
 The campaign preview binds pack digest, model artifact/runtime/settings, selected assignments, comparison IDs, cycle ceiling, per-cycle token allowances, deadline derivation, verifier identities, context limits and maximum possible submissions. With eight assignments and three cycles, local submissions are at most 24; two native comparisons add at most six proposal cycles. Native internal inference calls may exceed proposal cycles and must not be misreported as six calls.
 
 Each cycle records its parent candidate, input/context digest, working-tree digest, feedback digest, generation identity, effective allowance, terminal evidence, timestamps, usage availability and bound verification receipt. Preserve original output privately under current evidence rules; do not begin storing full private reasoning. Record settings and usage separately for local and native participants.
 
-Old synthetic reports, profiles and saved responses remain immutable. New report schemas must distinguish historical work from synthetic trials and real production delivery. Offline reverification creates a new verifier-version result linked to the original response; it never regenerates or silently replaces a historical verdict.
+Old synthetic reports, profiles and saved responses remain immutable. New report schemas must distinguish the substantial new synthetic assignments, synthetic substitutes, historical replay, legacy tiny synthetic trials and real production delivery. Offline reverification creates a new verifier-version result linked to the original response; it never regenerates or silently replaces a historical verdict.
 
 ## Work cycles and context
 
@@ -83,13 +95,13 @@ Intermediate snapshots are not accepted project changes. A final candidate requi
 
 ## Token ceilings and measured deadlines
 
-There is no fixed 32K policy for historical assessments and no symbolic unlimited number. Each campaign uses a separate unapproved assessment profile/permit; it never raises the approved production profile ceiling.
+There is no fixed 32K policy for the new mixed assessments and no symbolic unlimited number. Each campaign uses a separate unapproved assessment profile/permit; it never raises the approved production profile ceiling.
 
 Before consent, establish loaded context, supported generation parameters and accounting, template reserve, input bound for all planned feedback cycles, and known runtime/model output maximum. Use a qualified tokenizer if available; otherwise retain the current conservative UTF-8-byte bound. Reserve enough input space for the largest permitted cycle packet, including feedback. Bound and truncate public logs deterministically before hashing them.
 
 Choose the largest usable generation allowance within the verified runtime output maximum and the remaining context reservation. When an explicit maximum is unavailable, require documented adapter behavior plus separately authorized bounded qualification to establish an accepted finite ceiling; never infer support from a large context window alone. Label unverified accounting/support as unavailable and block that configuration. Do not silently reduce a frozen allowance after a run begins.
 
-Measure prefill/startup latency and decode throughput from compatible saved telemetry: same artifact, backend, machine, settings and relevant context range. Sparse or unmatched telemetry is insufficient for a precise deadline. A missing calibration requires a separately previewed bounded calibration run, excluded from the 6–10 scored assignments; design approval is not calibration consent.
+Measure prefill/startup latency and decode throughput from compatible saved telemetry: same artifact, backend, machine, settings and relevant context range. Sparse or unmatched telemetry is insufficient for a precise deadline. A missing calibration requires a separately previewed bounded calibration run, excluded from the eight scored assignments; design approval is not calibration consent.
 
 Proposed conservative initial deadline formula per model and cycle: twice the sum of observed upper prefill/startup time, allowance divided by a conservative observed decode rate, and the declared public-check timeouts. Store the measurements, sample count, context range, formula and resulting seconds. The factor of two is a coordinator proposal, not a measured safety guarantee. Freeze exact values only in the run preview; do not promise elapsed duration during design.
 
@@ -101,7 +113,7 @@ Budget exhaustion, deadline expiry or incomplete output produces an unfinished/i
 
 ## Fair native comparisons
 
-Freeze a difficulty-stratified subset before local results. Run fresh native contestants without inherited task history containing solutions. Preserve the owner's native model, provider, authentication and reasoning settings. Never switch profiles or billing paths merely to create a baseline.
+Freeze a difficulty- and origin-stratified subset before local results, using the actual composition after substitutions. Run fresh native contestants without inherited task history containing solutions. Preserve the owner's native model, provider, authentication and reasoning settings. Never switch profiles or billing paths merely to create a baseline.
 
 Both contestants receive identical initial task packets, permitted file scope, public checks, feedback rules, proposal-cycle count and hidden final criteria. Native contestants use the same coordinator-mediated proposal protocol for controlled comparisons. They do not browse the full repository or obtain private check feedback. Wider native tool access is a separately labeled workflow comparison, not the controlled score.
 
@@ -119,7 +131,7 @@ For paired completed tasks, report local and native execution seconds and `local
 
 Report correctness and timing when only one contestant succeeds, but do not label an unsuccessful quick attempt an efficiency win. For unfinished timed runs, show observed duration and that completion time is unknown. Verification and coordination costs count in end-to-end workflow measurements even though they do not grade capability. Historical references have no fresh baseline timing unless recorded comparably.
 
-No 6–10-case score certifies universal reliability. Report demonstrated specialty, difficulty, context, assistance level, settings and limits. The report can support a proposed production scope, but approval and routing remain separate explicit actions. Speed can inform an owner's later routing preference; it never silently downgrades demonstrated ability.
+No eight-assignment score certifies universal reliability. Show capability results by actual origin and difficulty as well as the combined result. A fully synthetic specialty has no demonstrated historical-project coverage. Report demonstrated specialty, difficulty, context, assistance level, settings and limits. The report can support a proposed production scope, but approval and routing remain separate explicit actions. Speed can inform an owner's later routing preference; it never silently downgrades demonstrated ability.
 
 ## Implementation boundaries and validation
 
@@ -127,7 +139,8 @@ Extend `assess-my-model` operations, assessment preparation/selection/reporting 
 
 Required offline proof before any real campaign:
 
-- Historical base/reference discrimination; test-writing defect discrimination; genuine framework discovery; deterministic environment and leakage inspection.
+- Historical base/reference discrimination; synthetic reference and defect discrimination; genuine framework discovery; deterministic environment and leakage inspection.
+- Exactly four planned synthetic and four planned historical slots per specialty; explicit one-for-one substitutions; eight distinct assignments; accurate actual-origin reporting and baseline selection after substitutions.
 - Pack tamper detection, exact preview consent, private/public artifact separation, unsupported-file rejection and no widening of live approval.
 - Candidate lineage across cycles, unchanged protected files, strict JSON validation, public-only feedback and no hidden-check coaching.
 - Exhaustion/deadline/late terminal/cancellation ambiguity, restart accounting, pause/stop, duplicate submission and retained uncertain slots.
@@ -140,4 +153,4 @@ The design is complete when review finds no consequential planning gaps and the 
 
 ## Design review
 
-An independent native builder check on 2026-10-23 found no consequential planning questions. It checked the current contracts, capability/speed separation, cycle lineage, hidden-check isolation, deadline recovery and comparison asymmetries. This review did not execute models or qualify runtime behavior. No production code has changed.
+The first independent native builder check on 2026-10-23 found no consequential planning questions in the historical-only draft. The owner subsequently changed the composition to four synthetic and four historical assignments, with explicit synthetic substitutions. A fresh independent builder check reviewed the complete revised design and diff on the same date and found no consequential planning gaps. It confirmed assignment counts, explicit substitutions, reference validation, baseline independence and capability/speed separation. No production code has changed; no local model assessment generations or runtime qualification checks ran.
