@@ -53,17 +53,38 @@ the reviewed component installer and ordinary authorized delivery instead.
 
 Follow the installed lifecycle contract for `sync` and `resume`, under the
 repository's publication authority. Stop writers and supply explicit files plus
-current checks and independent review. Plan at most four checkpoints or one sync
-per phase. PRs start draft `[BLOCKED]`; `[READY]` requires current local/remote
+current checks and independent review. Plan at most four routine checkpoints or one per phase. READY, reopen and blocker
+transitions reuse existing milestones without consuming that budget; refreshed
+inputs require a fresh READY event and current readiness gates. PRs start draft `[BLOCKED]`; `[READY]` requires current local/remote
 checks, review and non-draft status. Withdraw READY before further edits, preserve
 human content, reconcile uncertain results and never auto-merge. Publication
 failure means “blocked; PR update pending”, with a concrete next action.
 
-After all associated PRs are observed merged, cleanup defaults ON. Verify task
-ownership and stopped writers, delete and verify eligible remote branches first,
-then remove the exact clean worktree through its owner without force. Keep local
-branch refs; preserve ambiguous, shared or dirty resources and explicit opt-outs.
-Installation, client discovery and actual execution are separate evidence.
+Cleanup runs only when reconciliation confirms all associated PRs merged or
+records supersession with a verified replacement. Each closure processes all
+eligible queued retirement handoffs in the same Git repository. Startup never
+runs cleanup; `start` only cancels retirement before a checkout is reused.
+Preserve independent `delete_remote_branches=false`, `delete_worktrees=false`,
+`auto_cleanup=false` and whole-lifecycle opt-outs. Closed-unmerged PRs retain their
+remote branches and worktrees unless explicitly superseded. Keep local branch
+refs; preserve active, dirty, shared, foreign or ambiguously owned resources.
+Verify ownership, stopped writers, retained heads and remote absence before local
+removal when enabled. For managed worktrees, follow the installed native archive
+preflight: only verified completed task children with inherited attachments may
+be archived; running or uncertain children remain untouched. Use the native owner
+and verify filesystem and Git registration absence. Queued archival stays pending.
+Inspect `pending_cleanup.tasks` and report each unresolved owner action without
+polling. Installation, client discovery and actual execution are separate evidence.
+
+Every task follows the installed Vibe Setup `security-validation.md` at
+implementation-complete/READY/production candidate, release/deployment, or an
+explicit user/project requirement. Assess impact, check Trail of Bits updates,
+review applicable changes and bind required checks and independent review to the
+current snapshot. Reuse valid evidence; draft edits and worktree creation do not
+independently trigger security reviews. Missing, stale, incomplete or failing
+required checks block readiness and release. Use the installed helper's
+`check-security` for the exact clean release revision, including lifecycle opt-out.
+Preserve existing model approvals, routing, settings and authentication.
 
 For reusable read-only security review, use
 [Vibe Prompt 13](https://github.com/soumatheusgomes/vibe-coding-toolkit/blob/790a895304e0c08b70a5b215c9d334f1c86b816c/docs/prompts/13-security-review.md)
