@@ -475,8 +475,7 @@ class Store:
                 request_bytes=current.get('capacity_evidence',{}).get('request_bytes',0)
                 if route.get('assessment'):
                     from .capacity import inference_available,assessment_request_bytes
-                    from .onboarding import _assessment
-                    assessment=_assessment(self.root,route['assessment']['assessment_id'])
+                    # Reuse the validated run; reloading it can expire the fresh pressure sample.
                     target=assessment.get('capacity_target',1)
                     request_bytes=assessment_request_bytes(assessment)
                     limit=min(target,loaded['capacity']) if loaded and type(loaded.get('capacity')) is int and loaded['capacity']>0 and inference_available(resources) else 0

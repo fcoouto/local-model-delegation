@@ -724,7 +724,8 @@ def control_assessment(state_dir, assessment_id, action):
             atomic_json(store.root / 'assessments' / assessment_id / 'assessment.json', assessment)
     reconcile_attempts(state_dir, assessment_id=assessment_id)
     for trial, job in _run_jobs(store, assessment):
-        if (trial['trial_id'] not in assessment['receipts'] and job['status'] in ('accepted', 'failed', 'fallback_required')
+        if (trial['trial_id'] not in (set(assessment['receipts']) | set(assessment.get('cycle_receipts', {})))
+                and job['status'] in ('accepted', 'failed', 'fallback_required')
                 and job['attempt_id'] and store.attempt(job['attempt_id'])['state'] == 'complete'
                 and not _trial_blocker(store, job)):
             record_trial(state_dir, assessment_id, {'trial_id': trial['trial_id'], 'job_id': job['job_id']})

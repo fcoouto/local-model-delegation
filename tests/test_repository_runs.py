@@ -176,6 +176,27 @@ class RepositoryCampaigns(Fixture):
         self.assertEqual(trial['context_turns'],1)
         self.assertEqual(trial['brief']['repository']['context'][-1],{'error':'invalid_context_action'})
 
+    def test_pause_and_resume_preserve_consumed_context_without_finalizing_it(self):
+        from local_model_delegation import project_runs as runs, onboarding
+        with patch('local_model_delegation.lmstudio.select_loaded',return_value=self.loaded()), \
+             patch('local_model_delegation.worker.launch'):
+            prepared,store,job = self.generated(answer='{"action":"read","path":"helper.py","offset":0}')
+            child = runs.advance_cycle(self.state,prepared['assessment_id'],job['job_id'])
+            queued = onboarding.submit_trial(self.state,prepared['assessment_id'],child['trial_id'])
+            before = onboarding._assessment(self.state,prepared['assessment_id'])
+            attempt = store.attempt(job['attempt_id'])
+            paused = onboarding.control_assessment(self.state,prepared['assessment_id'],'pause')
+            self.assertEqual(paused['state'],'paused')
+            resumed = onboarding.control_assessment(self.state,prepared['assessment_id'],'resume')
+        after = onboarding._assessment(self.state,prepared['assessment_id'])
+        self.assertEqual(resumed['pending_jobs'],[queued['job_id']])
+        self.assertIsNone(resumed['next_trial_id'])
+        self.assertIsNone(store.job(queued['job_id'])['attempt_id'])
+        self.assertEqual(after['cycle_receipts'],before['cycle_receipts'])
+        self.assertEqual(after['receipts'],{})
+        self.assertEqual(store.attempt(job['attempt_id']),attempt)
+        self.assertEqual(self.server.calls.count(('POST','/api/v1/chat')),1)
+
     def test_failed_public_feedback_survives_source_reads(self):
         from local_model_delegation import project_runs as runs, onboarding
         prepared = self.prepare_run()

@@ -205,6 +205,32 @@ class AssessmentRuns(Fixture):
             store.enqueue(brief, brief['fallback'], assessment=permit)
         self.assertEqual(store.instance(key), before)
 
+    def test_slow_campaign_validation_precedes_fresh_capacity_sample(self):
+        for pressure, stale, expected in (('normal', False, 'reserved'),
+                                          ('critical', False, 'waiting'),
+                                          ('normal', True, 'waiting')):
+            with self.subTest(pressure=pressure, stale=stale):
+                self.state = self.root / ('capacity-' + pressure + str(stale))
+                store, key, first, loaded, brief, permit = self.admission_with_previous_slot()
+                job = store.enqueue(brief, brief['fallback'], assessment=permit)
+                clock = [time.time()]
+                original = assessment._assessment
+                def slow_validation(*args, **kwargs):
+                    record = original(*args, **kwargs)
+                    clock[0] += 6
+                    return record
+                def sample():
+                    return {'pressure': pressure, 'observed_at': clock[0] - (6 if stale else 0)}
+                with patch.object(assessment, '_assessment', side_effect=slow_validation), \
+                     patch('time.time', side_effect=lambda: clock[0]), \
+                     patch('local_model_delegation.capacity.pressure_snapshot', side_effect=sample):
+                    result = store.admit(job['job_id'], self.candidate, loaded)
+                self.assertEqual(result['status'], expected)
+                if expected == 'waiting':
+                    self.assertIsNone(result['attempt_id'])
+                    self.assertEqual(result['reason'], 'capacity_unqualified')
+                self.assertFalse(any(method == 'POST' for method, _ in self.server.calls))
+
     def test_run_consent_is_required_even_with_standing_permission(self):
         prepared, record, permit = self.saved_run()
         config = load_json((self.state / 'config.json').read_text())
