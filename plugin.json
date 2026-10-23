@@ -9,7 +9,9 @@
         "displayName": "Local Model Delegation",
         "shortDescription": "Verified local model tasks with native fallback",
         "developerName": "fcoouto",
-        "category": "Developer Tools"
+        "category": "Developer Tools",
+        "composerIcon": "./docs/assets/coordinated-loop.png",
+        "logo": "./docs/assets/coordinated-loop.png"
       }
     }
   },

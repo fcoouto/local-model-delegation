@@ -1,5 +1,7 @@
 # Local Model Delegation
 
+<img src="docs/assets/coordinated-loop.png" alt="Coordinated Loop: two agents exchanging a task and its result" width="160" height="160">
+
 **Let your agent set up local delegation with you, one step at a time.**
 
 Local models handle tasks they have demonstrated they can do. Your native agent checks their work and provides fallback.

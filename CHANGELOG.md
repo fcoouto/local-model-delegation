@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Adopt Coordinated Loop as the official plugin icon and logo, bundled with the package and displayed in the README.
+
 ## 0.3.14 — 2026-10-23
 
 - Assess local models against project-grounded assignments with separate correctness and timing results, frozen runtime budgets and up to three public-feedback work cycles.
