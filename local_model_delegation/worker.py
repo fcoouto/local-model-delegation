@@ -134,6 +134,8 @@ def run_local_attempt(state_dir, attempt_id):
         with ownership(store, 'assessment-' + permit['assessment_id']) if standalone else nullcontext(True) as owned:
             if not owned: return 0
             if standalone:
+                current_job = store.job(job['job_id'])
+                if current_job['attempt_id'] != attempt_id or current_job['status'] != 'reserved': return 0
                 run = _assessment(state_dir, permit['assessment_id'])
                 try:
                     authorize_job(store, job)
@@ -148,8 +150,8 @@ def run_local_attempt(state_dir, attempt_id):
                 if not rejection and not store.submission_resources_available(job):
                     rejection = 'resources_changed_before_post'
                 if rejection:
-                    store.transition(attempt_id, generation, 'reserved', 'released', {})
-                    store.select_fallback(job['job_id'], rejection)
+                    if store.transition(attempt_id, generation, 'reserved', 'released', {}):
+                        store.select_fallback(job['job_id'], rejection)
                     return 1
             if not store.transition(attempt_id, generation, "reserved", "submitting", {"pid": os.getpid(), "heartbeat": time.time(), "submitted_at": time.time(), 'request_settings':settings}): return 0
         from .habblaud import ensure_observer

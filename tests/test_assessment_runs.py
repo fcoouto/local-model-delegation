@@ -675,6 +675,27 @@ class AssessmentRuns(Fixture):
         self.assertEqual(report['counts']['evaluated'], 0)
         self.assertEqual(report['counts']['unresolved'], 1)
 
+    def test_old_worker_cannot_reject_replacement_after_pause_and_resume(self):
+        from local_model_delegation.worker import run_local_attempt
+        prepared, _, store, job = self.queued_run()
+        original = self.admit(store, job)
+        replacement = None
+        def replace_then_reject(*args, **kwargs):
+            nonlocal replacement
+            self.control(prepared, 'pause')
+            with patch('local_model_delegation.worker.launch'):
+                self.control(prepared, 'resume')
+            replacement = self.admit(store, job)
+            return False
+        with patch('local_model_delegation.store.Store.submission_resources_available', side_effect=replace_then_reject):
+            run_local_attempt(self.state, original['attempt_id'])
+        self.assertEqual(store.attempt(original['attempt_id'])['state'], 'released')
+        self.assertEqual(store.job(job['job_id'])['status'], 'reserved')
+        self.assertEqual(store.job(job['job_id'])['attempt_id'], replacement['attempt_id'])
+        self.assertEqual(store.attempt(replacement['attempt_id'])['state'], 'reserved')
+        self.control(prepared, 'stop')
+        self.assertFalse(any(method == 'POST' for method, _ in self.server.calls))
+
     def test_invalid_model_proposals_are_evaluated_failures(self):
         from local_model_delegation.worker import run_local_attempt
         from local_model_delegation.validation import prepare_verification
