@@ -1,5 +1,7 @@
 # Local Model Delegation
 
+<img src="docs/assets/coordinated-loop.png" alt="Coordinated Loop: two agents exchanging a task and its result" width="160" height="160">
+
 **Let your agent set up local delegation with you, one step at a time.**
 
 Local models handle tasks they have demonstrated they can do. Your native agent checks their work and provides fallback.
@@ -100,6 +102,13 @@ Approval records permission for an exact model, settings and practical operating
 Delegation follows the coordinator's active project instructions, skills and permission policy, including Vibe Setup where installed. The coordinator supplies relevant constraints, runs required tools and verifies proposals. Local HTTP calls are not native subagents and do not receive native hook enforcement. See [coordinator policy](skills/local-delegation/references/contracts.md#coordinator-policy-and-native-subagents).
 
 ## Shared state and updates
+
+Keep framework dependencies and temporary assessment workspaces separate from
+plugin state. `assessment storage` reports the supported external directories
+without creating them. Existing external qualified runtimes remain where they are;
+reports, approvals and frozen evidence retain their existing backup protection.
+Never delete a resumable assessment's dependencies to unblock an update. See the
+[storage and relocation procedure](skills/assess-my-model/references/operations.md#runtime-storage-and-plugin-updates).
 
 All projects use `~/.local/state/local-model-delegation` by default. Override `--state-dir` deliberately, such as for disposable fixtures or an existing installation. All participating projects must select the same state directory. Schema 2 separates `config.json` from `profiles/<profile_id>.json`. Profiles, approvals, database, model results and receipts stay private; weights remain where the runtime manages them.
 

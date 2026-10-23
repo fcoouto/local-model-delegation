@@ -1,5 +1,34 @@
 # Assessment operations
 
+## Runtime storage and plugin updates
+
+Before preparing framework dependencies or disposable reference checks, run
+`assessment storage` with the selected `--state-dir`. This read-only command returns
+an external private workspace, its `runtimes` directory and its `reference_checks`
+directory. Use a distinct run subdirectory for each prepared runtime. Existing
+qualified runtime roots already outside plugin state may remain where they are.
+Do not install `node_modules`, virtual environments or copied framework runtimes
+under plugin state. Do not link an external runtime back into state with a symlink.
+
+Keep reports, dependency manifests/fingerprints, approvals, frozen trial sources
+and verification receipts as durable evidence. Pin each external runtime's actual
+path and contents in the assessment's existing environment evidence. Plugin backup
+does not back up or certify external dependencies; preserve them for resumable
+assessments and historical replay. An unavailable runtime blocks its checks, never
+invalidates or overwrites an earlier report by itself.
+
+Before relocating a legacy runtime, coordinate with its owning chat and verify
+stopped writers and frozen references. Preserve original reports/scripts and record
+old/new paths, hashes and rollback location separately. Restore missing packages
+from the saved lockfile, compare recorded file hashes, and report any missing
+toolchain identity. Do not regenerate completed responses. Requalify relocated
+execution paths and isolation before replay; never silently rewrite a frozen run.
+
+Independent preparation outside state may continue during a plugin update. Active
+or uncertain inference, assessment admission and durable evidence writes still obey
+the [update gates](../../../docs/updating.md). A process being idle does not make
+its runtime disposable. Never delete dependencies to bypass an update failure.
+
 Use the packaged `delegate.py` and the owner's selected state directory throughout. Paths below are relative to `skills/assess-my-model/SKILL.md`. Keep selection, receipts, profiles and reports in private state, never in the plugin or a project.
 
 ## Shared prerequisites and profile

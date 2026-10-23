@@ -10,6 +10,48 @@ from local_model_delegation.store import Store, atomic_json
 
 
 class Updates(Fixture):
+    def test_external_runtime_changes_do_not_enter_update_backup(self):
+        from local_model_delegation.assessment_storage import workspace_root
+        from local_model_delegation.store import private_dir
+        api = self.api(); old, target = self.packages()
+        runtime = private_dir(workspace_root(self.state)/'runtimes'/'fictional'/'node_modules')
+        dependency = runtime/'dependency.js'; dependency.write_text('before')
+        (runtime/'dependency-link').symlink_to('dependency.js')
+        prepared = api.prepare_update(self.state, target, old)
+        dependency.write_text('after')
+        self.assertEqual(api.verify_update(self.state, Path(prepared['receipt']), target)['status'], 'verified')
+        receipt = json.loads(Path(prepared['receipt']).read_text())
+        self.assertNotIn(str(dependency), receipt['files'])
+        self.assertEqual(dependency.read_text(), 'after')
+
+    def test_misplaced_runtime_fails_before_bundle_or_backup_mutation(self):
+        api = self.api(); old, target = self.packages()
+        config = (self.state/'config.json').read_bytes()
+        for name in ('node_modules', '.venv', 'venv'):
+            runtime = self.state/'offline-reassessments'/'fictional'/'runtime'/name
+            runtime.mkdir(parents=True)
+            (runtime/'dependency').write_text('preserve')
+            with self.subTest(name=name), patch('local_model_delegation.package.pin_runtime_bundle') as pin:
+                with self.assertRaisesRegex(ValueError, 'assessment_runtime_in_state:'):
+                    api.prepare_update(self.state, target, old)
+                pin.assert_not_called()
+            self.assertFalse((self.state/'updates').exists())
+            self.assertFalse((self.state/'runtimes').exists())
+            self.assertEqual((runtime/'dependency').read_text(), 'preserve')
+            self.assertEqual((self.state/'config.json').read_bytes(), config)
+            (runtime/'dependency').unlink(); runtime.rmdir()
+
+    def test_arbitrary_state_symlink_still_blocks_backup(self):
+        api = self.api(); old, target = self.packages()
+        (self.state/'evidence-link').symlink_to(self.project/'helper.py')
+        with self.assertRaisesRegex(ValueError, 'unsafe_update_file'):
+            api.prepare_update(self.state, target, old)
+
+    def test_unreadable_evidence_directory_cannot_silently_disappear(self):
+        api = self.api(); self.packages()
+        with patch('os.scandir', side_effect=PermissionError('unreadable evidence')):
+            with self.assertRaises(PermissionError): api._files(self.state)
+
     def api(self):
         self.assertIsNotNone(importlib.util.find_spec('local_model_delegation.updates'))
         from local_model_delegation import updates

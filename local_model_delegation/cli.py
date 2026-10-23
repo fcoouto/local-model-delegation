@@ -120,7 +120,7 @@ def main(argv=None):
     p.add_argument('--instance-key')
     p.add_argument('--operation-id')
     p = commands.add_parser("assessment")
-    p.add_argument("action", choices=["choices", "projects", "project-preview", "advance", "prepare", "consent", "pause", "stop", "resume", "begin", "report", "trial", "submit", "capacity", "approve"])
+    p.add_argument("action", choices=["storage", "choices", "projects", "project-preview", "advance", "prepare", "consent", "pause", "stop", "resume", "begin", "report", "trial", "submit", "capacity", "approve"])
     p.add_argument("--profile-id")
     p.add_argument("--assessment-id")
     p.add_argument("--owner-reference")
@@ -235,7 +235,7 @@ def main(argv=None):
         elif args.command == "assessment":
             from .onboarding import (begin_assessment, assessment_report, record_trial, approve_assessment, submit_trial,
                                      record_capacity, assessment_choices, prepare_assessment, consent_assessment, control_assessment)
-            required = {'projects': {'project', 'owner_reference'}, 'advance': {'assessment_id', 'job'}, 'project-preview': {'project', 'selection', 'owner_reference'}, 'choices': set(), 'prepare': {'profile_id', 'selection'},
+            required = {'storage': set(), 'projects': {'project', 'owner_reference'}, 'advance': {'assessment_id', 'job'}, 'project-preview': {'project', 'selection', 'owner_reference'}, 'choices': set(), 'prepare': {'profile_id', 'selection'},
                         'consent': {'assessment_id', 'preview_digest', 'owner_reference'},
                         'pause': {'assessment_id'}, 'stop': {'assessment_id'}, 'resume': {'assessment_id'},
                         'begin': {'profile_id', 'owner_reference'}, 'report': {'assessment_id'},
@@ -247,7 +247,10 @@ def main(argv=None):
             optional = {'projects': {'repository'}, 'prepare': {'source_profile_id', 'project', 'owner_reference'}, 'report': {'check_current'}}.get(args.action, set())
             if not required[args.action] <= supplied or not supplied <= required[args.action] | optional:
                 raise ValueError('invalid_assessment_arguments')
-            if args.action == 'projects':
+            if args.action == 'storage':
+                from .assessment_storage import storage_info
+                result = storage_info(args.state_dir)
+            elif args.action == 'projects':
                 from .projects import assessment_projects
                 result = assessment_projects(args.project, args.owner_reference, args.repository)
             elif args.action == 'advance':
