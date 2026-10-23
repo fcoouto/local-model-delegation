@@ -32,7 +32,7 @@ class ProjectReports(Fixture):
         extra = next(b for b in result['scope_results'] if b['complexity'] == 'extra_complex')
         self.assertEqual(extra['recommendation'], 'not_established')
         self.assertEqual(extra['counts']['passed'], 1)
-        self.assertEqual(result['native_comparison']['status'], 'not_collected')
+        self.assertEqual(result['native_comparison']['status'], 'reported_separately')
         self.assertIn('not enforced', result['native_comparison']['native_limits'])
 
     def test_weights_keep_unfinished_in_denominator_and_show_assumptions(self):

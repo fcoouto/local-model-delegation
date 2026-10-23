@@ -67,10 +67,10 @@
 
 **Files:** Update `skills/assess-my-model/`, `skills/setup/`, `skills/local-delegation/references/contracts.md`, `README.md`, qualification docs and tests that validate entry-point contracts. PHIOON artifacts stay outside the repository.
 
-- [ ] Update both flows to select/authorize a project, inspect actual work, construct grounded tasks with native reference review, preview, consent and report. Preserve offline legacy reporting; no generic evidence is relabeled as project evidence.
-- [ ] Inspect the owner-selected PHIOON repository and relevant local instructions. Produce an eight-task-per-selected-domain draft with exact paths/revisions, difficulty rationales, expected checks and remaining readiness gates. No PHIOON mutations or Qwen inference yet.
-- [ ] Run `python3.11 -B -m unittest discover -s tests -t . -q` and `git diff --check`; complete skill validation where applicable.
-- [ ] Obtain independent native whole-branch review under unchanged native settings; fix material findings with regression tests and rerun affected checks.
+- [x] Update both flows to select/authorize a project, inspect actual work, construct grounded tasks with native reference review, preview, consent and report. Preserve offline legacy reporting; no generic evidence is relabeled as project evidence.
+- [x] Inspect the owner-selected PHIOON repository and relevant local instructions. Produce an eight-task-per-selected-domain draft with exact paths/revisions, difficulty rationales, expected checks and remaining readiness gates. No PHIOON mutations or Qwen inference yet.
+- [x] Run `python3.11 -B -m unittest discover -s tests -t . -q` and `git diff --check`; complete skill validation where applicable.
+- [x] Obtain independent native whole-branch review under unchanged native settings; fix material findings with regression tests and rerun affected checks.
 - [ ] Follow the repository lifecycle for reviewed draft publication; do not merge or install without applicable authorization. Present the PHIOON task preview and exact remaining run-consent dimensions before Qwen submissions.
 
 ## Execution record

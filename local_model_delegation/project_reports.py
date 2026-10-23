@@ -38,7 +38,7 @@ def summarize(record, results):
                 'owner_reference': record['pack']['workload']['owner_reference'],
                 'meaning': 'Potentially suitable share of the confirmed task mix, subject to native verification; not reliability or time saved.'},
             'unassessed_workload_share': record['pack']['workload']['unassessed_weight'],
-            'native_comparison': {'status': 'not_collected', **record['preview']['comparison_protocol'],
+            'native_comparison': {'status': 'reported_separately', **record['preview']['comparison_protocol'],
                                   'cases': comparison_inputs(record),
                                   'results_location': 'Private metrics report; comparison receipts do not alter capability outcomes.'}}
 
