@@ -4,10 +4,10 @@ from unittest.mock import patch
 from local_model_delegation.store import Store, atomic_json
 from local_model_delegation.contracts import digest
 from tests.support import Fixture
-from tests.habblaud_support import Receiver, PARENT, OTHER_PARENT, CONTEXT
+from tests.representation_support import Receiver, PARENT, OTHER_PARENT, CONTEXT
 
 
-class Habblaud(Fixture):
+class Representation(Fixture):
     def receiver(self):
         receiver = Receiver(); self.addCleanup(receiver.close)
         return receiver
@@ -19,12 +19,12 @@ class Habblaud(Fixture):
         return store, brief, job
 
     def test_disabled_status_has_no_state_or_network_side_effect(self):
-        from local_model_delegation.habblaud import status
+        from local_model_delegation.representation import status
         self.assertFalse(status(self.state)['enabled'])
         self.assertFalse(self.state.exists())
 
     def test_context_validation_and_independently_optional_labels(self):
-        from local_model_delegation.habblaud import validate_context
+        from local_model_delegation.representation import validate_context
         for context in ({'coordinator_chat_id': PARENT}, CONTEXT,
                         {'coordinator_chat_id': PARENT, 'specialty': 'Security'},
                         {'coordinator_chat_id': PARENT, 'role': 'Tester'}):
@@ -40,12 +40,12 @@ class Habblaud(Fixture):
         saved = store.job(job['job_id'])
         self.assertEqual(saved['brief'], brief)
         self.assertEqual(saved['brief_hash'], digest(brief))
-        self.assertEqual(saved['route_data']['habblaud']['context'], CONTEXT)
+        self.assertEqual(saved['route_data']['representation']['context'], CONTEXT)
         self.assertEqual(store.enqueue(brief, brief['fallback'], visibility=CONTEXT)['job_id'], job['job_id'])
         self.assertEqual(store.enqueue(brief, brief['fallback'])['job_id'], job['job_id'])
         other = self.brief('legacy')
         legacy = store.enqueue(other, other['fallback'])
-        self.assertNotIn('habblaud', store.job(legacy['job_id'])['route_data'])
+        self.assertNotIn('representation', store.job(legacy['job_id'])['route_data'])
 
     def test_bad_context_rolls_back_enqueue(self):
         self.write_config(); store = Store(self.state); brief = self.brief()
@@ -54,7 +54,7 @@ class Habblaud(Fixture):
         self.assertIsNone(store.lookup(brief['origin_chat_id'], brief['task_key']))
 
     def test_enable_requires_exact_codex_account_and_preserves_routing(self):
-        from local_model_delegation.habblaud import configure, status
+        from local_model_delegation.representation import configure, status
         receiver = self.receiver()
         with self.assertRaisesRegex(ValueError, 'account'):
             configure(self.state, receiver.endpoint, 'wrong')
@@ -67,7 +67,7 @@ class Habblaud(Fixture):
             configure(self.state, receiver.endpoint, '.codex')
 
     def test_transport_rejects_nonlocal_credentials_paths_redirects_and_oversize(self):
-        from local_model_delegation.habblaud import Client
+        from local_model_delegation.representation import Client
         for url in ('https://127.0.0.1', 'http://example.com', 'http://localhost',
                     'http://user:secret@127.0.0.1', 'http://127.0.0.1/path',
                     'http://127.0.0.1?query', 'http://127.0.0.1#fragment'):
@@ -81,14 +81,14 @@ class Habblaud(Fixture):
         with self.assertRaises(ValueError): client.snapshot('.codex')
 
     def test_hook_false_acknowledgment_is_failure(self):
-        from local_model_delegation.habblaud import Client
+        from local_model_delegation.representation import Client
         receiver = self.receiver(); receiver.reject = True
         with self.assertRaisesRegex(ValueError, 'rejected'):
             Client(receiver.endpoint).event('.codex', {'hook_event_name':'SubagentStart',
                 'session_id':PARENT, 'agent_id':OTHER_PARENT, 'agent_type':'LOCAL · fixture'})
 
     def test_explicit_rebind_preserves_execution_identity(self):
-        from local_model_delegation.habblaud import bind
+        from local_model_delegation.representation import bind
         store, brief, job = self.queued(CONTEXT)
         before = store.job(job['job_id'])
         bind(self.state, job['job_id'], {**CONTEXT, 'coordinator_chat_id':OTHER_PARENT})
@@ -96,10 +96,10 @@ class Habblaud(Fixture):
         self.assertEqual(after['brief_hash'], before['brief_hash'])
         self.assertEqual(after['status'], before['status'])
         self.assertEqual(after['route_data']['observed_at'], before['route_data']['observed_at'])
-        self.assertEqual(after['route_data']['habblaud']['context']['coordinator_chat_id'], OTHER_PARENT)
+        self.assertEqual(after['route_data']['representation']['context']['coordinator_chat_id'], OTHER_PARENT)
 
     def active(self):
-        from local_model_delegation.habblaud import configure, bind_context
+        from local_model_delegation.representation import configure, bind_context
         receiver = self.receiver(); profile = self.profile(); self.write_config(profile)
         store = Store(self.state); brief = self.brief(); brief['origin_chat_id'] = PARENT
         job = store.reserve(brief, profile, self.loaded())
@@ -115,7 +115,7 @@ class Habblaud(Fixture):
             db.execute('UPDATE jobs SET status=?,native_task_id=? WHERE job_id=?', (status, native, job['job_id']))
 
     def test_observer_labels_assignment_and_sends_only_changed_activity(self):
-        from local_model_delegation.habblaud import Observer
+        from local_model_delegation.representation import Observer
         receiver, store, job, now = self.active(); observer = Observer(self.state, job['job_id'])
         self.assertTrue(observer.step(now))
         events = [e['event'] for e in receiver.events]
@@ -132,7 +132,7 @@ class Habblaud(Fixture):
         self.assertNotIn('approval', payload); self.assertNotIn('token_env', payload)
 
     def test_candidate_verification_then_stop_never_closes_parent(self):
-        from local_model_delegation.habblaud import Observer
+        from local_model_delegation.representation import Observer
         receiver, store, job, now = self.active(); observer = Observer(self.state, job['job_id'])
         observer.step(now)
         self.job_phase(store, job, 'candidate_ready'); observer.step(now+1)
@@ -145,7 +145,7 @@ class Habblaud(Fixture):
         self.assertEqual(len(receiver.events), count)
 
     def test_native_acceptance_keeps_local_uncertainty_and_model(self):
-        from local_model_delegation.habblaud import Observer
+        from local_model_delegation.representation import Observer
         receiver, store, job, now = self.active(); observer = Observer(self.state, job['job_id'])
         observer.step(now)
         self.job_phase(store, job, 'accepted', 'uncertain', '/root/native')
@@ -157,7 +157,7 @@ class Habblaud(Fixture):
         self.assertEqual(store.attempt(job['attempt_id'])['state'], 'uncertain')
 
     def test_stale_attempt_is_retired_without_refreshing_progress(self):
-        from local_model_delegation.habblaud import Observer
+        from local_model_delegation.representation import Observer
         receiver, store, job, now = self.active(); observer = Observer(self.state, job['job_id'])
         observer.step(now); before = store.attempt(job['attempt_id'])
         self.assertFalse(observer.step(now+121))
@@ -165,7 +165,7 @@ class Habblaud(Fixture):
         self.assertEqual(receiver.events[-1]['event']['hook_event_name'], 'SubagentStop')
 
     def test_queue_reservation_and_historical_terminal_work_create_no_character(self):
-        from local_model_delegation.habblaud import Observer
+        from local_model_delegation.representation import Observer
         receiver, store, job, now = self.active()
         for state, attempt in [('waiting','reserved'), ('reserved','reserved'), ('accepted','complete')]:
             self.job_phase(store, job, state, attempt)
@@ -173,7 +173,7 @@ class Habblaud(Fixture):
         self.assertEqual(receiver.events, [])
 
     def test_restart_and_lost_ack_keep_one_stable_child(self):
-        from local_model_delegation.habblaud import Observer
+        from local_model_delegation.representation import Observer
         receiver, store, job, now = self.active(); receiver.drop_ack = True
         observer = Observer(self.state, job['job_id']); self.assertTrue(observer.step(now))
         identity = next(iter(receiver.agents))
@@ -185,7 +185,7 @@ class Habblaud(Fixture):
         self.assertEqual(receiver.events[-1]['event']['tool_name'], 'Starting')
 
     def test_rebind_retires_old_child_and_label_freeze_rejects_conflict(self):
-        from local_model_delegation.habblaud import Observer, bind_context
+        from local_model_delegation.representation import Observer, bind_context
         receiver, store, job, now = self.active(); observer = Observer(self.state, job['job_id'])
         observer.step(now); original = next(iter(receiver.agents))
         with self.assertRaisesRegex(ValueError, 'conflict'), store.db(write=True) as db:
@@ -199,19 +199,19 @@ class Habblaud(Fixture):
         self.assertEqual(live[0]['parentId'], '.codex:'+OTHER_PARENT)
 
     def test_account_disappearing_and_rejected_events_do_not_change_execution(self):
-        from local_model_delegation.habblaud import Observer, status
+        from local_model_delegation.representation import Observer, status
         receiver, store, job, now = self.active(); observer = Observer(self.state, job['job_id'])
         observer.step(now); before = store.job(job['job_id']); attempt = store.attempt(job['attempt_id'])
         receiver.accounts = []
         self.assertTrue(observer.step(now+21)); self.assertEqual(len(receiver.events), 2)
-        self.assertEqual(status(self.state, job['job_id'])['observation']['error'], 'habblaud_account_unavailable')
+        self.assertEqual(status(self.state, job['job_id'])['observation']['error'], 'representation_account_unavailable')
         receiver.accounts = [{'id':'.codex','provider':'codex'}]; receiver.reject = True
         self.assertTrue(observer.step(now+42))
         self.assertEqual(store.job(job['job_id']), before)
         self.assertEqual(store.attempt(job['attempt_id']), attempt)
 
     def test_global_disable_retires_only_display_and_preserves_reservation(self):
-        from local_model_delegation.habblaud import Observer
+        from local_model_delegation.representation import Observer
         from local_model_delegation.visibility import set_visibility
         receiver, store, job, now = self.active(); observer = Observer(self.state, job['job_id'])
         observer.step(now); before = store.attempt(job['attempt_id'])
@@ -220,24 +220,24 @@ class Habblaud(Fixture):
         self.assertEqual(store.attempt(job['attempt_id']), before)
 
     def test_unsupported_label_reports_error_and_does_not_emit(self):
-        from local_model_delegation.habblaud import Observer, bind_context, status
+        from local_model_delegation.representation import Observer, bind_context, status
         receiver, store, job, now = self.active()
         with store.db(write=True) as db:
             profile = store.job(job['job_id'])['profile']; profile['display_name'] = 'Guardian'
             db.execute('UPDATE jobs SET profile=? WHERE job_id=?', (json.dumps(profile), job['job_id']))
         self.assertFalse(Observer(self.state, job['job_id']).step(now))
         self.assertEqual(receiver.events, [])
-        self.assertEqual(status(self.state, job['job_id'])['observation']['error'], 'unsupported_habblaud_label')
+        self.assertEqual(status(self.state, job['job_id'])['observation']['error'], 'unsupported_representation_label')
 
     def test_transport_timeout_is_bounded(self):
-        from local_model_delegation.habblaud import Client
+        from local_model_delegation.representation import Client
         receiver = self.receiver(); receiver.delay = 3
         start = time.monotonic()
         with self.assertRaises(ValueError): Client(receiver.endpoint).snapshot('.codex')
         self.assertLess(time.monotonic()-start, 2.8)
 
     def test_initial_delivery_failure_can_recover_and_stop(self):
-        from local_model_delegation.habblaud import Observer
+        from local_model_delegation.representation import Observer
         receiver, store, job, now = self.active()
         receiver.accounts = []; observer = Observer(self.state, job['job_id'])
         observer.step(now)
@@ -249,7 +249,7 @@ class Habblaud(Fixture):
 
     def test_detached_observer_uses_runtime_bundle_and_single_owner(self):
         import os
-        from local_model_delegation.habblaud import ensure_observer, quiesce
+        from local_model_delegation.representation import ensure_observer, quiesce
         receiver, store, job, now = self.active()
         starts = [ensure_observer(self.state, job['job_id']) for _ in range(2)]
         try:
@@ -257,7 +257,7 @@ class Habblaud(Fixture):
             while not receiver.agents and time.monotonic()<deadline: time.sleep(.05)
             self.assertEqual(len(receiver.agents), 1)
             self.assertEqual(sum(e['event']['hook_event_name']=='SubagentStart' for e in receiver.events), 1)
-            self.assertTrue(list((self.state/'runtimes').glob('*/local_model_delegation/habblaud.py')))
+            self.assertTrue(list((self.state/'runtimes').glob('*/local_model_delegation/representation.py')))
         finally:
             quiesce(self.state)
             for start in starts:
@@ -268,7 +268,7 @@ class Habblaud(Fixture):
         self.assertEqual(store.attempt(job['attempt_id'])['state'], 'submitting')
 
     def test_worker_executes_when_hook_receiver_rejects_events(self):
-        from local_model_delegation.habblaud import configure, bind_context, quiesce
+        from local_model_delegation.representation import configure, bind_context, quiesce
         from local_model_delegation.worker import run_local_attempt
         from tests.support import FakeRuntime
         receiver = self.receiver(); receiver.reject = True
@@ -287,7 +287,7 @@ class Habblaud(Fixture):
         finally: quiesce(self.state)
 
     def test_disable_and_prepare_uninstall_leave_jobs_and_model_state_intact(self):
-        from local_model_delegation.habblaud import disable, status
+        from local_model_delegation.representation import disable, status
         from local_model_delegation.package import prepare_uninstall
         receiver, store, job, now = self.active()
         before = store.attempt(job['attempt_id'])
@@ -300,11 +300,11 @@ class Habblaud(Fixture):
         self.assertEqual(store.job(job['job_id'])['status'], 'accepted')
 
     def test_missing_coordinator_can_be_bound_after_observation_error(self):
-        from local_model_delegation.habblaud import Observer, bind_context
+        from local_model_delegation.representation import Observer, bind_context
         receiver, store, job, now = self.active()
         with store.db(write=True) as db:
             saved = store.job(job['job_id'])
-            route = saved['route_data']; route.pop('habblaud')
+            route = saved['route_data']; route.pop('representation')
             brief = saved['brief']; brief['origin_chat_id'] = 'legacy-chat'
             db.execute('UPDATE jobs SET brief=?,route_data=? WHERE job_id=?', (json.dumps(brief),json.dumps(route),job['job_id']))
         observer = Observer(self.state, job['job_id']); self.assertFalse(observer.step(now))
@@ -314,14 +314,14 @@ class Habblaud(Fixture):
         self.assertEqual(next(iter(receiver.agents.values()))['status'], 'done')
 
     def test_numeric_ok_is_not_a_boolean_acknowledgment(self):
-        from local_model_delegation.habblaud import Client
+        from local_model_delegation.representation import Client
         receiver = self.receiver(); receiver.raw = b'{"ok":1}'
         with self.assertRaisesRegex(ValueError, 'rejected'):
             Client(receiver.endpoint).event('.codex', {'hook_event_name':'SubagentStart',
                 'session_id':PARENT,'agent_id':OTHER_PARENT,'agent_type':'LOCAL'})
 
     def test_badge_uses_saved_model_display_name_and_keeps_specialty_separate(self):
-        from local_model_delegation.habblaud import Observer, bind_context
+        from local_model_delegation.representation import Observer, bind_context
         receiver, store, job, now = self.active()
         with store.db(write=True) as db:
             bind_context(db,job['job_id'],{'coordinator_chat_id':PARENT,'specialty':'x'*100},rebind=True)
@@ -329,13 +329,13 @@ class Habblaud(Fixture):
             db.execute('UPDATE jobs SET profile=? WHERE job_id=?', (json.dumps(profile), job['job_id']))
         Observer(self.state,job['job_id']).step(now)
         self.assertEqual(receiver.events[0]['event']['agent_type'], 'Unspecified role · Qwen3.8 27B Splash')
-        self.assertEqual(store.job(job['job_id'])['route_data']['habblaud']['context']['specialty'], 'x'*100)
+        self.assertEqual(store.job(job['job_id'])['route_data']['representation']['context']['specialty'], 'x'*100)
 
     def test_update_quiesces_observer_before_preservation_snapshot(self):
         import os
         from pathlib import Path
         from tests.test_updates import Updates
-        from local_model_delegation.habblaud import configure, ensure_observer, status, bind_context
+        from local_model_delegation.representation import configure, ensure_observer, status, bind_context
         from local_model_delegation.updates import prepare_update, verify_update
         old, target = Updates.packages(self)
         receiver = self.receiver(); store = Store(self.state)
@@ -353,15 +353,15 @@ class Habblaud(Fixture):
             self.assertFalse(status(self.state)['enabled'])
             self.assertEqual(next(iter(receiver.agents.values()))['status'],'done')
         finally:
-            from local_model_delegation.habblaud import quiesce
+            from local_model_delegation.representation import quiesce
             quiesce(self.state)
             if start.get('pid'):
                 try: os.waitpid(start['pid'],0)
                 except ChildProcessError: pass
 
 
-    def test_missing_assignment_uses_habblaud_default_without_invented_labels(self):
-        from local_model_delegation.habblaud import Observer, bind_context, status
+    def test_missing_assignment_uses_representation_default_without_invented_labels(self):
+        from local_model_delegation.representation import Observer, bind_context, status
         receiver,store,job,now = self.active()
         with store.db(write=True) as db: bind_context(db,job['job_id'],{'coordinator_chat_id':PARENT},rebind=True)
         observer = Observer(self.state,job['job_id']); observer.step(now)
@@ -372,7 +372,7 @@ class Habblaud(Fixture):
         self.assertEqual(status(self.state,job['job_id'])['observation']['state'],'active')
 
     def test_display_name_fallback_formats_actual_identifier_without_changing_it(self):
-        from local_model_delegation.habblaud import Observer
+        from local_model_delegation.representation import Observer
         receiver, store, job, now = self.active()
         profile = store.job(job['job_id'])['profile']; profile['model_id'] = 'qwen3.8-27b-splash'
         with store.db(write=True) as db:
@@ -383,7 +383,7 @@ class Habblaud(Fixture):
         self.assertEqual(store.job(job['job_id'])['profile'], profile)
 
     def test_drip_fed_headers_respect_total_transport_deadline(self):
-        from local_model_delegation.habblaud import Client
+        from local_model_delegation.representation import Client
         receiver = self.receiver(); receiver.drip_headers = True
         start = time.monotonic()
         with self.assertRaises(ValueError): Client(receiver.endpoint).snapshot('.codex')
@@ -408,7 +408,7 @@ class Habblaud(Fixture):
     def test_detached_worker_starts_observer_from_its_pinned_bundle(self):
         import os
         from tests.support import FakeRuntime
-        from local_model_delegation.habblaud import configure, bind_context, quiesce
+        from local_model_delegation.representation import configure, bind_context, quiesce
         from local_model_delegation.worker import start_worker
         receiver = self.receiver(); runtime = FakeRuntime(delay=.2); self.addCleanup(runtime.close)
         profile = self.profile(); profile['endpoint'] = runtime.endpoint; self.write_config(profile)
@@ -424,7 +424,7 @@ class Habblaud(Fixture):
         shutil.copyfile(REPO_ROOT/'delegate.py', old_source/'delegate.py')
         old_worker = old_source/'local_model_delegation/worker.py'
         old_worker.write_text(old_worker.read_text().replace(
-            '        from .habblaud import ensure_observer\n        ensure_observer(state_dir, job["job_id"])\n', ''))
+            '        from .representation import ensure_observer\n        ensure_observer(state_dir, job["job_id"])\n', ''))
         old_bundle = pin_runtime_bundle(self.state, old_source)
         instance = store.instance(store.attempt(job['attempt_id'])['instance_key'])
         with store.db(write=True) as db:
@@ -442,3 +442,100 @@ class Habblaud(Fixture):
             quiesce(self.state)
             try: os.waitpid(pid, 0)
             except ChildProcessError: pass
+
+    def legacy_state(self):
+        from local_model_delegation.representation import Observer
+        receiver, store, job, now = self.active()
+        observer = Observer(self.state, job['job_id']); observer.step(now)
+        config = json.loads((self.state/'config.json').read_text())
+        config['previous_display'] = config.pop('representation')
+        atomic_json(self.state/'config.json', config)
+        route = store.job(job['job_id'])['route_data']
+        route['previous_display'] = route.pop('representation')
+        with store.db(write=True) as db:
+            db.execute('UPDATE jobs SET route_data=? WHERE job_id=?', (json.dumps(route), job['job_id']))
+        (self.state/'representation').rename(self.state/'previous_display')
+        return receiver, store, job, now, observer.receipt
+
+    def test_previous_namespace_preserves_receipts_context_and_enable_state(self):
+        from local_model_delegation.representation import Observer, status, disable, bind_context
+        receiver, store, job, now, receipt = self.legacy_state()
+        before = (self.state/'config.json').read_bytes()
+        self.assertTrue(status(self.state, job['job_id'])['enabled'])
+        observer = Observer(self.state, job['job_id'])
+        self.assertEqual(observer.receipt, receipt)
+        self.assertTrue(observer.step(now+21))
+        self.assertEqual(observer.receipt['agent_id'], receipt['agent_id'])
+        self.assertEqual((self.state/'config.json').read_bytes(), before)
+        with store.db(write=True) as db:
+            bind_context(db, job['job_id'], CONTEXT)
+            with self.assertRaisesRegex(ValueError, 'conflict'):
+                bind_context(db, job['job_id'], {**CONTEXT, 'role':'Tester'}, rebind=True)
+        self.assertNotIn('representation', store.job(job['job_id'])['route_data'])
+        disable(self.state)
+        config = json.loads((self.state/'config.json').read_text())
+        self.assertFalse(config['previous_display']['enabled'])
+        self.assertNotIn('representation', config)
+
+    def test_previous_namespace_retains_observer_lock(self):
+        from local_model_delegation.representation import ensure_observer
+        from local_model_delegation.worker import ownership
+        _, store, job, _, _ = self.legacy_state()
+        with ownership(store, 'previous_display-'+job['job_id']):
+            with patch('local_model_delegation.worker.launch') as launch:
+                self.assertEqual(ensure_observer(self.state, job['job_id'])['state'], 'observing')
+                launch.assert_not_called()
+
+    def test_ambiguous_or_unsafe_previous_namespace_rejected_without_writes(self):
+        from local_model_delegation.representation import status, disable
+        receiver = self.receiver()
+        target = {'enabled': True, 'endpoint': receiver.endpoint, 'account': '.codex'}
+        for namespaces in (('representation', 'previous_display'), ('old_one', 'old_two'),
+                           ('../escape',), ('jobs',), ('locks',)):
+            self.write_config()
+            config = json.loads((self.state/'config.json').read_text())
+            config.update({key: target for key in namespaces})
+            atomic_json(self.state/'config.json', config)
+            before = (self.state/'config.json').read_bytes()
+            with self.subTest(namespaces=namespaces):
+                with self.assertRaises(ValueError): status(self.state)
+                with self.assertRaises(ValueError): disable(self.state)
+                self.assertEqual((self.state/'config.json').read_bytes(), before)
+
+    def test_ambiguous_context_rejected_without_rebinding(self):
+        from local_model_delegation.representation import bind_context
+        store, _, job = self.queued(CONTEXT)
+        route = store.job(job['job_id'])['route_data']
+        route['previous_display'] = route['representation']
+        with store.db(write=True) as db:
+            db.execute('UPDATE jobs SET route_data=? WHERE job_id=?', (json.dumps(route), job['job_id']))
+        with store.db(write=True) as db, self.assertRaises(ValueError):
+            bind_context(db, job['job_id'], CONTEXT)
+        self.assertEqual(store.job(job['job_id'])['route_data'], route)
+
+    def test_previous_namespace_configuration_and_quiesce_keep_storage_identity(self):
+        from local_model_delegation.representation import configure, quiesce
+        receiver, store, job, _, receipt = self.legacy_state()
+        before = store.job(job['job_id'])
+        configure(self.state, receiver.endpoint, '.codex')
+        with patch('local_model_delegation.worker.ownership') as ownership:
+            ownership.return_value.__enter__.return_value = True
+            quiesce(self.state)
+            self.assertEqual(ownership.call_args.args[1], 'previous_display-'+job['job_id'])
+        config = json.loads((self.state/'config.json').read_text())
+        self.assertFalse(config['previous_display']['enabled'])
+        self.assertNotIn('representation', config)
+        self.assertFalse((self.state/'representation').exists())
+        self.assertEqual(json.loads((self.state/'previous_display'/f"{job['job_id']}.json").read_text()), receipt)
+        self.assertEqual(store.job(job['job_id']), before)
+
+    def test_unrelated_config_does_not_enable_publishing(self):
+        from local_model_delegation.representation import status
+        self.write_config()
+        config = json.loads((self.state/'config.json').read_text())
+        config['other_service'] = {'enabled': True, 'endpoint': 'http://127.0.0.1:1',
+                                   'account': '.codex', 'unrelated': True}
+        atomic_json(self.state/'config.json', config)
+        before = (self.state/'config.json').read_bytes()
+        self.assertFalse(status(self.state)['enabled'])
+        self.assertEqual((self.state/'config.json').read_bytes(), before)

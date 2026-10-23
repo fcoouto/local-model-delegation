@@ -129,7 +129,7 @@ def prepare_update(state_dir, target_root=PACKAGE_ROOT, installed_root=PACKAGE_R
             _quiescent(db, settled, allow_pending_admission=True)
         # Refuse misplaced runtimes before changing observers, bundles or backups.
         _files(store.root)
-        from .habblaud import quiesce
+        from .representation import quiesce
         quiesce(store.root)
         bundle = pin_runtime_bundle(store.root, Path(installed_root))
         directory = private_dir(store.root / 'updates' / uuid.uuid4().hex)

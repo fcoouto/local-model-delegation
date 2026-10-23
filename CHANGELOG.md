@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Name delegated task and agent display consistently as agent representation across commands, modules, tests and documentation.
+- Preserve existing stored configuration, bindings, observer receipts and locks without rewriting job identities. Reject ambiguous or unsafe namespaces.
+- Describe publishing as operational state and retain its configured state through verified updates.
+
 ## 0.3.16 — 2026-10-23
 
 - Separate assessment runtimes and temporary reference checks from plugin state with the read-only `assessment storage` command.
@@ -49,20 +55,20 @@ This release incorporates the unpublished 0.3.10–0.3.12 development builds bel
 
 ## 0.3.9
 
-- Correct the guided update workflow to record routing and Habblaud preferences before pausing, restore previously enabled preferences after successful verification, and read back the final state.
-- Preserve disabled preferences and explicit pause requests; failed updates remain paused. Runtime verification gates and model approvals are unchanged.
-- Give new native fallbacks readable, collision-safe task names, with an optional coordinator-supplied name and preserved recovery identity. Use task and actual model labels in local progress; Habblaud badges are unchanged.
+- Correct the guided update workflow to record routing and agent representation state before pausing, restore previously enabled controls after successful verification, and read back the final state.
+- Preserve disabled controls and explicit pause requests; failed updates remain paused. Runtime verification gates and model approvals are unchanged.
+- Give new native fallbacks readable, collision-safe task names, with an optional coordinator-supplied name and preserved recovery identity. Use task and actual model labels in local progress; agent representation badges are unchanged.
 - Settle returned native fallbacks rejected for changed source as failed, preserving the rejection reason and preventing completed work from remaining active during update checks.
 
 ## 0.3.8
 
-- Fix automatic Habblaud observer startup from detached workers by reusing the validated immutable runtime bundle.
+- Fix automatic agent representation observer startup from detached workers by reusing the validated immutable runtime bundle.
 - Start newly submitted jobs with the installed helper after an update, while existing jobs and recovery retain their recorded runtime pins.
 - Add an end-to-end regression covering a real detached worker, an older loaded-instance bundle, one model request and automatic hook delivery.
 
 ## 0.3.7
 
-- Show real local attempts beneath their coordinator in unchanged Habblaud through its existing hooks, for local npm and Docker deployments.
+- Represent real local attempts beneath their coordinator through existing hooks, for local npm and Docker deployments.
 - Display the assignment role and actual model display name, preserve specialty metadata, and report generation, verification and terminal phases without changing execution or acceptance.
 - Add opt-in enable/status/bind/resume/disable controls, bounded loopback transport, stable display identities, restart recovery and observer cleanup during updates.
 - Preserve running job identity when duplicate presentation context conflicts; retain all published 0.3.6 generation-budget behavior.

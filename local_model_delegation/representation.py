@@ -1,4 +1,4 @@
-"""Optional presentation through unchanged Habblaud hooks; never execution authority."""
+"""Delegated task and agent representation; never execution authority."""
 import http.client
 import re
 import socket
@@ -14,6 +14,33 @@ from .store import Store, atomic_json, private_dir
 ROLES = {'Coordinator', 'Scout', 'Builder', 'Tester', 'Reviewer', 'Scribe', 'Investigator'}
 LIMITATIONS = ['inherited_codex_provider', 'completion_is_not_verification',
                'labels_may_be_clipped', 'model_stats_unavailable', 'unmeasured_tokens', 'native_statistics_and_world']
+
+
+
+def _namespace(values, fields, required):
+    # Preserve stored namespaces by schema; never rewrite existing identities.
+    keys = [key for key, value in values.items() if key == 'representation' or
+            (isinstance(value, dict) and required <= value.keys() <= fields)]
+    if len(keys) > 1: raise ValueError('ambiguous_representation_namespace')
+    return keys[0] if keys else 'representation'
+
+
+def _config_key(config):
+    key = _namespace(config, {'enabled', 'endpoint', 'account'}, {'enabled', 'endpoint', 'account'})
+    if (not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', key) or key in {
+            'jobs', 'profiles', 'locks', 'updates', 'runtimes', 'assessments',
+            'visibility', 'workers', 'bundles', 'offline_reassessments'}):
+        raise ValueError('unsafe_representation_namespace')
+    target = config.get(key, {})
+    if (not isinstance(target, dict) or set(target) - {'enabled', 'endpoint', 'account'}
+            or ('enabled' in target and type(target['enabled']) is not bool)
+            or any(k in target and not isinstance(target[k], str) for k in ('endpoint', 'account'))):
+        raise ValueError('invalid_representation_config')
+    return key
+
+
+def _context_key(route):
+    return _namespace(route, {'context', 'labels_locked'}, {'context'})
 
 
 def thread_id(value):
@@ -40,13 +67,13 @@ def bind_context(db, job_id, context, rebind=False):
     context = validate_context(context)
     row = db.execute('SELECT route_data FROM jobs WHERE job_id=?', (job_id,)).fetchone()
     if row is None: raise ValueError('unknown_job')
-    route = load_json(row['route_data']); saved = route.get('habblaud', {})
+    route = load_json(row['route_data']); key = _context_key(route); saved = route.get(key, {})
     previous = saved.get('context')
     if previous == context: return
     if previous and (not rebind or (saved.get('labels_locked') and any(
             previous.get(k) != context.get(k) for k in ('role', 'specialty')))):
         raise ValueError('visibility_context_conflict')
-    route['habblaud'] = {**saved, 'context': context}
+    route[key] = {**saved, 'context': context}
     db.execute('UPDATE jobs SET route_data=? WHERE job_id=?', (canonical(route), job_id))
 
 
@@ -66,9 +93,9 @@ class Client:
                     or parsed.username is not None or parsed.password is not None
                     or parsed.path not in ('', '/') or parsed.query or parsed.fragment
                     or not 1 <= (parsed.port or 80) <= 65535):
-                raise ValueError('unsupported_habblaud_endpoint')
+                raise ValueError('unsupported_representation_endpoint')
         except (TypeError, AttributeError, ValueError):
-            raise ValueError('unsupported_habblaud_endpoint') from None
+            raise ValueError('unsupported_representation_endpoint') from None
         self.endpoint = endpoint.rstrip('/')
         self.host, self.port = parsed.hostname, parsed.port or 80
 
@@ -76,7 +103,7 @@ class Client:
         connection = http.client.HTTPConnection(self.host, self.port, timeout=2)
         limit = 2 * 1024 * 1024 if value is None else 65536
         body = None if value is None else canonical(value).encode()
-        if body is not None and len(body) > 65536: raise ValueError('habblaud_event_too_large')
+        if body is not None and len(body) > 65536: raise ValueError('representation_event_too_large')
         deadline = time.monotonic() + 2
         expired = threading.Event(); timer = response = None
         try:
@@ -87,27 +114,27 @@ class Client:
                 try: wire.shutdown(socket.SHUT_RDWR)
                 except OSError: pass
             remaining = deadline - time.monotonic()
-            if remaining <= 0: raise ValueError('habblaud_timeout')
+            if remaining <= 0: raise ValueError('representation_timeout')
             # Capture the socket: HTTP/1.0 responses detach it from the connection.
             timer = threading.Timer(remaining, expire); timer.daemon = True; timer.start()
             connection.request('GET' if body is None else 'POST', path, body=body,
                                headers={'Content-Type': 'application/json'})
             response = connection.getresponse()
-            if response.status != 200: raise ValueError('habblaud_http_error')
-            if response.length is not None and response.length > limit: raise ValueError('habblaud_response_too_large')
+            if response.status != 200: raise ValueError('representation_http_error')
+            if response.length is not None and response.length > limit: raise ValueError('representation_response_too_large')
             chunks, size = [], 0
             while True:
                 remaining = deadline - time.monotonic()
-                if remaining <= 0: raise ValueError('habblaud_timeout')
+                if remaining <= 0: raise ValueError('representation_timeout')
                 if connection.sock: connection.sock.settimeout(remaining)
                 chunk = response.read1(min(65536, limit + 1 - size))
                 if not chunk: break
                 chunks.append(chunk); size += len(chunk)
-                if size > limit: raise ValueError('habblaud_response_too_large')
-            if expired.is_set() or time.monotonic() >= deadline: raise ValueError('habblaud_timeout')
+                if size > limit: raise ValueError('representation_response_too_large')
+            if expired.is_set() or time.monotonic() >= deadline: raise ValueError('representation_timeout')
             return load_json(b''.join(chunks).decode('utf-8'))
         except (OSError, http.client.HTTPException, UnicodeError):
-            raise ValueError('habblaud_timeout' if expired.is_set() else 'habblaud_unavailable') from None
+            raise ValueError('representation_timeout' if expired.is_set() else 'representation_unavailable') from None
         finally:
             if timer: timer.cancel()
             if response: response.close()
@@ -118,34 +145,34 @@ class Client:
         if (not isinstance(value, dict) or not isinstance(value.get('accounts'), list)
                 or not isinstance(value.get('agents'), list) or not isinstance(value.get('meta'), dict)
                 or not all(isinstance(a, dict) for a in value['agents'])):
-            raise ValueError('incompatible_habblaud_snapshot')
+            raise ValueError('incompatible_representation_snapshot')
         matches = [a for a in value['accounts'] if isinstance(a, dict)
                    and a.get('id') == account and a.get('provider') == 'codex']
-        if len(matches) != 1: raise ValueError('habblaud_account_unavailable')
+        if len(matches) != 1: raise ValueError('representation_account_unavailable')
         return value
 
     def event(self, account, event):
         result = self.request('/api/codex/events', {'account': account, 'event': event})
         if not isinstance(result, dict) or set(result) != {'ok'} or result['ok'] is not True:
-            raise ValueError('habblaud_event_rejected')
+            raise ValueError('representation_event_rejected')
 
 
 def configure(state_dir, endpoint, account):
     if not isinstance(account, str) or not account.strip() or len(account) > 200 or account != account.strip():
-        raise ValueError('invalid_habblaud_account')
+        raise ValueError('invalid_representation_account')
     client = Client(endpoint); client.snapshot(account)
     root = private_dir(Path(state_dir))
     from .visibility import _lock
     with _lock(root):
         config = read_config(root)
-        config['habblaud'] = {'enabled': True, 'endpoint': client.endpoint, 'account': account}
+        config[_config_key(config)] = {'enabled': True, 'endpoint': client.endpoint, 'account': account}
         atomic_json(root/'config.json', config)
     return status(root)
 
 
 def _receipt_path(root, job_id):
     if not isinstance(job_id, str) or not re.fullmatch('[a-f0-9]{32}', job_id): raise ValueError('invalid_job_id')
-    return Path(root)/'habblaud'/f'{job_id}.json'
+    return Path(root)/_config_key(read_config(root))/f'{job_id}.json'
 
 
 def _read_receipt(root, job_id):
@@ -158,7 +185,7 @@ def _read_receipt(root, job_id):
 
 
 def status(state_dir, job_id=None):
-    config = read_config(state_dir); target = config.get('habblaud', {})
+    config = read_config(state_dir); target = config.get(_config_key(config), {})
     result = {'enabled': target.get('enabled') is True and config.get('visibility_enabled', True) is True,
               'configured': bool(target.get('endpoint')), 'limitations': LIMITATIONS,
               **{k: target[k] for k in ('endpoint', 'account') if k in target}}
@@ -195,25 +222,26 @@ def _phase(job, attempt, now):
 
 def _binding(store, job_id, target):
     # Freeze only presentation metadata. No execution clocks or brief fields change.
-    locked = store.job(job_id)['route_data'].get('habblaud', {}).get('labels_locked') is True
+    route = store.job(job_id)['route_data']
+    locked = route.get(_context_key(route), {}).get('labels_locked') is True
     with store.db(write=not locked) as db:
         job = store._job(db.execute('SELECT * FROM jobs WHERE job_id=?', (job_id,)).fetchone())
-        route = job['route_data']; saved = route.get('habblaud', {})
+        route = job['route_data']; key = _context_key(route); saved = route.get(key, {})
         context = validate_context(saved.get('context', {'coordinator_chat_id': job['brief']['origin_chat_id']}))
         model = job['profile'].get('model_id')
         if not isinstance(model, str) or not model.strip() or len(model) > 4096:
-            raise ValueError('unsupported_habblaud_label')
+            raise ValueError('unsupported_representation_label')
         clean = lambda text: ' '.join(''.join(c if c.isprintable() else ' ' for c in text).split())
         display = job['profile'].get('display_name')
         if not display:
             parts = re.split(r'[-_\s]+', model.strip())
             display = ' '.join(re.sub(r'(\d)b$', r'\1B', part[:1].upper()+part[1:]) for part in parts)
         if not isinstance(display, str) or not display.strip() or len(display) > 4096:
-            raise ValueError('unsupported_habblaud_label')
+            raise ValueError('unsupported_representation_label')
         label = context.get('role', 'Unspecified role')+' · '+clean(display)
-        if 'guardian' in label.lower(): raise ValueError('unsupported_habblaud_label')
+        if 'guardian' in label.lower(): raise ValueError('unsupported_representation_label')
         if not saved.get('labels_locked'):
-            route['habblaud'] = {'context': context, 'labels_locked': True}
+            route[key] = {'context': context, 'labels_locked': True}
             db.execute('UPDATE jobs SET route_data=? WHERE job_id=?', (canonical(route), job_id))
     identity = [str(store.root), job_id, job['attempt_id'], target['endpoint'], target['account'], context['coordinator_chat_id']]
     return {'endpoint': target['endpoint'], 'account': target['account'], 'parent': context['coordinator_chat_id'],
@@ -252,7 +280,7 @@ class Observer:
                 self.receipt['last_sent_at'] = now
             except (ValueError, OSError):
                 # shortcut: an unavailable receiver expires the entry; hooks offer no neutral removal.
-                self.receipt['error'] = 'habblaud_stop_unconfirmed'
+                self.receipt['error'] = 'representation_stop_unconfirmed'
         if self.receipt:
             self.receipt.update(state='stopped', phase=phase)
             self.save()
@@ -260,7 +288,7 @@ class Observer:
 
     def step(self, now=None):
         now = time.time() if now is None else now
-        config = read_config(self.store.root); target = config.get('habblaud', {})
+        config = read_config(self.store.root); target = config.get(_config_key(config), {})
         if config.get('visibility_enabled', True) is not True or target.get('enabled') is not True:
             return self.stop('Visibility disabled', now)
         job = self.store.job(self.job_id)
@@ -287,7 +315,7 @@ class Observer:
                 client.event(binding['account'], _event(binding, 'SubagentStart'))
             else:
                 if existing.get('parentId') != binding['account']+':'+binding['parent'] or existing.get('role') != binding['label']:
-                    raise ValueError('habblaud_binding_mismatch')
+                    raise ValueError('representation_binding_mismatch')
                 self.receipt['may_exist'] = True
             if created or self.receipt.get('phase') != phase:
                 client.event(binding['account'], _event(binding, 'PreToolUse', phase))
@@ -297,19 +325,19 @@ class Observer:
             return True
         except (ValueError, OSError, KeyError, TypeError) as error:
             code = str(error)
-            allowed = {'unsupported_habblaud_label', 'invalid_coordinator_chat_id', 'habblaud_account_unavailable',
-                       'habblaud_event_rejected', 'habblaud_binding_mismatch', 'unsupported_habblaud_endpoint'}
-            code = code if code in allowed else 'habblaud_unavailable'
+            allowed = {'unsupported_representation_label', 'invalid_coordinator_chat_id', 'representation_account_unavailable',
+                       'representation_event_rejected', 'representation_binding_mismatch', 'unsupported_representation_endpoint'}
+            code = code if code in allowed else 'representation_unavailable'
             failures = min(self.receipt.get('failures', 0) + 1, 5)
             self.receipt.update(state='error', error=code, failures=failures, next_retry_at=now+min(20, 2**failures))
             self.save()
-            return code not in ('unsupported_habblaud_label', 'invalid_coordinator_chat_id', 'unsupported_habblaud_endpoint')
+            return code not in ('unsupported_representation_label', 'invalid_coordinator_chat_id', 'unsupported_representation_endpoint')
 
 
 def run_observer(state_dir, job_id):
     from .worker import ownership
     store = Store(state_dir); _receipt_path(store.root, job_id)
-    with ownership(store, 'habblaud-'+job_id) as owned:
+    with ownership(store, _config_key(read_config(store.root))+'-'+job_id) as owned:
         if not owned: return 0
         from .visibility import _lock
         with _lock(store.root):
@@ -334,12 +362,12 @@ def ensure_observer(state_dir, job_id):
         from .visibility import _lock
         with _lock(store.root):
             if not status(state_dir)['enabled']: return {'state': 'disabled'}
-            with ownership(store, 'habblaud-'+job_id) as owned:
+            with ownership(store, _config_key(read_config(store.root))+'-'+job_id) as owned:
                 if not owned: return {'state': 'observing'}
-            pid = launch(state_dir, 'habblaud-observer', job_id)
+            pid = launch(state_dir, 'representation-observer', job_id)
         return {'state': 'starting', 'pid': pid}
     except Exception:
-        return {'state': 'unavailable', 'error': 'habblaud_observer_unavailable'}
+        return {'state': 'unavailable', 'error': 'representation_observer_unavailable'}
 
 
 def disable(state_dir):
@@ -347,7 +375,8 @@ def disable(state_dir):
     from .visibility import _lock
     with _lock(root):
         config = read_config(root)
-        config['habblaud'] = {**config.get('habblaud', {}), 'enabled': False}
+        key = _config_key(config)
+        config[key] = {**config.get(key, {}), 'enabled': False}
         atomic_json(root/'config.json', config)
     return status(root)
 
@@ -355,16 +384,17 @@ def disable(state_dir):
 def quiesce(state_dir):
     """Stop only owned display observers before a package-state snapshot."""
     root = Path(state_dir)
-    if 'habblaud' not in read_config(root): return
+    config = read_config(root); key = _config_key(config)
+    if key not in config: return
     disable(root)
     from .worker import ownership
     store = Store(root); deadline = time.monotonic()+8
     while True:
         busy = False
-        for path in (root/'habblaud').glob('*.json'):
+        for path in (root/key).glob('*.json'):
             _receipt_path(root, path.stem)
-            with ownership(store, 'habblaud-'+path.stem) as owned:
+            with ownership(store, key+'-'+path.stem) as owned:
                 if not owned: busy = True
         if not busy: return
-        if time.monotonic() >= deadline: raise ValueError('habblaud_observer_busy')
+        if time.monotonic() >= deadline: raise ValueError('representation_observer_busy')
         time.sleep(.1)

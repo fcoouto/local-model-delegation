@@ -69,14 +69,14 @@ def main(argv=None):
     p.add_argument('--installed', type=Path)
     p = commands.add_parser("doctor")
     p.add_argument("--inspect-runtime", action="store_true")
-    for name in ("worker", "recover", "scheduler", "habblaud-observer"):
+    for name in ("worker", "recover", "scheduler", "representation-observer"):
         p = commands.add_parser(name)
         p.add_argument("identifier")
     p = commands.add_parser("submit")
     p.add_argument("--brief", type=Path, required=True)
     p.add_argument('--measurement-context', type=Path)
     p.add_argument('--visibility-context', type=Path)
-    h = commands.add_parser('habblaud').add_subparsers(dest='action', required=True)
+    h = commands.add_parser('representation').add_subparsers(dest='action', required=True)
     p = h.add_parser('enable'); p.add_argument('--endpoint', required=True); p.add_argument('--account', required=True)
     p = h.add_parser('status'); p.add_argument('--job')
     h.add_parser('disable')
@@ -174,8 +174,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         args.state_dir = resolve_state_directory(args.state_dir)
-        if args.command == 'habblaud-observer':
-            from .habblaud import run_observer
+        if args.command == 'representation-observer':
+            from .representation import run_observer
             return run_observer(args.state_dir, args.identifier)
         if args.command == "worker": return run_local_attempt(args.state_dir, args.identifier)
         if args.command == "scheduler":
@@ -219,13 +219,13 @@ def main(argv=None):
             from .package import initialize_state, doctor, prepare_uninstall
             if args.command == "doctor": result = doctor(args.state_dir, args.inspect_runtime)
             else: result = {"setup": initialize_state, "prepare-uninstall": prepare_uninstall}[args.command](args.state_dir)
-        elif args.command == 'habblaud':
-            from . import habblaud
-            if args.action == 'enable': result = habblaud.configure(args.state_dir, args.endpoint, args.account)
-            elif args.action == 'bind': result = habblaud.bind(args.state_dir, args.job, read_input(args.context))
-            elif args.action == 'disable': result = habblaud.disable(args.state_dir)
-            elif args.action == 'resume': result = {**habblaud.status(args.state_dir, args.job), 'observer': habblaud.ensure_observer(args.state_dir, args.job)}
-            else: result = habblaud.status(args.state_dir, args.job)
+        elif args.command == 'representation':
+            from . import representation
+            if args.action == 'enable': result = representation.configure(args.state_dir, args.endpoint, args.account)
+            elif args.action == 'bind': result = representation.bind(args.state_dir, args.job, read_input(args.context))
+            elif args.action == 'disable': result = representation.disable(args.state_dir)
+            elif args.action == 'resume': result = {**representation.status(args.state_dir, args.job), 'observer': representation.ensure_observer(args.state_dir, args.job)}
+            else: result = representation.status(args.state_dir, args.job)
         elif args.command == "visibility":
             from .visibility import set_visibility, visibility_status
             result = visibility_status(args.state_dir) if args.action == "status" else set_visibility(args.state_dir, args.action == "enable")

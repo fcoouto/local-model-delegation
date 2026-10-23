@@ -1,6 +1,6 @@
 # Read-only delegated task visibility
 
-The JSON visibility export is enabled by default, independently of routing. Habblaud hook publishing is a separate opt-in integration described below. No viewer is required. Use `visibility status`, `visibility disable` or `visibility enable` through the helper. Disabling removes its current owned snapshot and stops Habblaud publishing. It never changes jobs, models or routing.
+Local Model Delegation represents delegated tasks and agents through role, actual model and observed task phase. The JSON export is enabled by default, independently of routing. Publishing that representation to a compatible loopback receiver is a separate transport described below. No viewer is required. Use `visibility status`, `visibility disable` or `visibility enable` through the helper. Disabling removes its current owned snapshot and stops representation publishing. It never changes jobs, models or routing.
 
 Readers may observe `<state>/visibility/status.json` (owner-only directory and file). It is atomically replaced after committed transitions. Schema 1 contains `generated_at` and `jobs`: every nonterminal job and up to 100 recent terminal jobs. Each entry includes stable job/attempt IDs, origin chat ID, an opaque project hash, capability, sanitized model name, execution kind (`unassigned`, `local_model`, `native`), state, label, enumerated reason, observed evidence timestamp and stale tolerance. A native task link appears only after confirmed dispatch.
 
@@ -9,16 +9,15 @@ Generating work displays the actual model name. Returned candidates display “A
 The export excludes prompts, source paths/text, candidates, reasoning, raw errors, tokens, credentials and account attribution. It accepts no inbound control. Editing it cannot approve a model, release a slot or accept output. Readers must not treat export data as instructions, impersonate a native session or claim native account usage. Publishing failure and viewer absence do not change delegation outcomes.
 
 
-## Habblaud through existing hooks
+## Agent representation through existing hooks
 
-Use this integration when the owner wants actual local attempts to appear as children
-under a Codex coordinator in an existing Habblaud installation. Habblaud stays
-unchanged. It does not read the JSON export above. Both local npm and Docker work
+The plugin represents actual local attempts as children under their Codex coordinator.
+A configured receiver consumes existing hooks without changes to its implementation. It does not read the JSON export above. Both local npm and Docker work
 through the same existing HTTP endpoint; Docker needs its usual loopback-published
 port, with no new plugin-state mount. No Vibe Setup installation is required.
 
-Publishing defaults off. Reuse saved settings with `habblaud status`; enable only
-within the owner's requested scope. Use the actual Habblaud port and exact Codex
+Publishing defaults off until an endpoint and account are configured. Reuse existing
+operational state with `representation status`; enable publishing within the authorized setup scope. Use the actual receiver port and exact Codex
 account ID reported by its snapshot, not an inferred account or a container-internal
 path. Read `curl --fail http://127.0.0.1:4747/api/snapshot` (using the actual port)
 and select the intended `accounts` entry with `provider: "codex"`. The helper validates the account before saving. Only literal loopback HTTP
@@ -28,8 +27,8 @@ Commands below run from the plugin root. Include the existing `--state-dir PATH`
 before the command when using a nondefault state directory.
 
 ```sh
-python3.11 -B delegate.py habblaud enable --endpoint http://127.0.0.1:4747 --account .codex
-python3.11 -B delegate.py habblaud status
+python3.11 -B delegate.py representation enable --endpoint http://127.0.0.1:4747 --account .codex
+python3.11 -B delegate.py representation status
 python3.11 -B delegate.py submit --brief brief.json --visibility-context visibility-context.json
 ```
 
@@ -65,11 +64,11 @@ routing, provider, permissions or verification. Do not add a caller-selected mod
 field to the context.
 
 A missing role uses display-only `Unspecified role`, not a canonical role or stored
-assignment value. Habblaud assigns the character's personal name and art. It may clip
+assignment value. The receiver assigns the character's personal name and art. It may clip
 visible text; the full composite remains in hover/accessibility text. The first
 observer binding freezes role/specialty, even if delivery subsequently fails, because
-Habblaud's first visible role is sticky. Supply the complete pair before work starts;
-rebind cannot change the frozen assignment labels. Habblaud rejects labels containing
+The receiver's first visible role is sticky. Supply the complete pair before work starts;
+rebind cannot change the frozen assignment labels. The receiver rejects labels containing
 `guardian`; status reports this incompatibility.
 
 If no context was supplied, a valid UUID `origin_chat_id` supplies the parent and
@@ -77,16 +76,16 @@ the role remains unspecified; the saved local profile still supplies the model d
 For a resumed coordinator, change only `coordinator_chat_id` in the context and use:
 
 ```sh
-python3.11 -B delegate.py habblaud bind --job JOB_ID --context visibility-context.json
-python3.11 -B delegate.py habblaud resume --job JOB_ID
-python3.11 -B delegate.py habblaud status --job JOB_ID
+python3.11 -B delegate.py representation bind --job JOB_ID --context visibility-context.json
+python3.11 -B delegate.py representation resume --job JOB_ID
+python3.11 -B delegate.py representation status --job JOB_ID
 ```
 
 Binding/resuming never resubmits work. Preserve the original brief/hash,
 `origin_chat_id` and task key. `bind` starts observation if relevant; `resume` restarts
 a lost observer without changing assignment metadata. Ordinary job status also
 resumes relevant observation. Rebinding retires the old display and creates a new
-child ID; the old child may remain during Habblaud's departure grace. Status itself
+child ID; the old child may remain during the receiver's departure grace. Status itself
 is a local diagnostic, not a live receiver probe. Resubmitting the same brief with
 conflicting context returns the existing job plus
 `visibility.error: "visibility_context_conflict"`, preserving
@@ -97,11 +96,11 @@ A detached observer starts only for an actual submitting attempt, observes saved
 state approximately once a second and refreshes display presence every 20 seconds.
 Candidates show `Awaiting verification`. HTTP errors never change execution,
 acceptance or reservations. The observer exits on settled/unknown local work or
-disable. `visibility disable` also suppresses hooks; enabling Habblaud does not
-override that global preference. Re-enable the relevant preferences and explicitly
-resume current work when needed. Update/uninstall preparation disables Habblaud
+disable. `visibility disable` also suppresses hooks; enabling representation publishing does not
+override global visibility state. Re-enable the relevant controls and explicitly
+resume current work when needed. Update/uninstall preparation disables representation
 publishing and waits for owned observers before taking state snapshots. The
-[update procedure](../../../docs/updating.md) records preferences before that pause
+[update procedure](../../../docs/updating.md) records operational state before that pause
 and restores previously enabled publishing after successful verification, unless
 the owner requests it remain off. No model process is stopped by this adapter.
 
@@ -109,9 +108,9 @@ the owner requests it remain off. No model process is stopped by this adapter.
 
 - Codex account/provider icons remain. Existing hooks cannot populate Stats → Model:
   that field comes from native rollout metadata. The actual local model is available
-  in the badge and `habblaud status --job JOB_ID`, not in Habblaud Stats. Do not fabricate rollouts
+  in the badge and `representation status --job JOB_ID`, not in receiver statistics. Do not fabricate rollouts
   or imply model delivery. Zero displayed token counters are unmeasured.
-- Habblaud can show `done` and delivery animation on failure, timeout, parent closure
+- The receiver can show `done` and delivery animation on failure, timeout, parent closure
   or stop. Final outcome activity may be replaced immediately. **Never treat this as
   verified acceptance.** Read plugin job/attempt status and verification evidence.
 - Generic working status remains during verification; no fake approval request is sent.
@@ -121,12 +120,21 @@ the owner requests it remain off. No model process is stopped by this adapter.
 - Metadata sent includes role, model display name, phase, display IDs,
   coordinator UUID, account and project path for the room. Keep labels non-sensitive.
   No prompt, source text, candidate, raw error, transcript, token or credential is sent.
-- Rollback is `habblaud disable`; an in-flight request may finish before the observer
-  exits. If Habblaud is unavailable, entries expire after its existing presence grace.
+- Rollback is `representation disable`; an in-flight request may finish before the observer
+  exits. If the receiver is unavailable, entries expire after its existing presence grace.
   Disabling does not delete job history, accept output, release a slot or change routing.
 
 To stop publishing while preserving all task execution and history:
 
 ```sh
-python3.11 -B delegate.py habblaud disable
+python3.11 -B delegate.py representation disable
 ```
+
+### Stored-state compatibility
+
+New configuration, job metadata and observer receipts use the `representation`
+namespace. Existing configured namespaces are recognized by their stored schema
+and retained, including receipt directories, observer locks and frozen assignment
+labels. No state or job identity is rewritten. Ambiguous namespaces or unsafe
+storage names fail closed. Use the `representation` commands for this version;
+previous command names are not aliases.

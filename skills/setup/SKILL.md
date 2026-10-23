@@ -32,17 +32,17 @@ Example after detecting a missing runtime: “The plugin is installed; delegatio
 
 At completion or a pause, report **verified**, **pending/blocked**, **routing state**, and **resume step**. A saved setup is not operational delegation. “Resume Local Model Delegation setup” resumes from the saved checkpoint.
 
-For updates, follow the [guided update procedure](../../docs/updating.md), including release staging, private backup, native installation, verification and restoration of saved routing/publishing preferences. An update request includes restoring previously enabled preferences after successful verification; disabled preferences and explicit requests to remain paused stay off. For removal, follow [Setup operations](references/operations.md) before native plugin controls.
+For updates, follow the [guided update procedure](../../docs/updating.md), including release staging, private backup, native installation, verification and restoration of saved routing/publishing state. An update request includes restoring previously enabled controls after successful verification; disabled controls and explicit requests to remain paused stay off. For removal, follow [Setup operations](references/operations.md) before native plugin controls.
 
 Fresh authorized setup also initializes private measurement tables. Existing installations use `metrics init` after authorized update; see [measurements](../local-delegation/references/measurements.md). Reports and comparison registrations do not approve models, authorize extra inference, or enable routing. Missing native telemetry means savings remain unknown.
 
 
-## Optional Habblaud appearance
+## Delegated task and agent representation
 
-When the owner requests this integration, read
+For delegated task and agent representation, read
 [the visibility guide](../local-delegation/references/visibility.md) for the exact
-commands, metadata handoff and limitations. Reuse `habblaud status` and saved
-settings; do not enable hooks merely because Habblaud or Vibe Setup is installed.
-Habblaud stays unchanged. Vibe Setup owns assignment role/specialty policy; this
+commands, metadata handoff and limitations. Reuse `representation status` and saved
+operational state; configuring a receiver is part of authorized setup, not a model approval.
+The receiver stays unchanged. Vibe Setup owns assignment role/specialty policy; this
 plugin owns context storage, transport and observation. Setup for appearance never
 approves a model, activates routing or changes native authentication/settings.
