@@ -537,6 +537,13 @@ def _approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_
     """Record explicit provisional operating permission, never fabricated assessment evidence."""
     if not isinstance(owner_reference, str) or not owner_reference.strip(): raise ValueError('owner_confirmation_required')
     profile = _profile(state_dir, profile_id)
+    if project_root is not None and profile.get('scope'):
+        from .profiles import eligible
+        retained = _binding(profile)
+        if not all(eligible(profile, retained['artifact'], item['capability']) for item in profile['scope']):
+            raise ValueError('retained_approval_stale')
+        if max_output_tokens is not None and max_output_tokens != profile['request_settings']['max_output_tokens']:
+            raise ValueError('retained_settings_change_requires_approval')
     if max_output_tokens is not None:
         if type(max_output_tokens) is not int or max_output_tokens <= 0: raise ValueError('invalid_generation_ceiling')
         profile['request_settings'] = {**profile['request_settings'], 'max_output_tokens':max_output_tokens}

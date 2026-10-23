@@ -1,11 +1,18 @@
 import copy
 from unittest.mock import patch
-from tests.test_project_assessment_runs import ProjectRuns
+from tests import test_project_assessment_runs as campaigns
+from tests.support import Fixture
 from local_model_delegation import project_runs as runs, onboarding
 from local_model_delegation.store import atomic_json
 
 
-class ProjectReports(ProjectRuns):
+class ProjectReports(Fixture):
+    setUp = campaigns.ProjectRuns.setUp
+    pack = campaigns.ProjectRuns.pack
+    executable_pack = campaigns.ProjectRuns.executable_pack
+    prepare_run = campaigns.ProjectRuns.prepare_run
+    generated = campaigns.ProjectRuns.generated
+
     def report_fixture(self, passed=2, weights=False):
         prepared = self.prepare_run()
         record = onboarding._assessment(self.state, prepared['assessment_id'])
@@ -39,6 +46,7 @@ class ProjectReports(ProjectRuns):
         self.assertEqual(simple['recommendation'], 'suitable_within_tested_scope')
 
     def test_project_approval_preserves_legacy_and_rejects_untested_scope(self):
+        self.qualified_source()
         from local_model_delegation.projects import resolve_project_identity
         record = self.report_fixture(2)
         atomic_json(self.state / 'assessments' / record['assessment_id'] / 'assessment.json', record)
@@ -83,3 +91,37 @@ class ProjectReports(ProjectRuns):
         context['case_hash'] = '0' * 64
         with self.assertRaisesRegex(ValueError, 'comparison_case_mismatch'):
             metrics.begin_measurement(self.state, 'wrong', context, job['job_id'])
+
+    def qualified_source(self, ceiling=2048):
+        source = onboarding._profile(self.state, 'fictional')
+        source['capabilities'].append('python_code_change')
+        source['request_settings']['max_output_tokens'] = ceiling
+        binding = onboarding._binding(source)
+        source['approval'].update(model_identity=binding['runtime'], artifact_digest=binding['artifact']['digest'],
+                                  capabilities=source['capabilities'], request_settings=copy.deepcopy(source['request_settings']))
+        atomic_json(self.state / 'profiles/fictional.json', source)
+
+    def test_project_grant_cannot_resurrect_stale_legacy_permission(self):
+        self.qualified_source()
+        (self.artifact / 'weights.bin').write_bytes(b'replacement fictional artifact')
+        record = self.report_fixture(2)
+        atomic_json(self.state / 'assessments' / record['assessment_id'] / 'assessment.json', record)
+        before = (self.state / 'profiles/fictional.json').read_bytes()
+        scope = [{'capability': 'code_change', 'language': 'python', 'complexity': 'simple',
+                  'context_bucket': 'small', 'max_input_bytes': 100}]
+        with self.assertRaisesRegex(ValueError, 'retained_approval_stale'):
+            onboarding.approve_scope(self.state, 'fictional', 'owner-simple-project-only', scope,
+                                     project_root=self.project, assessment_id=record['assessment_id'])
+        self.assertEqual(before, (self.state / 'profiles/fictional.json').read_bytes())
+
+    def test_project_grant_cannot_expand_retained_global_generation_ceiling(self):
+        self.qualified_source(1024)
+        record = self.report_fixture(2)
+        atomic_json(self.state / 'assessments' / record['assessment_id'] / 'assessment.json', record)
+        before = (self.state / 'profiles/fictional.json').read_bytes()
+        scope = [{'capability': 'code_change', 'language': 'python', 'complexity': 'simple',
+                  'context_bucket': 'small', 'max_input_bytes': 100}]
+        with self.assertRaisesRegex(ValueError, 'retained_settings_change_requires_approval'):
+            onboarding.approve_scope(self.state, 'fictional', 'owner-simple-project-only', scope,
+                project_root=self.project, assessment_id=record['assessment_id'], max_output_tokens=2048)
+        self.assertEqual(before, (self.state / 'profiles/fictional.json').read_bytes())

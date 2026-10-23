@@ -465,10 +465,11 @@ def record_final(state_dir, record, receipt):
     authorize(state_dir, record, job['brief'], {k: record[k] for k in ('assessment_id', 'permit_token')}, purpose='verify', job=job)
     if job['status'] not in ('accepted', 'failed', 'fallback_required'):
         raise ValueError('trial_not_complete')
-    if _trial_blocker(store, job):
+    reset = verified_termination(store, job)
+    if _trial_blocker(store, job) and not reset:
         raise ValueError('trial_unresolved')
-    disposition = ('passed' if job['status'] == 'accepted' else 'unfinished'
-                   if job['reason'] == 'output_budget_exhausted' else 'failed')
+    disposition = ('unfinished' if reset else 'passed' if job['status'] == 'accepted' else 'unfinished'
+                   if job['reason'] in ('output_budget_exhausted', 'project_verification_incomplete') else 'failed')
     value = {**receipt, 'case_id': trial['case_id'], 'disposition': disposition,
              'passed': disposition == 'passed', **_trial_observation(store, job)}
     existing = record['receipts'].get(trial['trial_id'])
@@ -509,3 +510,64 @@ def verification_lock(state_dir, job_id):
         if not owned:
             raise ValueError('assessment_busy')
         yield
+
+
+def reset_profile(state_dir, instance):
+    """Explicit reset permission can retire a paused campaign, never load or approve it."""
+    from .onboarding import _assessment, _profile, _binding
+    identifier = instance['data']['profile']['profile_id']
+    if not identifier.startswith('assessment-'):
+        raise ValueError('model_not_approved')
+    record = _assessment(state_dir, identifier.removeprefix('assessment-'))
+    profile = _profile(state_dir, identifier)
+    if (record.get('schema_version') != 2 or record['profile_id'] != identifier
+            or record['authorization']['state'] not in ('paused', 'stopped', 'invalidated', 'complete')
+            or profile != record['profile_snapshot'] or _binding(profile) != record['binding']):
+        raise ValueError('assessment_scope_mismatch')
+    return profile
+
+
+def verified_termination(store, job):
+    attempt = store.attempt(job['attempt_id'])
+    resolution = attempt['data'].get('reset_resolution') or {}
+    if attempt['state'] != 'released' or resolution.get('previous_state') != 'uncertain':
+        return False
+    with store.db() as db:
+        row = db.execute("SELECT data FROM model_operations WHERE operation_id=? AND state='complete'",
+                         (resolution.get('operation_id'),)).fetchone()
+    if not row:
+        return False
+    operation = load_json(row['data'])
+    return (operation.get('kind') == 'external_reset' and operation.get('absence_verified') is True
+            and operation.get('instance_key') == attempt['instance_key']
+            and operation.get('generation') == attempt['generation']
+            and any(a.get('attempt_id') == job['attempt_id'] for a in operation.get('attempts_before', [])))
+
+
+def record_check_observation(state_dir, job_id, session, checks, reasons):
+    job = Store(state_dir).job(job_id)
+    permit = job.get('route_data', {}).get('assessment')
+    if not permit:
+        return
+    from .onboarding import _assessment
+    if _assessment(state_dir, permit['assessment_id']).get('schema_version') == 2:
+        atomic_json(Path(state_dir) / 'jobs' / job_id / 'project-checks.json',
+                    {'session_token': session['session_token'], 'candidate_hash': session['candidate_hash'],
+                     'checks': checks, 'reasons': reasons})
+
+
+def checks_incomplete(state_dir, job, session, checks):
+    permit = job.get('route_data', {}).get('assessment')
+    if not permit:
+        return False
+    from .onboarding import _assessment
+    if _assessment(state_dir, permit['assessment_id']).get('schema_version') != 2 or not session['acceptance']['checks']:
+        return False
+    path = Path(state_dir) / 'jobs' / job['job_id'] / 'project-checks.json'
+    if not path.is_file():
+        raise ValueError('project_checks_required')
+    observed = load_json(path.read_text())
+    if (observed['session_token'] != session['session_token'] or observed['candidate_hash'] != session['candidate_hash']
+            or observed['checks'] != checks):
+        raise ValueError('verification_mismatch')
+    return any(reason is not None for reason in observed['reasons'].values())

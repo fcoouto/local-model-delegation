@@ -16,7 +16,7 @@ from local_model_delegation.store import atomic_json
 class ProjectRuns(Fixture):
     pack = preparation.ProjectPreparation.pack
     def setUp(self):
-        super().setUp()
+        Fixture.setUp(self)
         recovery = patch('local_model_delegation.recovery.request_recovery')
         recovery.start()
         self.addCleanup(recovery.stop)
@@ -238,3 +238,59 @@ class ProjectRuns(Fixture):
             with self.assertRaisesRegex(ValueError, 'assessment_checker_changed'):
                 runs.authorize(self.state, record, job['brief'],
                     {k: record[k] for k in ('assessment_id', 'permit_token')}, purpose='verify', job=job)
+
+    def test_checker_timeout_is_unfinished_and_cannot_be_overridden_as_pass(self):
+        from local_model_delegation.validation import prepare_verification, run_native_checks, record_verification
+        prepared, store, job = self.generated()
+        session = prepare_verification(self.state, job['job_id'])
+        with patch('local_model_delegation.validation.run_isolated', return_value={'returncode': -9, 'reason': 'check_timeout'}):
+            observed = run_native_checks(self.state, job['job_id'])
+        receipt = {k: session[k] for k in ('session_token', 'job_id', 'attempt_id', 'native_task_id',
+                                          'candidate_hash', 'source_hash', 'acceptance_hash')}
+        receipt.update(criteria=[True], claims=[], checks={k: True for k in observed['checks']})
+        with self.assertRaisesRegex(ValueError, 'verification_mismatch'):
+            record_verification(self.state, job['job_id'], receipt)
+        receipt['checks'] = observed['checks']
+        record_verification(self.state, job['job_id'], receipt)
+        result = onboarding.record_trial(self.state, prepared['assessment_id'],
+                                          {'trial_id': job['brief']['task_key'], 'job_id': job['job_id']})
+        self.assertEqual(result['counts']['unfinished'], 1)
+        self.assertEqual(result['counts']['failed'], 0)
+
+    def test_expired_attempt_settles_only_after_verified_reset_without_replay(self):
+        from local_model_delegation.lifecycle import reset_external
+        self.server.delay = .1
+        with patch('local_model_delegation.project_runs.execution_deadline', return_value=.01):
+            prepared, store, job = self.generated()
+        onboarding.control_assessment(self.state, prepared['assessment_id'], 'pause')
+        result = reset_external(self.state, store.attempt(job['attempt_id'])['instance_key'], 'owner-reset-fixture')
+        self.assertEqual(result['status'], 'retired')
+        report = onboarding.record_trial(self.state, prepared['assessment_id'],
+                                         {'trial_id': job['brief']['task_key'], 'job_id': job['job_id']})
+        self.assertEqual(report['counts']['unfinished'], 1)
+        self.assertEqual(report['counts']['failed'], 0)
+        self.server.loaded = True
+        progress = onboarding.control_assessment(self.state, prepared['assessment_id'], 'resume')
+        self.assertEqual(progress['next_trial_id'], 'case-1-cycle-1')
+        repeated = onboarding.submit_trial(self.state, prepared['assessment_id'], job['brief']['task_key'])
+        self.assertEqual(repeated['job_id'], job['job_id'])
+        self.assertEqual(sum(method == 'POST' and path.endswith('/chat') for method, path in self.server.calls), 1)
+
+    def test_reset_flag_without_verified_operation_cannot_settle_uncertainty(self):
+        from local_model_delegation.contracts import canonical
+        from local_model_delegation.lifecycle import reset_external, configure_loading
+        self.server.delay = .1
+        with patch('local_model_delegation.project_runs.execution_deadline', return_value=.01):
+            prepared, store, job = self.generated()
+        with self.assertRaisesRegex(ValueError, 'assessments_must_be_paused'):
+            reset_external(self.state, store.attempt(job['attempt_id'])['instance_key'], 'owner-reset')
+        record = onboarding._assessment(self.state, prepared['assessment_id'])
+        with self.assertRaisesRegex(ValueError, 'model_not_approved'):
+            configure_loading(self.state, record['profile_id'], 'owner-loading', 8192)
+        attempt = store.attempt(job['attempt_id'])
+        data = {**attempt['data'], 'reset_resolution': {'previous_state': 'uncertain', 'operation_id': 'invented'}}
+        with store.db(write=True) as db:
+            db.execute("UPDATE attempts SET state='released',data=? WHERE attempt_id=?", (canonical(data), job['attempt_id']))
+        with self.assertRaisesRegex(ValueError, 'trial_unresolved'):
+            onboarding.record_trial(self.state, prepared['assessment_id'],
+                                    {'trial_id': job['brief']['task_key'], 'job_id': job['job_id']})
