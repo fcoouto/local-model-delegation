@@ -524,7 +524,9 @@ def approve_assessment(state_dir, assessment_id, owner_reference, scope):
 
 def approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_tokens=None, project_root=None, assessment_id=None):
     from .worker import ownership
-    with ownership(Store(state_dir), 'profile-approval-' + str(profile_id)) as owned:
+    if not isinstance(profile_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]+', profile_id):
+        raise ValueError('invalid_profile_id')
+    with ownership(Store(state_dir), 'profile-approval-' + profile_id) as owned:
         if not owned:
             raise ValueError('profile_approval_busy')
         return _approve_scope(state_dir, profile_id, owner_reference, scope,
@@ -576,7 +578,7 @@ def _approve_scope(state_dir, profile_id, owner_reference, scope, *, max_output_
                            'artifact_digest':binding['artifact']['digest'], 'model_identity':binding['runtime'],
                            'capabilities':profile['capabilities'], 'request_settings':profile['request_settings'], 'scope':scope}
     atomic_json(Path(state_dir) / 'profiles' / (profile['profile_id']+'.json'), profile)
-    return {'status':'approval_recorded', 'approval_kind': 'project_bound' if project_root is not None else 'legacy_global',
+    return {'status':'approval_recorded', **({'approval_kind': 'project_bound'} if project_root is not None else {}),
             'routing_enabled':read_config(state_dir).get('routing_enabled') is True}
 
 

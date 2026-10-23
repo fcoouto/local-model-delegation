@@ -1,6 +1,6 @@
 # Project Assessment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Prepare and execute project-grounded local model assessments, report demonstrated scope and workload coverage, and bind new approvals to the tested project.
 
@@ -35,10 +35,10 @@
 
 **Interfaces:** `difficulty_distribution(count: int) -> dict`; `project_preview(project_root: Path, pack: dict, owner_reference: str) -> dict`. Packs describe domains, assignments and exact source evidence. Preview returns canonical project identity, pack digest, coverage and resource/verification readiness without creating model jobs. A missing executable assessment bundle is visibly draft, never runnable.
 
-- [ ] Write tests for 6–10 mixes, strict extra-high separation, project permission, unsafe/changed source paths, distinct task IDs and repeated scenario rejection, honest unknown weights and no runtime calls.
-- [ ] Run `python3.11 -B -m unittest tests.test_project_assessment -q`; confirm failures identify missing behavior.
-- [ ] Implement strict private pack validation and offline preview; expose `assessment project-preview --project PATH --selection FILE --owner-reference REF` and distribution choices. Source files are data, never executable setup instructions.
-- [ ] Run focused tests and `git diff --check`; commit this complete preparation layer.
+- [x] Write tests for 6–10 mixes, strict extra-high separation, project permission, unsafe/changed source paths, distinct task IDs and repeated scenario rejection, honest unknown weights and no runtime calls.
+- [x] Run `python3.11 -B -m unittest tests.test_project_assessment -q`; confirm failures identify missing behavior.
+- [x] Implement strict private pack validation and offline preview; expose `assessment project-preview --project PATH --selection FILE --owner-reference REF` and distribution choices. Source files are data, never executable setup instructions.
+- [x] Run focused tests and `git diff --check`; commit this complete preparation layer.
 
 ## Task 2: Frozen project runs and bounded cycles
 
@@ -46,11 +46,11 @@
 
 **Interfaces:** Extend `prepare_assessment(..., project_root=None)` for reviewed executable project packs; preserve legacy selection semantics. Add project-cycle/finalization operations through the same assessment record, permits and queue. Each cycle binds parent candidate, source, public feedback, deadline and allowance; no unbounded dynamic consent.
 
-- [ ] Write failing fake-runtime tests for source/pack freeze, no POST before matching consent, exact original source profile, context-derived finite output allowance, terminal exhaustion as incomplete, deadline uncertainty, cycle cap, duplicate submissions and no hidden-check feedback.
-- [ ] Run the new tests and confirm the missing behavior.
-- [ ] Implement executable-pack validation/reference evidence, immutable campaign preview, cycle lineage and public-check staging, and worker deadline observation retaining uncertain ownership. Keep legacy records untouched. Reuse current verification receipts for final acceptance.
-- [ ] Verify native comparison records use identical frozen tasks/feedback rules and explicitly report unenforced token limits; do not spawn native baselines automatically.
-- [ ] Run project-run tests plus `tests.test_assessment_runs`, `tests.test_worker`, `tests.test_generation_budgets`, `tests.test_validation`; commit.
+- [x] Write failing fake-runtime tests for source/pack freeze, no POST before matching consent, exact original source profile, context-derived finite output allowance, terminal exhaustion as incomplete, deadline uncertainty, cycle cap, duplicate submissions and no hidden-check feedback.
+- [x] Run the new tests and confirm the missing behavior.
+- [x] Implement executable-pack validation/reference evidence, immutable campaign preview, cycle lineage and public-check staging, and worker deadline observation retaining uncertain ownership. Keep legacy records untouched. Reuse current verification receipts for final acceptance.
+- [x] Verify native comparison records use identical frozen tasks/feedback rules and explicitly report unenforced token limits; do not spawn native baselines automatically.
+- [x] Run project-run tests plus `tests.test_assessment_runs`, `tests.test_worker`, `tests.test_generation_budgets`, `tests.test_validation`; commit.
 
 ## Task 3: Project approvals and useful coverage reports
 
@@ -58,10 +58,10 @@
 
 **Interfaces:** Extend approval with explicit project grants bound to existing exact-model identity/settings; `scope_matches` must check project identity for new grants. Preserve existing legacy approvals and record their provenance. Project reports expose counts by domain/difficulty/origin, recommendation, provisional weighted task coverage, unknown share and paired timing separately.
 
-- [ ] Write failing tests for same-model separate projects, canonical worktrees, role-label bypass attempts, approval mutation/revocation while queued, unchanged legacy approvals, sparse success and missing weights, unfinished denominator, native assistance and comparison asymmetry.
-- [ ] Implement separate project grant permission using current ownership and atomic state patterns; do not duplicate model profiles just to represent project grants.
-- [ ] Implement report aggregation with explicit samples and workload assumptions. Extra-high one-case success is exploratory, not a broad operating grant.
-- [ ] Run project approval/report tests plus profile, scheduler, store and measurement suites; commit.
+- [x] Write failing tests for same-model separate projects, canonical worktrees, role-label bypass attempts, approval mutation/revocation while queued, unchanged legacy approvals, sparse success and missing weights, unfinished denominator, native assistance and comparison asymmetry.
+- [x] Implement separate project grant permission using current ownership and atomic state patterns; do not duplicate model profiles just to represent project grants.
+- [x] Implement report aggregation with explicit samples and workload assumptions. Extra-high one-case success is exploratory, not a broad operating grant.
+- [x] Run project approval/report tests plus profile, scheduler, store and measurement suites; commit.
 
 ## Task 4: Entry points, PHIOON preview and independent review
 
@@ -76,3 +76,5 @@
 ## Execution record
 
 The owner authorized updating the plan and implementation in one request. Execute inline with native settings preserved and one independent final review; do not repeat a plan-approval question. This change spans evidence/permission boundaries beyond the approved simple local scopes, so implementation remains native. Keep progress and interface rulings in the plan-specific private ledger. Four phases/checkpoints at most. Use existing verified worktree/task binding `9c5a1e72-97e7-4bcc-bc97-52a265ab08ee`.
+
+Implementation ruling: The first native comparison integration uses paired first-cycle cases with one opportunity per contestant. Multi-cycle local completion remains separate; no equal-opportunity final native comparison is claimed. The current comparison ledger stores individual attempt pairs. Project campaigns export exact hashes and measurement bindings for that existing ledger. A later multi-cycle native comparison needs its own equally frozen opportunity plan.

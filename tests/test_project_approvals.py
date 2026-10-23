@@ -38,7 +38,7 @@ class ProjectApprovals(Fixture):
         profile = self.profile()
         self.write_config(profile)
         result = approve_scope(self.state, 'fictional', 'owner', profile['scope'])
-        self.assertEqual(result['approval_kind'], 'legacy_global')
+        self.assertEqual(result, {'status': 'approval_recorded', 'routing_enabled': True})
         current = read_profile_by_id(self.state, 'fictional', 'python_code_change')
         self.assertEqual(current['scope'], profile['scope'])
         self.assertTrue(scope_matches(current, self.brief()))

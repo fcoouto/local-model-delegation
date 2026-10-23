@@ -93,7 +93,7 @@ The root [plugin manifest](plugin.json) packages [Setup](skills/setup/SKILL.md),
 
 After authorized installation, `setup` initializes disabled private state. Installation, per-run assessment consent, exact-model approval and routing activation remain separate decisions. Current builds/tests do none of those on the developer's real machine.
 
-**Assess my Model** tests an already loaded local text model without onboarding it. Focused coverage is the default; all supported abilities is explicit. It reuses Setup's helpers, saves an unapproved candidate and private evidence, and leaves existing approvals/routing intact. Reports remain readable offline. Only an explicit request such as “onboard this model” hands the result to Setup. Legacy standing-consent assessments retain their original meaning.
+**Assess my Model** tests an already loaded local text model without onboarding it. Project-specific coverage is the default: select a repository, inspect its actual work and prepare eight grounded assignments per specialty (2 light, 3 medium, 2 high, 1 extra high). Legacy fixture coverage remains available explicitly. It reuses Setup's helpers, saves an unapproved candidate and private evidence, and leaves existing approvals/routing intact. Reports remain readable offline. Only an explicit request such as “onboard this model” hands the result to Setup. Legacy standing-consent assessments retain their original meaning.
 
 Approval records permission for an exact model, settings and practical operating scope; it does not certify reliability. Start with one slot and a few representative, natively verified tasks. Once the owner approves that provisional scope and enables routing, ordinary authorized tasks provide measurement evidence. Missing telemetry or comparable baselines keeps savings unknown. Known negative benefit and suspended scopes remain ineligible; measured benefit for the matching scope takes priority over unknown benefit.
 
@@ -160,3 +160,7 @@ Skill validation uses the bundled validator with Python 3.11 and PyYAML 6.0.3. P
 ## Credits and license
 
 The prompt-first entry and guided setup structure are inspired by the [Vibe Coding Toolkit README](https://github.com/soumatheusgomes/vibe-coding-toolkit). Local Model Delegation is [MIT licensed](LICENSE).
+
+### Project-specific assessment
+
+See [project campaign operations](skills/assess-my-model/references/operations.md#project-campaigns-default) for offline task previews, reviewed executable packs, measured runtime ceilings/deadlines and up to three public-feedback cycles. Timing is separate from capability; interrupted work remains inconclusive. Reports estimate potential recurring-task coverage only with confirmed workload frequencies. New grants carry canonical project identity through eligibility. Existing global permissions and saved legacy results keep their original meaning. Preparation does not generate, install, approve or enable routing.
