@@ -212,7 +212,7 @@ class Store:
                 db.execute("INSERT INTO attempts VALUES (?,?,?,?,?,?)", (attempt_id, job_id, key, generation, "reserved", canonical({"created": time.time()})))
             return envelope(self._job(db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()))
 
-    def _slot(self, db, profile, loaded):
+    def _slot(self, db, profile, loaded, *, assessment=False):
         from .lifecycle import endpoint_operation
         if endpoint_operation(db, profile['endpoint']):
             return None, 'fallback_required', 'lifecycle_busy', None, None
@@ -233,12 +233,13 @@ class Store:
                 generation, state = row["generation"], row["state"]
                 data = load_json(row["data"])
                 if (data["artifact_digest"] != profile["artifact"]["digest"]
-                        or data["profile"]["approval"] != profile["approval"]):
+                        or data['profile']['approval'] != profile['approval']
+                        or data['profile']['request_settings'] != profile['request_settings']):
                     old_settings, settings = data['profile']['request_settings'], profile['request_settings']
                     same_settings = old_settings == settings or (
                         {k:v for k,v in old_settings.items() if k != 'max_output_tokens'} ==
                         {k:v for k,v in settings.items() if k != 'max_output_tokens'}
-                        and (profile.get('approval') or {}).get('request_settings') == settings)
+                        and (assessment or (profile.get('approval') or {}).get('request_settings') == settings))
                     same_runtime = same_settings and all(data['profile'].get(field) == profile.get(field) for field in
                                        ('endpoint','adapter','model_id','runtime_catalog','artifact'))
                     if same_runtime and occupied:
@@ -247,7 +248,7 @@ class Store:
                             and data.get('config') == loaded.get('config')
                             and state in ('ready','closed') and not any(k.startswith('recovery_') for k in data)
                             and not db.execute("SELECT 1 FROM model_operations WHERE model_key=? AND state NOT IN ('complete','failed') LIMIT 1", (digest([loaded['endpoint'],loaded['model_id']]),)).fetchone()):
-                        # Approval metadata can change after assessment; this is not a runtime reset.
+                        # Authorized request ceilings may change; runtime recovery remains separate.
                         data.update(profile=profile)
                         state = 'ready'
                         db.execute("UPDATE instances SET state='ready',data=? WHERE instance_key=?", (canonical(data),key))
@@ -474,13 +475,13 @@ class Store:
                 request_bytes=current.get('capacity_evidence',{}).get('request_bytes',0)
                 if route.get('assessment'):
                     from .capacity import inference_available,assessment_request_bytes
-                    from .onboarding import _assessment
-                    assessment=_assessment(self.root,route['assessment']['assessment_id'])
+                    # Reuse the validated run; reloading it can expire the fresh pressure sample.
                     target=assessment.get('capacity_target',1)
                     request_bytes=assessment_request_bytes(assessment)
                     limit=min(target,loaded['capacity']) if loaded and type(loaded.get('capacity')) is int and loaded['capacity']>0 and inference_available(resources) else 0
                 if limit:
-                    attempt,status,reason,key,generation=self._slot(db,current,{**loaded,'capacity':limit})
+                    attempt,status,reason,key,generation=self._slot(
+                        db,current,{**loaded,'capacity':limit},assessment=bool(route.get('assessment')))
                     if attempt:
                         route.update(observed_at=time.time(),approval_digest=digest(current['approval']),evidence_revision=digest(current.get('assessment',{})),request_bytes=request_bytes)
                         if db.execute("SELECT 1 FROM sqlite_master WHERE name='measurement_tasks'").fetchone():

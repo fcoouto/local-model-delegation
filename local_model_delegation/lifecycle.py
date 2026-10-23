@@ -106,7 +106,13 @@ def reset_external(state_dir, instance_key, owner_reference):
             profile = reset_profile(store.root, instance)
             from .profiles import model_identity
             assessment_identity = model_identity(profile)
-        if profile != instance['data']['profile']: raise ValueError('approval_changed')
+        previous = instance['data']['profile']
+        # Owner-authorized retirement survives scope changes, never runtime identity changes.
+        if assessment_identity is None and isinstance(previous.get('approval'), dict):
+            previous = {**previous, 'scope': profile['scope'], 'approval': {
+                **previous['approval'], **{k: profile['approval'][k]
+                                          for k in ('owner_reference', 'timestamp', 'scope')}}}
+        if profile != previous: raise ValueError('approval_changed')
         _locks(stack, store, profile['endpoint'], profile['model_id'])
         operation = _operation(store, identifier)
         if operation and operation['state'] == 'complete': return operation['data']['result']
