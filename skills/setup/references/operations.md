@@ -38,6 +38,8 @@ For this legacy path, the default is the [practical qualification runbook](../..
 
 ## Approval and activation
 
+For an umbrella, first use the [repository selection procedure](../../assess-my-model/references/operations.md#project-selection-git-repositories-and-umbrellas); keep separate campaign IDs, frozen consent and results for every selected repository. Selection does not grant approval.
+
 For new project evidence-backed grants, select the owning repository and follow the [project campaign procedure](../../assess-my-model/references/operations.md#project-campaigns-default). Reuse matching saved results. Run `profile approve --profile-id SOURCE --project PATH --assessment-id ID --owner-reference REF --scope FILE`, with `--max-output-tokens N` only when that exact ceiling is approved. Settings must match the campaign; only fully demonstrated exact bands with at least two distinct cases qualify. The helper appends project/assessment-bound scope to the same production profile only while every retained permission remains valid. Stale artifact/runtime permission or a ceiling change affecting retained scopes requires separate explicit approval/migration; a narrow project grant cannot renew those permissions. Existing global scopes remain legacy and unchanged; adding a project grant does not silently restrict them. Project replacement/revocation requires separate explicit owner-authorized migration. Neither an imported generic report nor a role label authorizes another project.
 
 The following provisional/global procedure remains available for explicitly authorized legacy use; it does not establish project qualification.

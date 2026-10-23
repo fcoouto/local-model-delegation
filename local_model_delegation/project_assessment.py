@@ -7,7 +7,7 @@ import re
 import subprocess
 
 from .contracts import COMPLEXITIES, CAPABILITIES, MAX_ANSWER_BYTES, canonical, digest, safe_path
-from .projects import resolve_project_identity
+from .projects import assessment_projects, resolve_project_identity
 
 DIFFICULTIES = COMPLEXITIES
 ROLES = {'Coordinator', 'Scout', 'Builder', 'Tester', 'Reviewer', 'Scribe', 'Investigator'}
@@ -75,6 +75,8 @@ def project_preview(project_root, pack, owner_reference):
     if not isinstance(owner_reference, str) or not owner_reference.strip():
         raise ValueError('project_permission_required')
     root = Path(project_root).resolve(strict=True)
+    if assessment_projects(root, owner_reference)['kind'] == 'umbrella':
+        raise ValueError('repository_selection_required')
     identity = resolve_project_identity(root)
     _fields(pack, 'schema_version project domains workload')
     if type(pack['schema_version']) is not int or pack['schema_version'] != 1:

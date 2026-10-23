@@ -1,6 +1,7 @@
 """Project preparation is offline and uses only fictional project evidence."""
 import io
 import json
+import subprocess
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
@@ -44,6 +45,13 @@ class ProjectPreparation(Fixture):
         self.assertFalse(result['ready_for_assessment'])
         self.assertIsNone(result['workload_coverage'])
         self.assertEqual(result['domains'][0]['difficulty_counts']['extra_complex'], 1)
+        self.assertFalse(self.state.exists())
+
+    def test_umbrella_cannot_be_used_as_one_campaign_identity(self):
+        pack = self.pack()
+        subprocess.run(['git', 'init', str(self.project/'backend')], check=True, capture_output=True)
+        with self.assertRaisesRegex(ValueError, 'repository_selection_required'):
+            project.project_preview(self.project, pack, 'owner')
         self.assertFalse(self.state.exists())
 
     def test_project_and_permission_are_required(self):

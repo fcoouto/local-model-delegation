@@ -29,6 +29,18 @@ class CLI(Fixture):
                 self.assertEqual(self.invoke('assessment', *args)['reason'], 'invalid_assessment_arguments')
                 self.assertFalse(self.state.exists())
 
+    def test_assessment_projects_is_offline_and_accepts_repeated_repository_selection(self):
+        for name in ('backend', 'frontend'):
+            subprocess.run(['git', 'init', str(self.project/name)], check=True, capture_output=True)
+        result = self.invoke('assessment', 'projects', '--project', str(self.project),
+                             '--owner-reference', 'owner', '--repository', 'backend', '--repository', 'frontend')
+        self.assertEqual(len(result['selected']), 2)
+        self.assertFalse(self.state.exists())
+        for args in [('projects', '--project', str(self.project)),
+                     ('choices', '--repository', 'backend')]:
+            self.assertEqual(self.invoke('assessment', *args)['reason'], 'invalid_assessment_arguments')
+            self.assertFalse(self.state.exists())
+
     def busy(self, fallback=None):
         server = FakeRuntime()
         self.addCleanup(server.close)

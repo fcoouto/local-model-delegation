@@ -38,7 +38,7 @@ Reopen Codex or start a fresh chat if the host needs to reload skills. The agent
 |---|---|---|
 | New to local delegation | Paste the prompt above | The agent checks prerequisites and guides installation and setup |
 | Partly configured | Paste the setup prompt | The agent resumes at the first unfinished step |
-| Want assessment without onboarding | Use **Assess my Model** | Choose a focused ability or all supported abilities, consent to one run, and receive a private report |
+| Want assessment without onboarding | Use **Assess my Model** | Select a repository or repositories within an umbrella, preview project-grounded tasks, consent to each run, and receive private results |
 | Want the latest plugin version | Paste the update prompt | The agent preserves state and verifies a numbered update |
 | Want to inspect the project first | [Clone and inspect](#clone-and-inspect) | Read the source and run a read-only check |
 | Want the technical details | [Shared state](#shared-state-and-updates) · [Contracts](#contracts-and-trust) | Review storage, approvals, verification and limits |
@@ -47,7 +47,7 @@ Reopen Codex or start a fresh chat if the host needs to reload skills. The agent
 
 1. **Check:** detect supported tools, an existing installation and saved configuration.
 2. **Prepare:** install missing prerequisites with your authorization and connect to your selected local server.
-3. **Assess:** with your consent, test a candidate model on package-owned synthetic tasks and report what passed.
+3. **Assess:** select a Git repository or multiple repositories inside an umbrella, preview grounded assignments, and consent to separate repository assessments. Default eight tasks per selected specialty per repository; review combined totals before generation.
 4. **Decide:** approve the exact model and a practical provisional scope, then separately choose whether to enable delegation.
 5. **Verify:** report what was checked, what remains pending and how to resume. “Installed” does not mean “ready to delegate.”
 
@@ -164,3 +164,5 @@ The prompt-first entry and guided setup structure are inspired by the [Vibe Codi
 ### Project-specific assessment
 
 See [project campaign operations](skills/assess-my-model/references/operations.md#project-campaigns-default) for offline task previews, reviewed executable packs, measured runtime ceilings/deadlines and up to three public-feedback cycles. Timing is separate from capability; interrupted work remains inconclusive. Reports estimate potential recurring-task coverage only with confirmed workload frequencies. New grants carry canonical project identity through eligibility. Existing global permissions and saved legacy results keep their original meaning. Preparation does not generate, install, approve or enable routing.
+
+Umbrella selection uses `assessment projects --project PATH --owner-reference REF`, followed by repeated `--repository CHILD` options for the owner-selected roots. Discovery inspects immediate child Git roots, skips symlink directories and deduplicates worktrees. Each repository retains its own task pack, consent, results and approval; the umbrella grants no shared permission. See the [selection procedure](skills/assess-my-model/references/operations.md#project-selection-git-repositories-and-umbrellas).

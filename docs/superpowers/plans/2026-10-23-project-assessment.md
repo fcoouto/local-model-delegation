@@ -71,10 +71,24 @@
 - [x] Inspect the owner-selected PHIOON repository and relevant local instructions. Produce an eight-task-per-selected-domain draft with exact paths/revisions, difficulty rationales, expected checks and remaining readiness gates. No PHIOON mutations or Qwen inference yet.
 - [x] Run `python3.11 -B -m unittest discover -s tests -t . -q` and `git diff --check`; complete skill validation where applicable.
 - [x] Obtain independent native whole-branch review under unchanged native settings; fix material findings with regression tests and rerun affected checks.
-- [ ] Follow the repository lifecycle for reviewed draft publication; do not merge or install without applicable authorization. Present the PHIOON task preview and exact remaining run-consent dimensions before Qwen submissions.
+- [x] Follow the repository lifecycle for reviewed draft publication; do not merge or install without applicable authorization. Present the PHIOON task preview and exact remaining run-consent dimensions before Qwen submissions.
 
 ## Execution record
 
 The owner authorized updating the plan and implementation in one request. Execute inline with native settings preserved and one independent final review; do not repeat a plan-approval question. This change spans evidence/permission boundaries beyond the approved simple local scopes, so implementation remains native. Keep progress and interface rulings in the plan-specific private ledger. Four phases/checkpoints at most. Use existing verified worktree/task binding `9c5a1e72-97e7-4bcc-bc97-52a265ab08ee`.
 
 Implementation ruling: The first native comparison integration uses paired first-cycle cases with one opportunity per contestant. Multi-cycle local completion remains separate; no equal-opportunity final native comparison is claimed. The current comparison ledger stores individual attempt pairs. Project campaigns export exact hashes and measurement bindings for that existing ledger. A later multi-cycle native comparison needs its own equally frozen opportunity plan.
+
+## Task 5: Umbrella discovery and multiple repository selection
+
+**Files:** Modify `local_model_delegation/projects.py`, `local_model_delegation/cli.py`, `tests/test_projects.py`, `tests/test_cli.py`, Setup/Assess skills and operations, README, and the assessment design.
+
+**Interfaces:** `assessment_projects(project_root, owner_reference, repositories=None)` returns the selection container, candidate roots/canonical identities, selected entries and whether selection is required. CLI: `assessment projects --project PATH --owner-reference REF [--repository PATH ...]`. Existing project-preview/prepare/approve stay single-repository operations.
+
+- [x] Add failing tests for standalone Git/subdirectory, non-Git directory, multi-selection, no automatic umbrella selection, symlink/outside/duplicate/non-repository rejection, worktree deduplication, bounded discovery and offline CLI behavior.
+- [x] Implement bounded read-only discovery and strict fresh selection validation, reusing canonical project identity. No runtime, approval or campaign schema changes.
+- [x] Update both skill flows and operations for grouped selection, per-repository packs/consent/results/grants and combined workload preview; validate skills.
+- [x] Run focused and full offline tests, independent review of the extension and affected trust boundaries, and `git diff --check`.
+- [ ] Update draft PR #12 through the existing lifecycle milestone and refresh user-facing design/plan copies. No inference or installation.
+
+Review focus: outside/symlink escapes, worktrees mistaken for separate projects, child directories mistaken for owning roots, unknown/duplicate selections, and umbrella identity leaking into campaign approval. Each gets a regression or explicit flow review. Implementation remains native because repository selection controls evidence/permission scope. The owner's direct request authorizes design update and implementation without another approval round.
