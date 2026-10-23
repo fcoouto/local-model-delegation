@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.15 — 2026-10-23
 
 - Adopt Coordinated Loop as the official plugin icon and logo, bundled with the package and displayed in the README.
 
